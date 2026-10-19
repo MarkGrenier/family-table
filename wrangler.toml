@@ -1,0 +1,24 @@
+# Family grocery list.
+# The database id below is a placeholder. After you create the database,
+# replace it with the id Cloudflare prints. The README has the exact steps.
+
+name = "family-grocery"
+main = "src/index.ts"
+compatibility_date = "2026-10-01"
+
+[assets]
+directory = "./public"
+binding = "ASSETS"
+run_worker_first = true
+
+[dev]
+ip = "0.0.0.0"
+port = 47219
+inspector_port = 9234
+local_protocol = "http"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "grocery"
+database_id = "00000000-0000-0000-0000-000000000000"
+migrations_dir = "migrations"
