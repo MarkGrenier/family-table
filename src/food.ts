@@ -20,6 +20,8 @@ export type Recipe = {
   totalTime: string | null;
   sourceUrl: string | null;
   favorite: boolean;
+  lastMade: string | null;
+  timesMade: number;
   externalId: string | null;
   coversNights: number | null;
   nightBefore: string[];
@@ -105,6 +107,8 @@ function recipeFromRow(row: RecipeRow): Recipe {
     totalTime: row.total_time,
     sourceUrl: row.source_url,
     favorite: Boolean(row.favorite),
+    lastMade: null,
+    timesMade: 0,
     externalId: row.external_id,
     coversNights: row.covers_nights == null ? null : Number(row.covers_nights),
     nightBefore: parseJson<string[]>(row.night_before_json, []),
@@ -117,22 +121,57 @@ function recipeFromRow(row: RecipeRow): Recipe {
   };
 }
 
-export async function listRecipes(db: D1Database, query = ""): Promise<Recipe[]> {
+export function easternToday(now = new Date()): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/New_York",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(now);
+}
+
+async function madeStats(db: D1Database): Promise<Map<string, { lastMade: string; timesMade: number }>> {
+  const rows = await db
+    .prepare(
+      `SELECT recipe_id, MAX(plan_date) AS last_made, COUNT(*) AS times_made
+       FROM plan_entries
+       WHERE entry_type = 'recipe' AND recipe_id IS NOT NULL AND plan_date <= ?
+       GROUP BY recipe_id`,
+    )
+    .bind(easternToday())
+    .all<{ recipe_id: string; last_made: string; times_made: number }>();
+  const stats = new Map<string, { lastMade: string; timesMade: number }>();
+  for (const row of rows.results ?? []) {
+    stats.set(row.recipe_id, { lastMade: row.last_made, timesMade: Number(row.times_made) || 0 });
+  }
+  return stats;
+}
+
+function withMade(recipe: Recipe, stats: Map<string, { lastMade: string; timesMade: number }>): Recipe {
+  const made = stats.get(recipe.id);
+  return made ? { ...recipe, lastMade: made.lastMade, timesMade: made.timesMade } : recipe;
+}
+
+export async function listRecipes(db: D1Database, query = "", favoriteOnly = false): Promise<Recipe[]> {
   const needle = query.trim().toLowerCase();
-  const rows = needle
-    ? await db
-        .prepare(
-          `SELECT ${RECIPE_COLUMNS} FROM recipes WHERE lower(name) LIKE ? ESCAPE '\\' ORDER BY favorite DESC, name COLLATE NOCASE`,
-        )
-        .bind(`%${needle.replace(/[\\%_]/g, (char) => `\\${char}`)}%`)
-        .all<RecipeRow>()
-    : await db.prepare(`SELECT ${RECIPE_COLUMNS} FROM recipes ORDER BY favorite DESC, name COLLATE NOCASE`).all<RecipeRow>();
-  return (rows.results ?? []).map(recipeFromRow);
+  const where: string[] = [];
+  const binds: string[] = [];
+  if (needle) {
+    where.push(`lower(name) LIKE ? ESCAPE '\\'`);
+    binds.push(`%${needle.replace(/[\\%_]/g, (char) => `\\${char}`)}%`);
+  }
+  if (favoriteOnly) where.push("favorite = 1");
+  const sql = `SELECT ${RECIPE_COLUMNS} FROM recipes${where.length ? ` WHERE ${where.join(" AND ")}` : ""} ORDER BY favorite DESC, name COLLATE NOCASE`;
+  const rows = await db.prepare(sql).bind(...binds).all<RecipeRow>();
+  const stats = await madeStats(db);
+  return (rows.results ?? []).map((row) => withMade(recipeFromRow(row), stats));
 }
 
 export async function getRecipe(db: D1Database, id: string): Promise<Recipe | null> {
   const row = await db.prepare(`SELECT ${RECIPE_COLUMNS} FROM recipes WHERE id = ?`).bind(id).first<RecipeRow>();
-  return row ? recipeFromRow(row) : null;
+  if (!row) return null;
+  const stats = await madeStats(db);
+  return withMade(recipeFromRow(row), stats);
 }
 
 export async function createRecipe(db: D1Database, input: RecipeInput): Promise<Recipe> {
@@ -532,6 +571,7 @@ export async function replaceWeek(db: D1Database, input: WeekInput): Promise<{ w
   for (const entry of existing) {
     if (entry.type === "recipe") await removePlanGroceries(db, entry);
   }
+  // Recipes stay in the cookbook. Replacing a week only changes that week's meals.
   await db.prepare(`DELETE FROM plan_entries WHERE plan_date >= ? AND plan_date <= ?`).bind(input.weekStart, end).run();
   const now = nowIso();
   for (const day of input.days) {

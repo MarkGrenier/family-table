@@ -137,7 +137,7 @@ Four tabs sit at the bottom: Today, Week, Recipes, and Groceries. Tap one. Nothi
 
 - **Today** is tonight's dinner. If a recipe is planned, tap **Start cooking** for one step at a time. Breakfast or lunch shows up only when something is planned. Family events for the day sit underneath in small type. If dinner is empty, tap **Plan dinner**.
 - **Week** is this week and next, Monday through Sunday, in Eastern time. Tap a day to pick a recipe, leftovers, or a short note such as eating out. **+ Add breakfast** and **+ Add lunch** appear on that day when you want them. Choosing a recipe puts its ingredients on the grocery list. Taking that recipe off the day, or picking a different one, takes those things back off if they haven't been bought yet. Leftovers and notes don't add anything.
-- **Recipes** is the cookbook. Search by name, and tap the star for a favorite. Open a recipe to change the number of servings, which scales amounts the app can read, such as `1/2 lb`. **Add ingredients to groceries** uses that serving count. **Cook** shows one big step at a time and tries to keep the screen awake. **Add a recipe** takes a link. If the page has a recipe on it, the name, photo, amounts, steps, time, and link are filled in. If not, type the name, one ingredient per line, and one step per line. The source link stays on the recipe.
+- **Recipes** is the cookbook. Search by name, and tap the star for a favorite. **Favorites**, **Recently made**, and **A-Z** sort the list. A recipe that has already been planned shows **Last made Oct 12** in grey under the name, and again on the recipe page. Open a recipe to change the number of servings, which scales amounts the app can read, such as `1/2 lb`. **Add ingredients to groceries** uses that serving count. **Cook** shows one big step at a time and tries to keep the screen awake. **Add a recipe** takes a link. If the page has a recipe on it, the name, photo, amounts, steps, time, and link are filled in. If not, type the name, one ingredient per line, and one step per line. The source link stays on the recipe. Sending a new week does not remove recipes.
 - **Groceries** is one list. Type something and tap **Add**. Tap the round circle to mark it bought. Bought items sit under **Done**, and **Clear** takes them off after you confirm. Tap the words of an item to rename it or delete it. A grey line under a name says which recipe it is for. Adding the same recipe twice does not stack it again.
 - The app follows the phone's light or dark setting.
 
@@ -259,7 +259,13 @@ If it is new, the reply is `{ "barcode", "known": false, "suggestion" }`. `sugge
 
 ### Recipes
 
-`GET /api/recipes` and `GET /api/recipes?q=chili`
+`GET /api/recipes`
+
+`GET /api/recipes?q=chili` finds recipes by name.
+
+`GET /api/recipes?favorite=true` returns only favorites. You can use both, as in `GET /api/recipes?q=chili&favorite=true`.
+
+Each recipe includes `favorite`, `lastMade`, and `timesMade`. `lastMade` is the most recent date it was planned, up through today in Eastern time, or `null` if that has not happened. A date still in the future does not count. `timesMade` is how many meals it was planned for on those dates. Leftovers do not count.
 
 `POST /api/recipes`
 
@@ -278,7 +284,7 @@ If it is new, the reply is `{ "barcode", "known": false, "suggestion" }`. `sugge
 
 `GET /api/recipes/ID`
 
-`PATCH /api/recipes/ID` with only what changed. `{ "favorite": true }` is enough.
+`PATCH /api/recipes/ID` with only what changed. `{ "favorite": true }` stars it, and `{ "favorite": false }` clears the star.
 
 `DELETE /api/recipes/ID` removes the recipe. Days that used it become a note with the recipe's name.
 
@@ -306,7 +312,7 @@ Dates are `YYYY-MM-DD`. Meals are `breakfast`, `lunch`, or `dinner`. A day has o
 
 ### Weekly menu
 
-`PUT /api/week` replaces Monday through Sunday, starting on `weekStart` (that date has to be a Monday). It also saves the recipes in the list. A recipe with `externalId` updates the recipe that already has that id. Otherwise the name is used. `recipeId` uses a recipe that is already saved, without changing it.
+`PUT /api/week` replaces Monday through Sunday, starting on `weekStart` (that date has to be a Monday). It also saves the recipes in the list. Recipes already in the cookbook stay there. Replacing the week does not delete them. A recipe with `externalId` updates the recipe that already has that id. Otherwise the name is used. `recipeId` uses a recipe that is already saved, without changing it.
 
 `GET /api/week?start=2026-10-19` reads that week back in the same shape. Each recipe day includes the full recipe.
 

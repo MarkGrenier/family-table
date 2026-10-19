@@ -727,6 +727,71 @@ describe("grocery API", () => {
     expect((await call("/api/week", { method: "PUT", token, body: { weekStart: "2026-10-20", days: [] } })).status).toBe(400);
   });
 
+  it("keeps the cookbook when a week is replaced and reports when a recipe was made", async () => {
+    const token = env.API_TOKEN;
+    const today = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "America/New_York",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(new Date());
+    const shift = (iso: string, days: number) => {
+      const [year, month, day] = iso.split("-").map(Number);
+      const date = new Date(Date.UTC(year, month - 1, day));
+      date.setUTCDate(date.getUTCDate() + days);
+      return date.toISOString().slice(0, 10);
+    };
+    const older = shift(today, -14);
+    const recent = shift(today, -3);
+    const future = shift(today, 10);
+
+    const created = await call("/api/recipes", {
+      method: "POST",
+      token,
+      body: { name: "Keep me soup", ingredients: ["1 onion"], steps: ["Simmer."] },
+    });
+    const id = (created.json?.recipe as Json).id as string;
+    await call("/api/plan", { method: "POST", token, body: { date: older, meal: "dinner", type: "recipe", recipeId: id } });
+    await call("/api/plan", { method: "POST", token, body: { date: recent, meal: "dinner", type: "recipe", recipeId: id } });
+    await call("/api/plan", { method: "POST", token, body: { date: recent, meal: "lunch", type: "recipe", recipeId: id } });
+    await call("/api/plan", { method: "POST", token, body: { date: future, meal: "dinner", type: "recipe", recipeId: id } });
+    await call("/api/plan", { method: "POST", token, body: { date: shift(today, -1), meal: "dinner", type: "leftovers", note: "Soup" } });
+
+    const starred = await call(`/api/recipes/${id}`, { method: "PATCH", token, body: { favorite: true } });
+    expect((starred.json?.recipe as Json).favorite).toBe(true);
+    expect((starred.json?.recipe as Json).lastMade).toBe(recent);
+    expect((starred.json?.recipe as Json).timesMade).toBe(3);
+
+    const favorites = await call("/api/recipes?favorite=true&q=soup", { token });
+    const listed = (favorites.json?.recipes ?? []) as Json[];
+    expect(listed).toHaveLength(1);
+    expect(listed[0].lastMade).toBe(recent);
+    expect(listed[0].timesMade).toBe(3);
+
+    const replaced = await call("/api/week", {
+      method: "PUT",
+      token,
+      body: {
+        weekStart: "2026-10-26",
+        days: [
+          {
+            date: "2026-10-26",
+            meal: "dinner",
+            type: "recipe",
+            recipe: { externalId: "keep-me-soup", name: "Brand new pasta", ingredients: ["1/2 lb spaghetti"], steps: ["Boil."] },
+          },
+        ],
+      },
+    });
+    expect(replaced.status).toBe(200);
+    const names = (((await call("/api/recipes", { token })).json?.recipes ?? []) as Json[]).map((recipe) => recipe.name);
+    expect(names).toContain("Keep me soup");
+    expect(names).toContain("Brand new pasta");
+    const week = ((await call("/api/week?start=2026-10-26", { token })).json?.days ?? []) as Json[];
+    expect(week).toHaveLength(1);
+    expect((week[0].recipe as Json).name).toBe("Brand new pasta");
+  });
+
   it("serves the phone page", async () => {
     const response = await exports.default.fetch("https://grocery.test/");
     expect(response.status).toBe(200);

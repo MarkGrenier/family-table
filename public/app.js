@@ -9,6 +9,7 @@ const state = {
   events: [],
   items: [],
   recipeQuery: "",
+  recipeSort: "favorites",
   dayQuery: "",
   groceryDraft: "",
   doneOpen: false,
@@ -257,14 +258,38 @@ function pickerHtml(date, meal) {
 }
 
 function recipesHtml() {
-  const query = state.recipeQuery.trim().toLowerCase();
-  const recipes = query ? state.recipes.filter((recipe) => recipe.name.toLowerCase().includes(query)) : state.recipes;
   return `<h1>Recipes</h1>
     <label class="search">Search
       <input id="recipe-search" type="search" value="${esc(state.recipeQuery)}" placeholder="Search recipes" autocomplete="off">
     </label>
+    <div class="sort" role="group" aria-label="Sort recipes">
+      ${sortButton("favorites", "Favorites")}
+      ${sortButton("recent", "Recently made")}
+      ${sortButton("az", "A-Z")}
+    </div>
     <button class="secondary" type="button" data-action="add-recipe">Add a recipe</button>
-    <div id="recipe-list">${recipeList(recipes)}</div>`;
+    <div id="recipe-list">${recipeList(visibleRecipes())}</div>`;
+}
+
+function sortButton(sort, label) {
+  const on = state.recipeSort === sort;
+  return `<button type="button" data-action="recipe-sort" data-sort="${sort}" aria-pressed="${on ? "true" : "false"}">${label}</button>`;
+}
+
+function visibleRecipes() {
+  const query = state.recipeQuery.trim().toLowerCase();
+  const recipes = query ? state.recipes.filter((recipe) => recipe.name.toLowerCase().includes(query)) : state.recipes.slice();
+  const byName = (a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
+  if (state.recipeSort === "az") return recipes.sort(byName);
+  if (state.recipeSort === "recent") {
+    return recipes.sort((a, b) => {
+      if (a.lastMade && b.lastMade && a.lastMade !== b.lastMade) return a.lastMade < b.lastMade ? 1 : -1;
+      if (a.lastMade && !b.lastMade) return -1;
+      if (!a.lastMade && b.lastMade) return 1;
+      return byName(a, b);
+    });
+  }
+  return recipes.sort((a, b) => Number(Boolean(b.favorite)) - Number(Boolean(a.favorite)) || byName(a, b));
 }
 
 function recipeList(recipes) {
@@ -274,10 +299,25 @@ function recipeList(recipes) {
   return recipes.map((recipe) => `<div class="recipe-row">
       <button type="button" data-action="open-recipe" data-id="${esc(recipe.id)}" class="recipe-open">
         ${recipe.imageUrl ? `<img class="thumb" src="${esc(safeSrc(recipe.imageUrl))}" alt="">` : `<span class="thumb placeholder"></span>`}
-        <span>${esc(recipe.name)}</span>
+        <span class="recipe-copy">
+          <span>${esc(recipe.name)}</span>
+          ${lastMadeText(recipe) ? `<span class="small">${esc(lastMadeText(recipe))}</span>` : ""}
+        </span>
       </button>
       <button class="star${recipe.favorite ? " is-on" : ""}" type="button" data-action="favorite" data-id="${esc(recipe.id)}" aria-label="${recipe.favorite ? "Unfavorite" : "Favorite"}" aria-pressed="${recipe.favorite ? "true" : "false"}">★</button>
     </div>`).join("");
+}
+
+function lastMadeText(recipe) {
+  if (!recipe?.lastMade) return "";
+  return `Last made ${madeDate(recipe.lastMade)}`;
+}
+
+function madeDate(iso) {
+  const [year, month, day] = iso.split("-").map(Number);
+  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const label = `${months[month - 1]} ${day}`;
+  return String(year) === nyToday().slice(0, 4) ? label : `${label}, ${year}`;
 }
 
 function recipeHtml(id) {
@@ -290,6 +330,7 @@ function recipeHtml(id) {
     ${photoBlock(recipe.imageUrl, recipe.name)}
     <h1>${esc(recipe.name)}</h1>
     <p class="small">${[recipe.totalTime, host ? `From ${host}` : ""].filter(Boolean).map(esc).join(" · ") || ""}</p>
+    ${lastMadeText(recipe) ? `<p class="small">${esc(lastMadeText(recipe))}</p>` : ""}
     ${recipe.sourceUrl ? `<p><a href="${esc(safeSrc(recipe.sourceUrl))}" target="_blank" rel="noopener noreferrer">Source</a></p>` : ""}
     <div class="stepper" aria-label="Servings">
       <button type="button" data-action="servings" data-delta="-1" aria-label="Fewer servings">−</button>
@@ -541,6 +582,11 @@ async function onClick(event) {
     return;
   }
   if (action === "favorite") return toggleFavorite(button.dataset.id);
+  if (action === "recipe-sort") {
+    state.recipeSort = button.dataset.sort;
+    render();
+    return;
+  }
   if (action === "servings") {
     const recipe = recipeById(state.page?.id);
     const next = Math.min(99, Math.max(1, (state.page.servings || recipe.servings) + Number(button.dataset.delta)));
@@ -606,10 +652,8 @@ async function onSubmit(event) {
 function onInput(event) {
   if (event.target.id === "recipe-search") {
     state.recipeQuery = event.target.value;
-    const query = state.recipeQuery.trim().toLowerCase();
-    const recipes = query ? state.recipes.filter((recipe) => recipe.name.toLowerCase().includes(query)) : state.recipes;
     const list = document.getElementById("recipe-list");
-    if (list) list.innerHTML = recipeList(recipes);
+    if (list) list.innerHTML = recipeList(visibleRecipes());
   }
   if (event.target.classList?.contains("day-search")) {
     state.dayQuery = event.target.value;

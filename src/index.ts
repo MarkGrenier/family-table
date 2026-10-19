@@ -195,8 +195,8 @@ async function handleFood(request: Request, env: Env, path: string, method: stri
     return json({ recipe }, 201);
   }
   if (path === "/api/recipes" && method === "GET") {
-    const query = new URL(request.url).searchParams.get("q") ?? "";
-    return json({ recipes: await listRecipes(env.DB, query) });
+    const params = new URL(request.url).searchParams;
+    return json({ recipes: await listRecipes(env.DB, params.get("q") ?? "", params.get("favorite") === "true") });
   }
   if (path === "/api/recipes" && method === "POST") {
     const recipe = await createRecipe(env.DB, parseRecipe(await readJson(request)));
