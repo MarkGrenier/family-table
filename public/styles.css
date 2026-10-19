@@ -182,6 +182,36 @@ a { color: var(--accent); }
 
 .day-main, .item-main, .recipe-copy { flex: 1; min-width: 0; }
 
+.checklist { text-align: left; }
+
+.item-row {
+  justify-content: flex-start;
+  align-items: flex-start;
+  text-align: left;
+}
+
+.item-main {
+  display: block;
+  text-align: left;
+}
+
+.item-name,
+.item-main .small {
+  text-align: left;
+}
+
+.check { align-self: flex-start; margin-top: 0.15rem; }
+
+.timer {
+  margin: 0.25rem 0 1rem;
+  font-size: 2.4rem;
+  font-weight: 650;
+  letter-spacing: -0.04em;
+  font-variant-numeric: tabular-nums;
+}
+
+.note-block { margin: 0 0 1rem; }
+
 .day-date {
   color: var(--muted);
   font-size: 0.9rem;

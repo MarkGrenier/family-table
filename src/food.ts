@@ -1,13 +1,14 @@
-import { createItem, listItems, updateItem } from "./db";
+import { createItem, deleteItem, listItems, updateItem } from "./db";
 import {
   buildGroceryNote,
   groceryName,
   mergeGroceryNote,
   scaleIngredient,
+  unmergeGroceryNote,
   type Ingredient,
 } from "./ingredients";
 import { HttpError } from "./http";
-import type { EventInput, PlanInput, RecipeInput, RecipePatch } from "./food-validate";
+import { addDays, type CookStep, type EventInput, type PlanInput, type RecipeInput, type RecipePatch, type WeekInput } from "./food-validate";
 
 export type Recipe = {
   id: string;
@@ -19,8 +20,24 @@ export type Recipe = {
   totalTime: string | null;
   sourceUrl: string | null;
   favorite: boolean;
+  externalId: string | null;
+  coversNights: number | null;
+  nightBefore: string[];
+  prepSteps: string[];
+  cookSteps: CookStep[];
+  kidsPlates: string | null;
+  reheating: string | null;
   createdAt: string;
   updatedAt: string;
+};
+
+export type WeekDay = {
+  date: string;
+  meal: PlanEntry["meal"];
+  type: PlanEntry["type"];
+  recipeId: string | null;
+  note: string | null;
+  recipe: Recipe | null;
 };
 
 export type PlanEntry = {
@@ -51,12 +68,19 @@ type RecipeRow = {
   total_time: string | null;
   source_url: string | null;
   favorite: number;
+  external_id: string | null;
+  covers_nights: number | null;
+  night_before_json: string;
+  prep_steps_json: string;
+  cook_steps_json: string;
+  kids_plates: string | null;
+  reheating: string | null;
   created_at: string;
   updated_at: string;
 };
 
 const RECIPE_COLUMNS =
-  "id, name, image_url, servings, ingredients_json, steps_json, total_time, source_url, favorite, created_at, updated_at";
+  "id, name, image_url, servings, ingredients_json, steps_json, total_time, source_url, favorite, external_id, covers_nights, night_before_json, prep_steps_json, cook_steps_json, kids_plates, reheating, created_at, updated_at";
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -81,6 +105,13 @@ function recipeFromRow(row: RecipeRow): Recipe {
     totalTime: row.total_time,
     sourceUrl: row.source_url,
     favorite: Boolean(row.favorite),
+    externalId: row.external_id,
+    coversNights: row.covers_nights == null ? null : Number(row.covers_nights),
+    nightBefore: parseJson<string[]>(row.night_before_json, []),
+    prepSteps: parseJson<string[]>(row.prep_steps_json, []),
+    cookSteps: parseJson<CookStep[]>(row.cook_steps_json, []),
+    kidsPlates: row.kids_plates,
+    reheating: row.reheating,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -109,19 +140,29 @@ export async function createRecipe(db: D1Database, input: RecipeInput): Promise<
   const now = nowIso();
   await db
     .prepare(
-      `INSERT INTO recipes (id, name, image_url, servings, ingredients_json, steps_json, total_time, source_url, favorite, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO recipes (
+         id, name, image_url, servings, ingredients_json, steps_json, total_time, source_url, favorite,
+         external_id, covers_nights, night_before_json, prep_steps_json, cook_steps_json, kids_plates, reheating,
+         created_at, updated_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .bind(
       id,
       input.name,
-      input.imageUrl,
+      input.imageUrl ?? null,
       input.servings,
       JSON.stringify(input.ingredients),
       JSON.stringify(input.steps),
       input.totalTime,
       input.sourceUrl,
       input.favorite ? 1 : 0,
+      input.externalId ?? null,
+      input.coversNights ?? null,
+      JSON.stringify(input.nightBefore ?? []),
+      JSON.stringify(input.prepSteps ?? []),
+      JSON.stringify(input.cookSteps ?? []),
+      input.kidsPlates ?? null,
+      input.reheating ?? null,
       now,
       now,
     )
@@ -144,12 +185,21 @@ export async function updateRecipe(db: D1Database, id: string, patch: RecipePatc
     totalTime: patch.totalTime === undefined ? existing.totalTime : patch.totalTime,
     sourceUrl: patch.sourceUrl === undefined ? existing.sourceUrl : patch.sourceUrl,
     favorite: patch.favorite ?? existing.favorite,
+    externalId: patch.externalId === undefined ? existing.externalId : patch.externalId,
+    coversNights: patch.coversNights === undefined ? existing.coversNights : patch.coversNights,
+    nightBefore: patch.nightBefore ?? existing.nightBefore,
+    prepSteps: patch.prepSteps ?? existing.prepSteps,
+    cookSteps: patch.cookSteps ?? existing.cookSteps,
+    kidsPlates: patch.kidsPlates === undefined ? existing.kidsPlates : patch.kidsPlates,
+    reheating: patch.reheating === undefined ? existing.reheating : patch.reheating,
     updatedAt: nowIso(),
   };
   await db
     .prepare(
       `UPDATE recipes
-       SET name = ?, image_url = ?, servings = ?, ingredients_json = ?, steps_json = ?, total_time = ?, source_url = ?, favorite = ?, updated_at = ?
+       SET name = ?, image_url = ?, servings = ?, ingredients_json = ?, steps_json = ?, total_time = ?, source_url = ?, favorite = ?,
+           external_id = ?, covers_nights = ?, night_before_json = ?, prep_steps_json = ?, cook_steps_json = ?, kids_plates = ?, reheating = ?,
+           updated_at = ?
        WHERE id = ?`,
     )
     .bind(
@@ -161,6 +211,13 @@ export async function updateRecipe(db: D1Database, id: string, patch: RecipePatc
       next.totalTime,
       next.sourceUrl,
       next.favorite ? 1 : 0,
+      next.externalId,
+      next.coversNights,
+      JSON.stringify(next.nightBefore),
+      JSON.stringify(next.prepSteps),
+      JSON.stringify(next.cookSteps),
+      next.kidsPlates,
+      next.reheating,
       next.updatedAt,
       id,
     )
@@ -171,6 +228,11 @@ export async function updateRecipe(db: D1Database, id: string, patch: RecipePatc
 export async function deleteRecipe(db: D1Database, id: string): Promise<void> {
   const existing = await getRecipe(db, id);
   if (!existing) throw new HttpError(404, "That recipe isn't here anymore.");
+  const planned = await db.prepare(`SELECT id FROM plan_entries WHERE recipe_id = ?`).bind(id).all<{ id: string }>();
+  for (const row of planned.results ?? []) {
+    const entry = await getPlan(db, row.id);
+    if (entry) await removePlanGroceries(db, entry);
+  }
   const now = nowIso();
   await db.batch([
     db
@@ -226,11 +288,22 @@ export async function listPlan(db: D1Database, from: string, to: string): Promis
   return (rows.results ?? []).map(planFromRow);
 }
 
+async function getPlan(db: D1Database, id: string): Promise<PlanEntry | null> {
+  const row = await db.prepare(`${PLAN_SELECT} WHERE p.id = ?`).bind(id).first<PlanRow>();
+  return row ? planFromRow(row) : null;
+}
+
+async function planOn(db: D1Database, date: string, meal: string): Promise<PlanEntry | null> {
+  const row = await db.prepare(`${PLAN_SELECT} WHERE p.plan_date = ? AND p.meal = ?`).bind(date, meal).first<PlanRow>();
+  return row ? planFromRow(row) : null;
+}
+
 export async function savePlan(db: D1Database, input: PlanInput): Promise<PlanEntry> {
   if (input.type === "recipe" && input.recipeId) {
     const recipe = await getRecipe(db, input.recipeId);
     if (!recipe) throw new HttpError(400, "That recipe isn't here anymore.");
   }
+  const previous = await planOn(db, input.date, input.meal);
   const now = nowIso();
   const id = crypto.randomUUID();
   await db
@@ -245,12 +318,15 @@ export async function savePlan(db: D1Database, input: PlanInput): Promise<PlanEn
     )
     .bind(id, input.date, input.meal, input.type, input.recipeId, input.note, now, now)
     .run();
-  const row = await db
-    .prepare(`${PLAN_SELECT} WHERE p.plan_date = ? AND p.meal = ?`)
-    .bind(input.date, input.meal)
-    .first<PlanRow>();
-  if (!row) throw new HttpError(500, "Something went wrong. Try again.");
-  return planFromRow(row);
+  const saved = await planOn(db, input.date, input.meal);
+  if (!saved) throw new HttpError(500, "Something went wrong. Try again.");
+  const sameRecipe =
+    previous?.type === "recipe" && saved.type === "recipe" && previous.recipeId === saved.recipeId && Boolean(saved.recipeId);
+  if (!sameRecipe) {
+    if (previous?.type === "recipe") await removePlanGroceries(db, previous);
+    if (saved.type === "recipe" && saved.recipeId) await addEntryGroceries(db, saved);
+  }
+  return saved;
 }
 
 export async function listAllPlan(db: D1Database): Promise<PlanEntry[]> {
@@ -264,8 +340,10 @@ export async function listAllPlan(db: D1Database): Promise<PlanEntry[]> {
 }
 
 export async function deletePlan(db: D1Database, id: string): Promise<void> {
-  const result = await db.prepare(`DELETE FROM plan_entries WHERE id = ?`).bind(id).run();
-  if (!result.meta.changes) throw new HttpError(404, "That meal isn't planned anymore.");
+  const existing = await getPlan(db, id);
+  if (!existing) throw new HttpError(404, "That meal isn't planned anymore.");
+  if (existing.type === "recipe") await removePlanGroceries(db, existing);
+  await db.prepare(`DELETE FROM plan_entries WHERE id = ?`).bind(id).run();
 }
 
 type EventRow = {
@@ -367,20 +445,155 @@ export async function addRecipeToGroceries(db: D1Database, recipeId: string, ser
   return totals;
 }
 
+async function addEntryGroceries(db: D1Database, entry: PlanEntry): Promise<GroceryChange> {
+  const totals = { added: 0, updated: 0, skipped: 0 };
+  if (entry.type !== "recipe" || !entry.recipeId) return totals;
+  const recipe = await getRecipe(db, entry.recipeId);
+  if (!recipe) return totals;
+  for (let index = 0; index < recipe.ingredients.length; index += 1) {
+    const change = await addOneIngredient(db, recipe.ingredients[index], recipe.name, `plan:${entry.id}:${index}`);
+    totals[change] += 1;
+  }
+  return totals;
+}
+
 export async function addPlanGroceries(db: D1Database, from: string, to: string, planId: string | null): Promise<GroceryChange> {
   const planned = await listPlan(db, from, to);
   const entries = planId ? planned.filter((entry) => entry.id === planId) : planned;
   const totals = { added: 0, updated: 0, skipped: 0 };
   for (const entry of entries) {
-    if (entry.type !== "recipe" || !entry.recipeId) continue;
-    const recipe = await getRecipe(db, entry.recipeId);
-    if (!recipe) continue;
-    for (let index = 0; index < recipe.ingredients.length; index += 1) {
-      const change = await addOneIngredient(db, recipe.ingredients[index], recipe.name, `plan:${entry.id}:${index}`);
-      totals[change] += 1;
-    }
+    const change = await addEntryGroceries(db, entry);
+    totals.added += change.added;
+    totals.updated += change.updated;
+    totals.skipped += change.skipped;
   }
   return totals;
+}
+
+async function findRecipeByExternalId(db: D1Database, externalId: string): Promise<Recipe | null> {
+  const row = await db.prepare(`SELECT ${RECIPE_COLUMNS} FROM recipes WHERE external_id = ?`).bind(externalId).first<RecipeRow>();
+  return row ? recipeFromRow(row) : null;
+}
+
+async function findRecipeByName(db: D1Database, name: string): Promise<Recipe | null> {
+  const row = await db
+    .prepare(`SELECT ${RECIPE_COLUMNS} FROM recipes WHERE lower(name) = ? ORDER BY updated_at DESC LIMIT 1`)
+    .bind(name.toLowerCase())
+    .first<RecipeRow>();
+  return row ? recipeFromRow(row) : null;
+}
+
+async function upsertRecipe(db: D1Database, input: RecipeInput): Promise<Recipe> {
+  const byExternal = input.externalId ? await findRecipeByExternalId(db, input.externalId) : null;
+  let existing = byExternal;
+  if (!existing) {
+    const byName = await findRecipeByName(db, input.name);
+    if (byName && !(input.externalId && byName.externalId && byName.externalId !== input.externalId)) existing = byName;
+  }
+  if (!existing) return createRecipe(db, input);
+  return updateRecipe(db, existing.id, {
+    name: input.name,
+    servings: input.servings,
+    ingredients: input.ingredients,
+    steps: input.steps,
+    totalTime: input.totalTime,
+    sourceUrl: input.sourceUrl,
+    externalId: input.externalId ?? existing.externalId,
+    coversNights: input.coversNights ?? null,
+    nightBefore: input.nightBefore ?? [],
+    prepSteps: input.prepSteps ?? [],
+    cookSteps: input.cookSteps ?? [],
+    kidsPlates: input.kidsPlates ?? null,
+    reheating: input.reheating ?? null,
+    imageUrl: input.imageUrl === undefined ? existing.imageUrl : input.imageUrl,
+    favorite: input.favorite === undefined ? existing.favorite : input.favorite,
+  });
+}
+
+export async function getWeek(db: D1Database, weekStart: string): Promise<{ weekStart: string; days: WeekDay[] }> {
+  const entries = await listPlan(db, weekStart, addDays(weekStart, 6));
+  const days: WeekDay[] = [];
+  for (const entry of entries) {
+    days.push({
+      date: entry.date,
+      meal: entry.meal,
+      type: entry.type,
+      recipeId: entry.recipeId,
+      note: entry.note,
+      recipe: entry.recipeId ? await getRecipe(db, entry.recipeId) : null,
+    });
+  }
+  return { weekStart, days };
+}
+
+export async function replaceWeek(db: D1Database, input: WeekInput): Promise<{ weekStart: string; days: WeekDay[] }> {
+  const end = addDays(input.weekStart, 6);
+  const existing = await listPlan(db, input.weekStart, end);
+  for (const entry of existing) {
+    if (entry.type === "recipe") await removePlanGroceries(db, entry);
+  }
+  await db.prepare(`DELETE FROM plan_entries WHERE plan_date >= ? AND plan_date <= ?`).bind(input.weekStart, end).run();
+  const now = nowIso();
+  for (const day of input.days) {
+    let recipeId = day.recipeId;
+    if (day.type === "recipe" && day.recipe) recipeId = (await upsertRecipe(db, day.recipe)).id;
+    if (day.type === "recipe" && recipeId) {
+      const recipe = await getRecipe(db, recipeId);
+      if (!recipe) throw new HttpError(400, "That recipe isn't here anymore.");
+    }
+    await db
+      .prepare(
+        `INSERT INTO plan_entries (id, plan_date, meal, entry_type, recipe_id, note, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .bind(crypto.randomUUID(), day.date, day.meal, day.type, day.type === "recipe" ? recipeId : null, day.note, now, now)
+      .run();
+  }
+  const saved = await listPlan(db, input.weekStart, end);
+  for (const entry of saved) {
+    if (entry.type === "recipe") await addEntryGroceries(db, entry);
+  }
+  return getWeek(db, input.weekStart);
+}
+
+async function removePlanGroceries(db: D1Database, entry: PlanEntry): Promise<void> {
+  const recipe = entry.recipeId ? await getRecipe(db, entry.recipeId) : null;
+  const rows = await db
+    .prepare(`SELECT item_id, source_key FROM grocery_sources WHERE source_key GLOB ?`)
+    .bind(`plan:${entry.id}:*`)
+    .all<{ item_id: string; source_key: string }>();
+  for (const row of rows.results ?? []) {
+    const index = Number(row.source_key.slice(row.source_key.lastIndexOf(":") + 1));
+    const ingredient = recipe && Number.isInteger(index) ? recipe.ingredients[index] : undefined;
+    await removeOneSource(db, row.item_id, row.source_key, ingredient ?? null, recipe?.name ?? entry.recipeName ?? "");
+  }
+}
+
+async function removeOneSource(
+  db: D1Database,
+  itemId: string,
+  sourceKey: string,
+  ingredient: Ingredient | null,
+  recipeName: string,
+): Promise<void> {
+  const items = await listItems(db);
+  const item = items.find((entry) => entry.id === itemId);
+  if (!item || item.checked) {
+    await db.prepare(`DELETE FROM grocery_sources WHERE item_id = ? AND source_key = ?`).bind(itemId, sourceKey).run();
+    return;
+  }
+  const others = await db
+    .prepare(`SELECT source_key FROM grocery_sources WHERE item_id = ? AND source_key != ?`)
+    .bind(itemId, sourceKey)
+    .all<{ source_key: string }>();
+  if ((others.results ?? []).length === 0) {
+    await deleteItem(db, itemId);
+    return;
+  }
+  if (ingredient && recipeName) {
+    await updateItem(db, itemId, { quantityNote: unmergeGroceryNote(item.quantityNote, ingredient, recipeName) });
+  }
+  await db.prepare(`DELETE FROM grocery_sources WHERE item_id = ? AND source_key = ?`).bind(itemId, sourceKey).run();
 }
 
 async function addOneIngredient(
@@ -413,6 +626,13 @@ async function addOneIngredient(
     .bind(existing.id, sourceKey)
     .first<{ ok: number }>();
   if (seen) return "skipped";
+  const sourceCount = await db
+    .prepare(`SELECT COUNT(*) AS n FROM grocery_sources WHERE item_id = ?`)
+    .bind(existing.id)
+    .first<{ n: number }>();
+  if (Number(sourceCount?.n ?? 0) === 0) {
+    await db.prepare(`INSERT INTO grocery_sources (item_id, source_key) VALUES (?, ?)`).bind(existing.id, `user:${existing.id}`).run();
+  }
   const note = mergeGroceryNote(existing.quantityNote, ingredient, recipeName);
   await updateItem(db, existing.id, { quantityNote: note || null });
   await db.prepare(`INSERT INTO grocery_sources (item_id, source_key) VALUES (?, ?)`).bind(existing.id, sourceKey).run();

@@ -136,16 +136,16 @@ Open the app on both phones. When one of you changes dinner, a recipe, or the gr
 Four tabs sit at the bottom: Today, Week, Recipes, and Groceries. Tap one. Nothing here uses a swipe.
 
 - **Today** is tonight's dinner. If a recipe is planned, tap **Start cooking** for one step at a time. Breakfast or lunch shows up only when something is planned. Family events for the day sit underneath in small type. If dinner is empty, tap **Plan dinner**.
-- **Week** is this week and next, Monday through Sunday, in Eastern time. Tap a day to pick a recipe, leftovers, or a short note such as eating out. **+ Add breakfast** and **+ Add lunch** appear on that day when you want them. **Add this week's ingredients** puts the planned recipes on the grocery list.
+- **Week** is this week and next, Monday through Sunday, in Eastern time. Tap a day to pick a recipe, leftovers, or a short note such as eating out. **+ Add breakfast** and **+ Add lunch** appear on that day when you want them. Choosing a recipe puts its ingredients on the grocery list. Taking that recipe off the day, or picking a different one, takes those things back off if they haven't been bought yet. Leftovers and notes don't add anything.
 - **Recipes** is the cookbook. Search by name, and tap the star for a favorite. Open a recipe to change the number of servings, which scales amounts the app can read, such as `1/2 lb`. **Add ingredients to groceries** uses that serving count. **Cook** shows one big step at a time and tries to keep the screen awake. **Add a recipe** takes a link. If the page has a recipe on it, the name, photo, amounts, steps, time, and link are filled in. If not, type the name, one ingredient per line, and one step per line. The source link stays on the recipe.
 - **Groceries** is one list. Type something and tap **Add**. Tap the round circle to mark it bought. Bought items sit under **Done**, and **Clear** takes them off after you confirm. Tap the words of an item to rename it or delete it. A grey line under a name says which recipe it is for. Adding the same recipe twice does not stack it again.
-- **Sign out on this phone** is at the bottom of Today. It only signs out that phone. The app follows the phone's light or dark setting.
+- The app follows the phone's light or dark setting.
 
 ## If something goes wrong
 
 - "That passcode didn't work" — on the live site, use the passcode from step 4, not the practice passcode from this computer.
 - The page will not load on your phone at `127.0.0.1` — that address only works on the computer that is running `npm start`. Phones use the `workers.dev` address.
-- You changed the passcode — each phone needs to open the list and sign in again. Use **Sign out on this phone** first if it still shows the old list.
+- You changed the passcode — each phone needs to open the app and sign in again.
 - `npm start` says the port is already in use — the list is probably already running in another terminal window. Close that one, or just open [http://127.0.0.1:47219](http://127.0.0.1:47219).
 
 ## For a helper program
@@ -292,7 +292,7 @@ Dates are `YYYY-MM-DD`. Meals are `breakfast`, `lunch`, or `dinner`. A day has o
 
 `GET /api/plan?from=2026-10-19&to=2026-10-25`
 
-`POST /api/plan` saves or replaces that day and meal.
+`POST /api/plan` saves or replaces that day and meal. A `recipe` meal adds its ingredients to groceries. Replacing it with a different recipe, leftovers, or a note takes back the unchecked items that were added only for that meal. Bought items stay. Leftovers and notes add nothing.
 
 ```json
 { "date": "2026-10-19", "meal": "dinner", "type": "recipe", "recipeId": "RECIPE_ID" }
@@ -300,9 +300,68 @@ Dates are `YYYY-MM-DD`. Meals are `breakfast`, `lunch`, or `dinner`. A day has o
 
 `type` may also be `leftovers`, or `note` with a `note` string.
 
-`DELETE /api/plan/ID`
+`DELETE /api/plan/ID` removes that meal and, when it was a recipe, the unchecked groceries that belonged only to it.
 
-`POST /api/plan/groceries` with `{ "from": "2026-10-19", "to": "2026-10-25" }` adds ingredients for recipes planned in that range. Two dinners of the same recipe count twice. Running it again does not add them a second time. Send `"planId"` as well when you only want one planned meal. Matching names are combined, and the grey note lists the recipe. The button on a recipe page is separate: it adds that recipe once, even if it is also on the week.
+`POST /api/plan/groceries` with `{ "from": "2026-10-19", "to": "2026-10-25" }` adds ingredients for recipes planned in that range. The phones already do this when a recipe is planned. This endpoint is for a helper that wants to run it again. Two dinners of the same recipe count twice. Running it again does not add them a second time. Send `"planId"` as well when you only want one planned meal. Matching names are combined, and the grey note lists the recipe.
+
+### Weekly menu
+
+`PUT /api/week` replaces Monday through Sunday, starting on `weekStart` (that date has to be a Monday). It also saves the recipes in the list. A recipe with `externalId` updates the recipe that already has that id. Otherwise the name is used. `recipeId` uses a recipe that is already saved, without changing it.
+
+`GET /api/week?start=2026-10-19` reads that week back in the same shape. Each recipe day includes the full recipe.
+
+Planning and removing meals here follows the same grocery rules as `POST /api/plan`.
+
+```json
+{
+  "weekStart": "2026-10-19",
+  "days": [
+    {
+      "date": "2026-10-19",
+      "meal": "dinner",
+      "type": "recipe",
+      "recipe": {
+        "externalId": "home-chef-chicken-chili",
+        "name": "Chicken chili",
+        "coversNights": 2,
+        "servings": 4,
+        "nightBefore": ["Thaw the chicken in the fridge."],
+        "ingredients": ["1 1/2 lb chicken thighs", "1 onion", "2 cloves garlic"],
+        "prepSteps": ["Chop the onion and garlic."],
+        "cookSteps": [
+          { "text": "Brown the chicken in a pot.", "minutes": 8 },
+          { "text": "Simmer until thick.", "minutes": 25 }
+        ],
+        "kidsPlates": "Plain rice, beans, and fruit.",
+        "reheating": "Add a splash of water and simmer for 5 minutes.",
+        "sourceUrl": "https://example.com/chicken-chili"
+      }
+    },
+    {
+      "date": "2026-10-20",
+      "meal": "dinner",
+      "type": "leftovers",
+      "note": "Chicken chili"
+    },
+    {
+      "date": "2026-10-21",
+      "meal": "dinner",
+      "type": "note",
+      "note": "Eating at Grandma's"
+    },
+    {
+      "date": "2026-10-22",
+      "meal": "dinner",
+      "type": "recipe",
+      "recipeId": "EXISTING_RECIPE_ID"
+    }
+  ]
+}
+```
+
+`coversNights` is how many nights the recipe feeds, including a leftovers night. `nightBefore`, `prepSteps`, and `cookSteps` show on the recipe page in that order, after the ingredients. Cook mode walks through prep, then cook. A cook step with `minutes` gets a timer. `kidsPlates` and `reheating` are short notes at the end. Leave a section out when it doesn't apply.
+
+The same fields can be sent on `POST /api/recipes` and `PATCH /api/recipes/ID`. Older recipes that only have `steps` still cook from those steps.
 
 ### Family events
 

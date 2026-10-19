@@ -573,6 +573,160 @@ describe("grocery API", () => {
     expect(items.find((item) => item.name === "Onion")?.quantityNote).toBe("1 · Soup");
   });
 
+  it("adds groceries when a recipe is planned and takes them back when it changes", async () => {
+    const token = env.API_TOKEN;
+    const chili = await call("/api/recipes", {
+      method: "POST",
+      token,
+      body: { name: "Chili", ingredients: ["1 onion", "1 lb beef"], steps: ["Simmer."] },
+    });
+    const pasta = await call("/api/recipes", {
+      method: "POST",
+      token,
+      body: { name: "Pasta", ingredients: ["1 onion", "1/2 lb spaghetti"], steps: ["Boil."] },
+    });
+    const chiliId = (chili.json?.recipe as Json).id as string;
+    const pastaId = (pasta.json?.recipe as Json).id as string;
+
+    await call("/api/items", { method: "POST", token, body: { name: "Milk", store: "local", category: "refrigerated" } });
+    const planned = await call("/api/plan", {
+      method: "POST",
+      token,
+      body: { date: "2026-10-19", meal: "dinner", type: "recipe", recipeId: chiliId },
+    });
+    expect(planned.status).toBe(200);
+    const afterPlan = ((await call("/api/items", { token })).json?.items ?? []) as Json[];
+    expect(afterPlan.find((item) => item.name === "Onion")?.quantityNote).toBe("1 · Chili");
+    expect(afterPlan.find((item) => item.name === "Beef")?.quantityNote).toBe("1 lb · Chili");
+    expect(afterPlan.find((item) => item.name === "Milk")?.quantityNote ?? null).toBeNull();
+
+    await call("/api/plan", {
+      method: "POST",
+      token,
+      body: { date: "2026-10-20", meal: "dinner", type: "recipe", recipeId: pastaId },
+    });
+    const shared = ((await call("/api/items", { token })).json?.items ?? []) as Json[];
+    expect(shared.find((item) => item.name === "Onion")?.quantityNote).toBe("2 · Chili, Pasta");
+
+    const leftovers = await call("/api/plan", {
+      method: "POST",
+      token,
+      body: { date: "2026-10-21", meal: "dinner", type: "leftovers" },
+    });
+    expect(leftovers.status).toBe(200);
+    expect(((await call("/api/items", { token })).json?.items as Json[]).filter((item) => item.name === "Onion")).toHaveLength(1);
+
+    const beef = shared.find((item) => item.name === "Beef");
+    await call(`/api/items/${beef?.id}`, { method: "PATCH", token, body: { checked: true } });
+    await call("/api/plan", {
+      method: "POST",
+      token,
+      body: { date: "2026-10-19", meal: "dinner", type: "note", note: "Eating out" },
+    });
+    const afterSwap = ((await call("/api/items", { token })).json?.items ?? []) as Json[];
+    expect(afterSwap.find((item) => item.name === "Beef")?.checked).toBe(true);
+    expect(afterSwap.find((item) => item.name === "Onion")?.quantityNote).toBe("1 · Pasta");
+    expect(afterSwap.some((item) => item.name === "Milk")).toBe(true);
+
+    const pastaPlan = ((await call("/api/plan?from=2026-10-20&to=2026-10-20", { token })).json?.plan ?? []) as Json[];
+    await call(`/api/plan/${pastaPlan[0].id}`, { method: "DELETE", token });
+    const cleared = ((await call("/api/items", { token })).json?.items ?? []) as Json[];
+    expect(cleared.some((item) => item.name === "Onion")).toBe(false);
+    expect(cleared.some((item) => item.name === "Spaghetti")).toBe(false);
+    expect(cleared.some((item) => item.name === "Milk")).toBe(true);
+    expect(cleared.find((item) => item.name === "Beef")?.checked).toBe(true);
+  });
+
+  it("replaces a week of recipes for a helper and reads it back", async () => {
+    const token = env.API_TOKEN;
+    const first = await call("/api/week", {
+      method: "PUT",
+      token,
+      body: {
+        weekStart: "2026-10-19",
+        days: [
+          {
+            date: "2026-10-19",
+            meal: "dinner",
+            type: "recipe",
+            recipe: {
+              externalId: "home-chef-chicken-chili",
+              name: "Chicken chili",
+              coversNights: 2,
+              servings: 4,
+              nightBefore: ["Thaw the chicken in the fridge."],
+              ingredients: ["1 lb chicken thighs", "1 onion"],
+              prepSteps: ["Chop the onion."],
+              cookSteps: [
+                { text: "Brown the chicken.", minutes: 8 },
+                { text: "Simmer.", minutes: 25 },
+              ],
+              kidsPlates: "Plain rice and fruit.",
+              reheating: "Simmer 5 minutes.",
+              sourceUrl: "https://example.com/chicken-chili",
+            },
+          },
+          { date: "2026-10-20", meal: "dinner", type: "leftovers", note: "Chicken chili" },
+          { date: "2026-10-22", meal: "dinner", type: "note", note: "Eating out" },
+        ],
+      },
+    });
+    expect(first.status).toBe(200);
+    const firstDays = (first.json?.days ?? []) as Json[];
+    expect(firstDays).toHaveLength(3);
+    const savedRecipe = firstDays[0].recipe as Json;
+    expect(savedRecipe.externalId).toBe("home-chef-chicken-chili");
+    expect(savedRecipe.coversNights).toBe(2);
+    expect(savedRecipe.nightBefore).toEqual(["Thaw the chicken in the fridge."]);
+    expect(savedRecipe.prepSteps).toEqual(["Chop the onion."]);
+    expect(savedRecipe.cookSteps).toEqual([
+      { text: "Brown the chicken.", minutes: 8 },
+      { text: "Simmer.", minutes: 25 },
+    ]);
+    expect(savedRecipe.kidsPlates).toBe("Plain rice and fruit.");
+    const shopped = ((await call("/api/items", { token })).json?.items ?? []) as Json[];
+    expect(shopped.find((item) => item.name === "Chicken thighs")?.quantityNote).toBe("1 lb · Chicken chili");
+    expect(shopped.find((item) => item.name === "Onion")?.quantityNote).toBe("1 · Chicken chili");
+
+    const second = await call("/api/week", {
+      method: "PUT",
+      token,
+      body: {
+        weekStart: "2026-10-19",
+        days: [
+          {
+            date: "2026-10-21",
+            meal: "dinner",
+            type: "recipe",
+            recipe: {
+              externalId: "home-chef-chicken-chili",
+              name: "Weeknight chili",
+              coversNights: 2,
+              ingredients: ["2 lb chicken thighs"],
+              cookSteps: [{ text: "Simmer the chili.", minutes: 30 }],
+            },
+          },
+        ],
+      },
+    });
+    expect(second.status).toBe(200);
+    const recipes = ((await call("/api/recipes", { token })).json?.recipes ?? []) as Json[];
+    expect(recipes.filter((recipe) => recipe.externalId === "home-chef-chicken-chili")).toHaveLength(1);
+    expect(recipes.find((recipe) => recipe.externalId === "home-chef-chicken-chili")?.name).toBe("Weeknight chili");
+
+    const read = await call("/api/week?start=2026-10-19", { token });
+    expect(read.status).toBe(200);
+    expect(read.json?.weekStart).toBe("2026-10-19");
+    const days = (read.json?.days ?? []) as Json[];
+    expect(days).toHaveLength(1);
+    expect(days[0].date).toBe("2026-10-21");
+    expect((days[0].recipe as Json).cookSteps).toEqual([{ text: "Simmer the chili.", minutes: 30 }]);
+    const items = ((await call("/api/items", { token })).json?.items ?? []) as Json[];
+    expect(items.some((item) => item.name === "Onion")).toBe(false);
+    expect(items.find((item) => item.name === "Chicken thighs")?.quantityNote).toBe("2 lb · Weeknight chili");
+    expect((await call("/api/week", { method: "PUT", token, body: { weekStart: "2026-10-20", days: [] } })).status).toBe(400);
+  });
+
   it("serves the phone page", async () => {
     const response = await exports.default.fetch("https://grocery.test/");
     expect(response.status).toBe(200);

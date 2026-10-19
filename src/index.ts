@@ -17,8 +17,10 @@ import {
   savePlan,
   updateRecipe,
   getRecipe,
+  getWeek,
+  replaceWeek,
 } from "./food";
-import { dateRange, parseEvent, parseEventList, parsePlan, parseRecipe, parseRecipePatch, parseServingsOverride } from "./food-validate";
+import { cleanWeekStart, dateRange, parseEvent, parseEventList, parsePlan, parseRecipe, parseRecipePatch, parseServingsOverride, parseWeek } from "./food-validate";
 import { HttpError, json, readJson } from "./http";
 import { importRecipeFromUrl } from "./import-recipe";
 import { cleanBarcode, cleanStore, parseItemPatch, parseNewItem, parseStaple } from "./validate";
@@ -222,6 +224,13 @@ async function handleFood(request: Request, env: Env, path: string, method: stri
       return json({ ok: true });
     }
     throw new HttpError(405, "That action isn't available.");
+  }
+
+  if (path === "/api/week" && method === "GET") {
+    return json(await getWeek(env.DB, cleanWeekStart(new URL(request.url).searchParams.get("start"))));
+  }
+  if (path === "/api/week" && method === "PUT") {
+    return json(await replaceWeek(env.DB, parseWeek(await readJson(request))));
   }
 
   if (path === "/api/plan/groceries") {

@@ -154,8 +154,7 @@ function todayHtml() {
     ${state.error ? `<p class="error" role="alert">${esc(state.error)}</p>` : ""}
     ${dinner ? dinnerCard(dinner) : emptyDinner()}
     ${others.map(otherMeal).join("")}
-    ${events.length ? `<h2 class="kicker">On the calendar</h2><ul class="events">${events.map(eventItem).join("")}</ul>` : ""}
-    <button class="signout" type="button" data-action="sign-out">Sign out on this phone</button>`;
+    ${events.length ? `<h2 class="kicker">On the calendar</h2><ul class="events">${events.map(eventItem).join("")}</ul>` : ""}`;
 }
 
 function dinnerCard(entry) {
@@ -199,7 +198,6 @@ function weekHtml() {
   return `<h1>Week</h1>
     ${state.notice ? `<p class="notice" role="status">${esc(state.notice)}</p>` : ""}
     ${state.error ? `<p class="error" role="alert">${esc(state.error)}</p>` : ""}
-    <button class="primary" type="button" data-action="week-groceries">Add this week's ingredients</button>
     ${weekBlock("This week", start)}
     ${weekBlock("Next week", addDays(start, 7))}`;
 }
@@ -232,8 +230,7 @@ function dayHtml(date) {
     ${mealEditor(date, "dinner", dinner)}
     ${extras.map((meal) => mealEditor(date, meal, mealOn(date, meal))).join("")}
     ${["breakfast", "lunch"].filter((meal) => !extras.includes(meal)).map((meal) => `<button class="quiet" type="button" data-action="show-meal" data-date="${esc(date)}" data-meal="${meal}">+ Add ${meal}</button>`).join("")}
-    ${eventsOn(date).length ? `<h2 class="kicker">On the calendar</h2><ul class="events">${eventsOn(date).map(eventItem).join("")}</ul>` : ""}
-    ${offerHtml()}`;
+    ${eventsOn(date).length ? `<h2 class="kicker">On the calendar</h2><ul class="events">${eventsOn(date).map(eventItem).join("")}</ul>` : ""}`;
 }
 
 function mealEditor(date, meal, entry) {
@@ -257,17 +254,6 @@ function pickerHtml(date, meal) {
       <input name="note" type="text" maxlength="140" placeholder="Eating out" aria-label="Short note" data-date="${esc(date)}" data-meal="${meal}">
       <button class="secondary" type="submit">Save note</button>
     </form>`;
-}
-
-function offerHtml() {
-  if (!state.offer) return "";
-  return `<div class="offer">
-    <p>Add the ingredients from ${esc(state.offer.name)} to groceries?</p>
-    <div class="stack">
-      <button class="primary" type="button" data-action="add-recipe-groceries" data-id="${esc(state.offer.recipeId)}">Add them</button>
-      <button class="secondary" type="button" data-action="dismiss-offer">Not now</button>
-    </div>
-  </div>`;
 }
 
 function recipesHtml() {
@@ -310,13 +296,18 @@ function recipeHtml(id) {
       <strong>${servings}</strong>
       <button type="button" data-action="servings" data-delta="1" aria-label="More servings">+</button>
     </div>
+    ${recipe.coversNights ? `<p class="small">Covers ${recipe.coversNights} ${recipe.coversNights === 1 ? "night" : "nights"}</p>` : ""}
+    ${stepList("Night before", recipe.nightBefore)}
     <h2 class="kicker">Ingredients</h2>
     <ul class="ingredients">${recipe.ingredients.map((ingredient) => `<li>${esc(scaledLine(ingredient, factor))}</li>`).join("") || `<li class="small">No ingredients yet.</li>`}</ul>
     <button class="primary" type="button" data-action="add-recipe-groceries" data-id="${esc(recipe.id)}" data-servings="${servings}">Add ingredients to groceries</button>
     ${state.notice ? `<p class="notice" role="status">${esc(state.notice)}</p>` : ""}
-    <h2 class="kicker">Steps</h2>
-    <ol class="steps">${recipe.steps.map((step) => `<li>${esc(step)}</li>`).join("") || `<li>No steps yet.</li>`}</ol>
-    ${recipe.steps.length ? `<button class="secondary" type="button" data-action="cook" data-id="${esc(recipe.id)}">Cook</button>` : ""}`;
+    ${stepList("Prep", recipe.prepSteps)}
+    ${cookStepList(recipe.cookSteps)}
+    ${!(recipe.prepSteps || []).length && !(recipe.cookSteps || []).length ? `${stepList("Steps", recipe.steps)}` : ""}
+    ${noteBlock("Kids' plates", recipe.kidsPlates)}
+    ${noteBlock("Reheating", recipe.reheating)}
+    ${cookSequence(recipe).length ? `<button class="secondary" type="button" data-action="cook" data-id="${esc(recipe.id)}">Cook</button>` : ""}`;
 }
 
 function newRecipeHtml() {
@@ -350,15 +341,17 @@ function newRecipeHtml() {
 
 function cookHtml() {
   const recipe = recipeById(state.page.id);
-  const steps = recipe?.steps || [];
+  const steps = cookSequence(recipe);
   const index = Math.min(state.page.step || 0, Math.max(0, steps.length - 1));
-  if (!recipe || !steps.length) {
-    return `<main class="cook"><button class="back" type="button" data-action="cook-back">Back</button><p>There aren't any steps yet.</p></main>`;
+  const step = steps[index];
+  if (!recipe || !step) {
+    return `<main class="cook"><button class="back" type="button" data-action="close-cook">Close</button><p>There aren't any steps yet.</p></main>`;
   }
   return `<main class="cook">
     <button class="back" type="button" data-action="close-cook">Close</button>
-    <p class="kicker">Step ${index + 1} of ${steps.length}</p>
-    <p class="cook-step">${esc(steps[index])}</p>
+    <p class="kicker">${esc(step.phase)} · Step ${index + 1} of ${steps.length}</p>
+    <p class="cook-step">${esc(step.text)}</p>
+    ${timerHtml(step, index)}
     <div class="cook-nav">
       <button class="secondary" type="button" data-action="cook-step" data-delta="-1" ${index === 0 ? "disabled" : ""}>Back</button>
       <button class="primary" type="button" data-action="cook-step" data-delta="1">${index === steps.length - 1 ? "Done" : "Next"}</button>
@@ -366,10 +359,54 @@ function cookHtml() {
   </main>`;
 }
 
+function stepList(title, lines) {
+  const items = (lines || []).filter(Boolean);
+  if (!items.length) return "";
+  return `<h2 class="kicker">${esc(title)}</h2><ol class="steps">${items.map((line) => `<li>${esc(line)}</li>`).join("")}</ol>`;
+}
+
+function cookStepList(steps) {
+  const items = steps || [];
+  if (!items.length) return "";
+  return `<h2 class="kicker">Cook</h2><ol class="steps">${items.map((step) => `<li>${esc(step.text)}${step.minutes ? ` <span class="small">${step.minutes} min</span>` : ""}</li>`).join("")}</ol>`;
+}
+
+function noteBlock(title, text) {
+  if (!text) return "";
+  return `<p class="note-block"><span class="kicker">${esc(title)}</span> ${esc(text)}</p>`;
+}
+
+function cookSequence(recipe) {
+  if (!recipe) return [];
+  const prep = (recipe.prepSteps || []).filter(Boolean).map((text) => ({ phase: "Prep", text, minutes: null }));
+  const cook = (recipe.cookSteps || []).filter((step) => step && step.text).map((step) => ({ phase: "Cook", text: step.text, minutes: step.minutes || null }));
+  if (prep.length || cook.length) return [...prep, ...cook];
+  return (recipe.steps || []).filter(Boolean).map((text) => ({ phase: "Cook", text, minutes: null }));
+}
+
+function timerHtml(step, index) {
+  if (!step.minutes) return "";
+  const timer = state.timer;
+  if (timer && timer.step === index && timer.done) return `<p class="timer" role="status">Time's up</p>`;
+  if (timer && timer.step === index) {
+    return `<p class="timer" role="timer">${formatClock(timer.remaining)}</p>
+      <button class="secondary" type="button" data-action="timer-cancel">Cancel timer</button>`;
+  }
+  return `<button class="secondary" type="button" data-action="timer-start" data-minutes="${step.minutes}">Start ${step.minutes} min timer</button>`;
+}
+
+function formatClock(totalSeconds) {
+  const seconds = Math.max(0, totalSeconds);
+  const minutes = Math.floor(seconds / 60);
+  const rest = seconds % 60;
+  return `${minutes}:${String(rest).padStart(2, "0")}`;
+}
+
 function groceriesHtml() {
   const open = state.items.filter((item) => !item.checked);
   const done = state.items.filter((item) => item.checked);
   return `<h1>Groceries</h1>
+    <div class="checklist">
     ${state.notice ? `<p class="notice" role="status">${esc(state.notice)}</p>` : ""}
     ${state.error ? `<p class="error" role="alert">${esc(state.error)}</p>` : ""}
     <form data-form="grocery-add" class="add-row">
@@ -381,7 +418,8 @@ function groceriesHtml() {
       <button type="button" data-action="toggle-done">${state.doneOpen ? "Hide" : "Done"} ${done.length}</button>
       <button class="quiet" type="button" data-action="ask-clear">Clear</button>
     </div>
-    ${state.doneOpen ? `<div class="done-list">${done.map(itemRow).join("")}</div>` : ""}` : ""}`;
+    ${state.doneOpen ? `<div class="done-list">${done.map(itemRow).join("")}</div>` : ""}` : ""}
+    </div>`;
 }
 
 function itemRow(item) {
@@ -513,16 +551,9 @@ async function onClick(event) {
   if (action === "cook") return openCook(button.dataset.id);
   if (action === "cook-step") return moveCook(Number(button.dataset.delta));
   if (action === "close-cook" || action === "cook-back") return closeCook();
-  if (action === "add-recipe-groceries") {
-    if (state.offer?.planId && button.dataset.servings == null) return addPlannedGroceries();
-    return addRecipeGroceries(button.dataset.id, button.dataset.servings);
-  }
-  if (action === "dismiss-offer") {
-    state.offer = null;
-    render();
-    return;
-  }
-  if (action === "week-groceries") return addWeekGroceries();
+  if (action === "timer-start") return startTimer(Number(button.dataset.minutes));
+  if (action === "timer-cancel") return stopTimer(true);
+  if (action === "add-recipe-groceries") return addRecipeGroceries(button.dataset.id, button.dataset.servings);
   if (action === "toggle-item") return toggleItem(button.dataset.id);
   if (action === "open-item") {
     state.sheet = { kind: "item", id: button.dataset.id };
@@ -551,7 +582,6 @@ async function onClick(event) {
     return;
   }
   if (action === "confirm-clear") return clearDone();
-  if (action === "sign-out") return signOut();
 }
 
 async function onSubmit(event) {
@@ -617,15 +647,6 @@ async function signIn(passcode) {
   }
 }
 
-async function signOut() {
-  await api("/api/logout", { method: "POST", body: {} });
-  unlockScreen();
-  state.authed = false;
-  state.page = null;
-  state.sheet = null;
-  render();
-}
-
 async function savePlanEntry(body) {
   try {
     await api("/api/plan", { method: "POST", body });
@@ -639,10 +660,8 @@ async function savePlanEntry(body) {
 }
 
 async function planRecipe(date, meal, recipeId) {
-  const recipe = recipeById(recipeId);
   try {
-    const data = await api("/api/plan", { method: "POST", body: { date, meal, type: "recipe", recipeId } });
-    state.offer = { recipeId, planId: data.entry.id, date, name: recipe?.name || "this recipe" };
+    await api("/api/plan", { method: "POST", body: { date, meal, type: "recipe", recipeId } });
     state.dayQuery = "";
     await refresh(true);
   } catch (error) {
@@ -675,7 +694,8 @@ async function toggleFavorite(id) {
 
 function openCook(id) {
   const recipe = recipeById(id);
-  if (!recipe?.steps?.length) return;
+  if (!cookSequence(recipe).length) return;
+  stopTimer(false);
   state.cookReturn = { tab: state.tab, page: state.page ? { ...state.page } : null };
   state.page = { kind: "cook", id, step: 0 };
   lockScreen();
@@ -684,15 +704,17 @@ function openCook(id) {
 
 function moveCook(delta) {
   const recipe = recipeById(state.page.id);
-  const last = (recipe?.steps.length || 1) - 1;
+  const last = cookSequence(recipe).length - 1;
   const next = (state.page.step || 0) + delta;
   if (next > last || next < 0) return closeCook();
+  stopTimer(false);
   state.page.step = next;
   render();
 }
 
 function closeCook() {
   const back = state.cookReturn;
+  stopTimer(false);
   unlockScreen();
   state.cookReturn = null;
   if (back?.page?.kind === "recipe" || back?.page?.kind === "day") {
@@ -718,30 +740,32 @@ async function addRecipeGroceries(id, servings) {
   }
 }
 
-async function addPlannedGroceries() {
-  const offer = state.offer;
-  if (!offer?.planId) return;
-  try {
-    await api("/api/plan/groceries", { method: "POST", body: { from: offer.date, to: offer.date, planId: offer.planId } });
-    state.offer = null;
-    state.notice = "Added to groceries.";
-    await refresh(true);
-  } catch (error) {
-    state.error = error.message;
-    render();
-  }
+function startTimer(minutes) {
+  stopTimer(false);
+  const step = state.page?.step || 0;
+  state.timer = { step, remaining: minutes * 60, endsAt: Date.now() + minutes * 60 * 1000, done: false };
+  state.timerHandle = setInterval(() => {
+    if (!state.timer) return;
+    const remaining = Math.max(0, Math.round((state.timer.endsAt - Date.now()) / 1000));
+    state.timer.remaining = remaining;
+    if (remaining <= 0) {
+      state.timer.done = true;
+      clearInterval(state.timerHandle);
+      state.timerHandle = null;
+      render();
+      return;
+    }
+    const node = document.querySelector(".timer");
+    if (node) node.textContent = formatClock(remaining);
+  }, 250);
+  render();
 }
 
-async function addWeekGroceries() {
-  const start = mondayOf(nyToday());
-  try {
-    await api("/api/plan/groceries", { method: "POST", body: { from: start, to: addDays(start, 6) } });
-    state.notice = "Added this week's ingredients.";
-    await refresh(true);
-  } catch (error) {
-    state.error = error.message;
-    render();
-  }
+function stopTimer(shouldRender) {
+  if (state.timerHandle) clearInterval(state.timerHandle);
+  state.timerHandle = null;
+  state.timer = null;
+  if (shouldRender) render();
 }
 
 async function addGrocery(name) {

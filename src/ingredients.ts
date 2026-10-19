@@ -268,3 +268,34 @@ function amountPiece(ingredient: Ingredient): string {
   const unit = unitLabel(ingredient.unit, ingredient.quantity);
   return `${formatQuantity(ingredient.quantity)}${unit ? ` ${unit}` : ""}`.trim();
 }
+
+export function unmergeGroceryNote(existing: string | null, addition: Ingredient, recipeName: string): string | null {
+  const parsed = parseGroceryNote(existing);
+  if (!parsed.structured) {
+    if (!existing) return null;
+    const suffix = `, ${recipeName}`;
+    if (existing.endsWith(suffix)) {
+      const rest = existing.slice(0, -suffix.length).trim();
+      return rest || null;
+    }
+    return existing;
+  }
+  const count = parsed.recipes.get(recipeName) ?? 0;
+  if (count <= 1) parsed.recipes.delete(recipeName);
+  else parsed.recipes.set(recipeName, count - 1);
+  const piece = amountPiece(addition);
+  let amount = parsed.amountText;
+  if (piece) {
+    if (parsed.quantity != null && parsed.unit === addition.unit && addition.quantity != null) {
+      const next = parsed.quantity - addition.quantity;
+      amount = next > 0.001 ? amountPiece({ ...addition, quantity: next }) : "";
+    } else if (amount === piece) amount = "";
+    else if (amount.endsWith(` + ${piece}`)) amount = amount.slice(0, -(piece.length + 3));
+    else if (amount.startsWith(`${piece} + `)) amount = amount.slice(piece.length + 3);
+  }
+  const names = [...parsed.recipes.entries()].map(([name, times]) => (times > 1 ? `${name} ×${times}` : name));
+  const recipeText = names.join(", ");
+  if (!amount && !recipeText) return null;
+  const note = amount && recipeText ? `${amount} · ${recipeText}` : amount || recipeText;
+  return note.slice(0, 140);
+}
