@@ -379,7 +379,10 @@ export async function updateItem(db: D1Database, id: string, patch: ItemPatch): 
 export async function deleteItem(db: D1Database, id: string): Promise<void> {
   const existing = await getItem(db, id);
   if (!existing) throw new HttpError(404, "That item isn't on the list anymore.");
-  await db.prepare(`DELETE FROM items WHERE id = ?`).bind(id).run();
+  await db.batch([
+    db.prepare(`DELETE FROM grocery_sources WHERE item_id = ?`).bind(id),
+    db.prepare(`DELETE FROM items WHERE id = ?`).bind(id),
+  ]);
 }
 
 export async function clearChecked(db: D1Database, store: Store): Promise<number> {
@@ -387,7 +390,14 @@ export async function clearChecked(db: D1Database, store: Store): Promise<number
     .prepare(`SELECT COUNT(*) AS n FROM items WHERE store = ? AND checked = 1`)
     .bind(store)
     .first<{ n: number }>();
-  await db.prepare(`DELETE FROM items WHERE store = ? AND checked = 1`).bind(store).run();
+  await db.batch([
+    db
+      .prepare(
+        `DELETE FROM grocery_sources WHERE item_id IN (SELECT id FROM items WHERE store = ? AND checked = 1)`,
+      )
+      .bind(store),
+    db.prepare(`DELETE FROM items WHERE store = ? AND checked = 1`).bind(store),
+  ]);
   return Number(row?.n ?? 0);
 }
 

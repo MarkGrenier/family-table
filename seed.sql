@@ -156,3 +156,46 @@ INSERT OR REPLACE INTO items (
     '2026-01-02T12:05:00.000Z',
     '2026-01-02T12:05:00.000Z'
   );
+
+INSERT OR REPLACE INTO recipes (
+  id, name, image_url, servings, ingredients_json, steps_json, total_time, source_url, favorite, created_at, updated_at
+) VALUES
+  (
+    'recipe-chili',
+    'Chicken chili',
+    '/photos/chili.svg',
+    4,
+    '[{"text":"1 1/2 lb chicken thighs","quantity":1.5,"unit":"lb","name":"chicken thighs"},{"text":"1 onion","quantity":1,"unit":null,"name":"onion"},{"text":"2 cloves garlic","quantity":2,"unit":"clove","name":"garlic"}]',
+    '["Brown the chicken in a pot.","Add the onion, garlic, tomatoes, and chili powder.","Simmer for 30 minutes."]',
+    '45 min',
+    NULL,
+    1,
+    '2026-01-03T12:00:00.000Z',
+    '2026-01-03T12:00:00.000Z'
+  ),
+  (
+    'recipe-pasta',
+    'Lemon pasta',
+    '/photos/pasta.svg',
+    4,
+    '[{"text":"1/2 lb spaghetti","quantity":0.5,"unit":"lb","name":"spaghetti"},{"text":"1 lemon","quantity":1,"unit":null,"name":"lemon"}]',
+    '["Boil the pasta.","Toss with lemon and butter."]',
+    '25 min',
+    NULL,
+    0,
+    '2026-01-03T12:01:00.000Z',
+    '2026-01-03T12:01:00.000Z'
+  ),
+  (
+    'recipe-salmon',
+    'Sheet-pan salmon',
+    '/photos/salmon.svg',
+    4,
+    '[{"text":"1 1/2 lb salmon","quantity":1.5,"unit":"lb","name":"salmon"},{"text":"1 bunch asparagus","quantity":1,"unit":"bunch","name":"asparagus"}]',
+    '["Heat the oven to 425°F.","Roast the salmon and asparagus for 12 minutes."]',
+    '20 min',
+    NULL,
+    0,
+    '2026-01-03T12:02:00.000Z',
+    '2026-01-03T12:02:00.000Z'
+  );

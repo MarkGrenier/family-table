@@ -1,8 +1,8 @@
-# Family groceries
+# Family food
 
-A shared shopping list for Mark and Emma.
+Dinners, recipes, and one grocery list for Mark and Emma.
 
-There are three stores: Costco, the local store, and Amazon. Things you buy over and over can sit on a Staples list and be added again next time. When one phone changes the list, the other phone catches up in a few seconds.
+The home screen is tonight. The week shows what is planned. Recipes can come from a link or be typed in. Groceries is one plain checklist. When one phone changes something, the other phone catches up in a few seconds.
 
 You can try the whole list on this computer before you put it on the internet. A Cloudflare account is only needed for the internet part.
 
@@ -24,7 +24,7 @@ You do not need a Cloudflare account for this.
    npm install
    ```
 
-5. Create the practice list (a few example items, only on this computer):
+5. Create the practice list (a few example recipes and groceries, only on this computer):
 
    ```bash
    npm run setup
@@ -68,9 +68,11 @@ A browser window opens. Sign in to Cloudflare and approve the question it asks. 
 
 `wrangler.toml` already has the live database id. Leave that line as it is.
 
-### 3. Add the barcode column on the live list
+### 3. Add the new tables on the live list
 
-The phones already have a list. This step only adds a place to remember barcodes. It does not erase milk, bananas, or anything else.
+The phones already have the grocery list. This step adds recipes, the week plan, and family events. It does not erase anything already on the list.
+
+The new file is `migrations/0003_food.sql`. Older migration files stay as they are.
 
 ```bash
 npx wrangler d1 migrations apply grocery --remote
@@ -120,28 +122,24 @@ Do this in Safari. The Chrome app on an iPhone will not add it to the home scree
 
 1. Open Safari.
 2. Go to the `workers.dev` address from the last step.
-3. Type the passcode from step 4 and tap **Open the list**. The phone remembers it.
+3. Type the passcode from step 4 and tap **Open**. The phone remembers it.
 4. Tap the Share button (the square with an arrow pointing up).
 5. Tap **Add to Home Screen**.
 6. Tap **Add**.
 
-An icon named Groceries appears on the home screen. Do the same on the other phone.
+The icon is still the little cart. A newly added icon is named Food. An icon you already added can keep its old name. Do the same on the other phone.
 
-Open the list on both phones. When one of you adds or checks something, the other phone updates within a few seconds, as long as the list is open.
+Open the app on both phones. When one of you changes dinner, a recipe, or the groceries, the other phone updates within a few seconds, as long as the app is open.
 
-## Using the list
+## Using the app
 
-- The buttons at the top are Costco, Local, Amazon, and Staples. Swipe left or right on the list to move between Costco, Local, and Amazon.
-- Type a name and tap **Add**, or tap **Scan**. It goes on the store you are looking at. If you have bought that thing before, the aisle and brand are filled in from last time. A new Costco or local item starts as Shelf-stable. Amazon has no aisles.
-- Tap **Scan** to use the camera on a barcode, mostly for things you buy again. The first time, the phone asks to use the camera. If that barcode was scanned before, the item goes on the list in one step. If it is new, the list looks up a name. You can change it before saving. Next time, that barcode is one step. If the camera will not open, type the numbers under the bars. The **×** on the camera screen closes it. On the name screen, swipe right to go back.
-- Tap an item to mark it bought. Bought items drop to the bottom and turn grey. Tap again to put it back.
-- Hold your finger on an item to rename it right there. In that same row you can set a short quantity, tap the star if you buy it often, and tap a store or aisle to move it. Done, or tapping somewhere else, saves it. If you didn't change anything, it just closes.
-- A brand, when we know it, shows in grey under the name.
-- Swipe an item to the left to remove it. **Undo** shows for a few seconds.
-- Swipe left or right on the page to move between Costco, Local, and Amazon. From Staples or the scanner, swipe right to come back to the list.
-- **Clear already got** takes the bought items off that store. It asks you first.
-- A staple is something you buy often. Hold the item and tap the star. On the Staples tab, **Add to this week** puts it on that store's list. If it is already there and not bought yet, the button says **On the list**. Swipe a staple to the left to take it off the Staples tab. It stays on this week's list if it is already there. A scanned barcode is remembered the same way.
-- **Sign out on this phone** is at the bottom. It only signs out that phone.
+Four tabs sit at the bottom: Today, Week, Recipes, and Groceries. Tap one. Nothing here uses a swipe.
+
+- **Today** is tonight's dinner. If a recipe is planned, tap **Start cooking** for one step at a time. Breakfast or lunch shows up only when something is planned. Family events for the day sit underneath in small type. If dinner is empty, tap **Plan dinner**.
+- **Week** is this week and next, Monday through Sunday, in Eastern time. Tap a day to pick a recipe, leftovers, or a short note such as eating out. **+ Add breakfast** and **+ Add lunch** appear on that day when you want them. **Add this week's ingredients** puts the planned recipes on the grocery list.
+- **Recipes** is the cookbook. Search by name, and tap the star for a favorite. Open a recipe to change the number of servings, which scales amounts the app can read, such as `1/2 lb`. **Add ingredients to groceries** uses that serving count. **Cook** shows one big step at a time and tries to keep the screen awake. **Add a recipe** takes a link. If the page has a recipe on it, the name, photo, amounts, steps, time, and link are filled in. If not, type the name, one ingredient per line, and one step per line. The source link stays on the recipe.
+- **Groceries** is one list. Type something and tap **Add**. Tap the round circle to mark it bought. Bought items sit under **Done**, and **Clear** takes them off after you confirm. Tap the words of an item to rename it or delete it. A grey line under a name says which recipe it is for. Adding the same recipe twice does not stack it again.
+- **Sign out on this phone** is at the bottom of Today. It only signs out that phone. The app follows the phone's light or dark setting.
 
 ## If something goes wrong
 
@@ -259,11 +257,78 @@ If that barcode was saved before, the reply looks like:
 
 If it is new, the reply is `{ "barcode", "known": false, "suggestion" }`. `suggestion` is `{ "name", "brand" }` when a free product lookup finds it, or `null` when it does not. No key is required for that lookup.
 
+### Recipes
+
+`GET /api/recipes` and `GET /api/recipes?q=chili`
+
+`POST /api/recipes`
+
+```json
+{
+  "name": "Weeknight chili",
+  "servings": 4,
+  "ingredients": ["1 lb ground beef", "1 onion"],
+  "steps": ["Brown the beef.", "Simmer."],
+  "totalTime": "45 min",
+  "sourceUrl": "https://example.com/chili",
+  "imageUrl": "https://example.com/chili.jpg",
+  "favorite": false
+}
+```
+
+`GET /api/recipes/ID`
+
+`PATCH /api/recipes/ID` with only what changed. `{ "favorite": true }` is enough.
+
+`DELETE /api/recipes/ID` removes the recipe. Days that used it become a note with the recipe's name.
+
+`POST /api/recipes/import` with `{ "url": "https://..." }` fetches the page and reads the schema.org Recipe block (including one inside `@graph`). The reply is the saved recipe, including `sourceUrl`. If the page has no recipe, the reply is `422` and nothing is saved.
+
+`POST /api/recipes/ID/groceries` with optional `{ "servings": 8 }` adds that recipe's ingredients. Amounts scale from the recipe's own servings when you send a different number. The same recipe is not added twice.
+
+### The week
+
+Dates are `YYYY-MM-DD`. Meals are `breakfast`, `lunch`, or `dinner`. A day has one entry per meal.
+
+`GET /api/plan?from=2026-10-19&to=2026-10-25`
+
+`POST /api/plan` saves or replaces that day and meal.
+
+```json
+{ "date": "2026-10-19", "meal": "dinner", "type": "recipe", "recipeId": "RECIPE_ID" }
+```
+
+`type` may also be `leftovers`, or `note` with a `note` string.
+
+`DELETE /api/plan/ID`
+
+`POST /api/plan/groceries` with `{ "from": "2026-10-19", "to": "2026-10-25" }` adds ingredients for recipes planned in that range. Two dinners of the same recipe count twice. Running it again does not add them a second time. Send `"planId"` as well when you only want one planned meal. Matching names are combined, and the grey note lists the recipe. The button on a recipe page is separate: it adds that recipe once, even if it is also on the week.
+
+### Family events
+
+`GET /api/events?from=2026-10-19&to=2026-10-25`
+
+`POST /api/events`
+
+```json
+{ "date": "2026-10-19", "time": "15:30", "title": "Soccer" }
+```
+
+`time` may be `HH:MM` or a short bit of text such as `afternoon`, or left out.
+
+`PUT /api/events?from=2026-10-19&to=2026-10-25` replaces every event in that range and leaves days outside it alone.
+
+```json
+{ "events": [ { "date": "2026-10-19", "time": "15:30", "title": "Soccer" } ] }
+```
+
+`DELETE /api/events/ID`
+
 ### Backup
 
 `GET /api/export`
 
-Returns the whole list: `{ "exportedAt", "items", "staples" }`.
+Returns everything: `{ "exportedAt", "items", "staples", "recipes", "plan", "events" }`.
 
 ### The website sign-in
 

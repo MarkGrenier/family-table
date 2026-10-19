@@ -1,6 +1,26 @@
 import { clearSessionCookie, passcodeMatches, requestAuthed, sessionCookie, sessionToken } from "./auth";
 import { addStapleToList, clearChecked, createItem, createStaple, deleteItem, deleteStaple, listItems, listStaples, lookupBarcode, updateItem } from "./db";
+import {
+  addPlanGroceries,
+  addRecipeToGroceries,
+  createEvent,
+  createRecipe,
+  deleteEvent,
+  deletePlan,
+  deleteRecipe,
+  listAllEvents,
+  listAllPlan,
+  listEvents,
+  listPlan,
+  listRecipes,
+  replaceEvents,
+  savePlan,
+  updateRecipe,
+  getRecipe,
+} from "./food";
+import { dateRange, parseEvent, parseEventList, parsePlan, parseRecipe, parseRecipePatch, parseServingsOverride } from "./food-validate";
 import { HttpError, json, readJson } from "./http";
+import { importRecipeFromUrl } from "./import-recipe";
 import { cleanBarcode, cleanStore, parseItemPatch, parseNewItem, parseStaple } from "./validate";
 
 export interface Env {
@@ -14,7 +34,7 @@ const CSP = [
   "default-src 'self'",
   "script-src 'self'",
   "style-src 'self'",
-  "img-src 'self'",
+  "img-src 'self' https:",
   "manifest-src 'self'",
   "connect-src 'self'",
   "base-uri 'self'",
@@ -119,9 +139,18 @@ async function handleApi(request: Request, env: Env, path: string): Promise<Resp
     return json({ barcode: code, known: false, suggestion });
   }
   if (path === "/api/export" && method === "GET") {
-    const [items, staples] = await Promise.all([listItems(env.DB), listStaples(env.DB)]);
-    return json({ exportedAt: new Date().toISOString(), items, staples });
+    const [items, staples, recipes, plan, events] = await Promise.all([
+      listItems(env.DB),
+      listStaples(env.DB),
+      listRecipes(env.DB),
+      listAllPlan(env.DB),
+      listAllEvents(env.DB),
+    ]);
+    return json({ exportedAt: new Date().toISOString(), items, staples, recipes, plan, events });
   }
+
+  const food = await handleFood(request, env, path, method);
+  if (food) return food;
 
   const itemMatch = /^\/api\/items\/([A-Za-z0-9-]{1,80})$/.exec(path);
   if (itemMatch) {
@@ -152,6 +181,95 @@ async function handleApi(request: Request, env: Env, path: string): Promise<Resp
   }
 
   throw new HttpError(404, "That address isn't part of the list.");
+}
+
+async function handleFood(request: Request, env: Env, path: string, method: string): Promise<Response | null> {
+  if (path === "/api/recipes/import") {
+    if (method !== "POST") throw new HttpError(405, "That action isn't available.");
+    const body = await readJson(request);
+    if (typeof body.url !== "string" || !body.url.trim()) throw new HttpError(400, "Paste a link to the recipe.");
+    const imported = await importRecipeFromUrl(body.url);
+    const recipe = await createRecipe(env.DB, { ...imported, favorite: false });
+    return json({ recipe }, 201);
+  }
+  if (path === "/api/recipes" && method === "GET") {
+    const query = new URL(request.url).searchParams.get("q") ?? "";
+    return json({ recipes: await listRecipes(env.DB, query) });
+  }
+  if (path === "/api/recipes" && method === "POST") {
+    const recipe = await createRecipe(env.DB, parseRecipe(await readJson(request)));
+    return json({ recipe }, 201);
+  }
+  const recipeGroceries = /^\/api\/recipes\/([A-Za-z0-9-]{1,80})\/groceries$/.exec(path);
+  if (recipeGroceries) {
+    if (method !== "POST") throw new HttpError(405, "That action isn't available.");
+    const result = await addRecipeToGroceries(env.DB, recipeGroceries[1], parseServingsOverride(await readJson(request)));
+    return json(result);
+  }
+  const recipeMatch = /^\/api\/recipes\/([A-Za-z0-9-]{1,80})$/.exec(path);
+  if (recipeMatch) {
+    const id = recipeMatch[1];
+    if (method === "GET") {
+      const recipe = await getRecipe(env.DB, id);
+      if (!recipe) throw new HttpError(404, "That recipe isn't here anymore.");
+      return json({ recipe });
+    }
+    if (method === "PATCH") {
+      return json({ recipe: await updateRecipe(env.DB, id, parseRecipePatch(await readJson(request))) });
+    }
+    if (method === "DELETE") {
+      await deleteRecipe(env.DB, id);
+      return json({ ok: true });
+    }
+    throw new HttpError(405, "That action isn't available.");
+  }
+
+  if (path === "/api/plan/groceries") {
+    if (method !== "POST") throw new HttpError(405, "That action isn't available.");
+    const body = await readJson(request);
+    const range = dateRange(body.from, body.to, 21);
+    const planId = body.planId == null || body.planId === "" ? null : body.planId;
+    if (planId != null && (typeof planId !== "string" || !/^[A-Za-z0-9-]{1,80}$/.test(planId))) {
+      throw new HttpError(400, "That meal isn't planned anymore.");
+    }
+    return json(await addPlanGroceries(env.DB, range.from, range.to, planId));
+  }
+  if (path === "/api/plan" && method === "GET") {
+    const range = dateRange(new URL(request.url).searchParams.get("from"), new URL(request.url).searchParams.get("to"), 62);
+    return json({ plan: await listPlan(env.DB, range.from, range.to) });
+  }
+  if (path === "/api/plan" && method === "POST") {
+    const entry = await savePlan(env.DB, parsePlan(await readJson(request)));
+    return json({ entry });
+  }
+  const planMatch = /^\/api\/plan\/([A-Za-z0-9-]{1,80})$/.exec(path);
+  if (planMatch) {
+    if (method !== "DELETE") throw new HttpError(405, "That action isn't available.");
+    await deletePlan(env.DB, planMatch[1]);
+    return json({ ok: true });
+  }
+
+  if (path === "/api/events" && method === "GET") {
+    const range = dateRange(new URL(request.url).searchParams.get("from"), new URL(request.url).searchParams.get("to"), 62);
+    return json({ events: await listEvents(env.DB, range.from, range.to) });
+  }
+  if (path === "/api/events" && method === "POST") {
+    const event = await createEvent(env.DB, parseEvent(await readJson(request)));
+    return json({ event }, 201);
+  }
+  if (path === "/api/events" && method === "PUT") {
+    const range = dateRange(new URL(request.url).searchParams.get("from"), new URL(request.url).searchParams.get("to"), 62);
+    const events = await replaceEvents(env.DB, range, parseEventList(await readJson(request), range));
+    return json({ events });
+  }
+  const eventMatch = /^\/api\/events\/([A-Za-z0-9-]{1,80})$/.exec(path);
+  if (eventMatch) {
+    if (method !== "DELETE") throw new HttpError(405, "That action isn't available.");
+    await deleteEvent(env.DB, eventMatch[1]);
+    return json({ ok: true });
+  }
+
+  return null;
 }
 
 async function suggestProduct(code: string): Promise<{ name: string; brand: string | null } | null> {

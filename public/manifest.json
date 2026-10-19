@@ -1,13 +1,13 @@
 {
   "id": "/",
-  "name": "Family groceries",
-  "short_name": "Groceries",
-  "description": "A shared grocery list for Mark and Emma.",
+  "name": "Family food",
+  "short_name": "Food",
+  "description": "Dinners, recipes, and the grocery list for Mark and Emma.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
-  "background_color": "#f4efe4",
-  "theme_color": "#f4efe4",
+  "background_color": "#f6f5f2",
+  "theme_color": "#f6f5f2",
   "icons": [
     {
       "src": "/icons/icon-192.png",
