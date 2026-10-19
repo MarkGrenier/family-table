@@ -1,5 +1,6 @@
 import { HttpError } from "./http";
 import {
+  barcodeKeys,
   mergedCategory,
   type ItemInput,
   type ItemPatch,
@@ -16,6 +17,7 @@ export type Item = {
   checked: boolean;
   brand: string | null;
   asin: string | null;
+  barcode: string | null;
   staple: boolean;
   stapleId: string | null;
   createdAt: string;
@@ -29,8 +31,20 @@ export type Staple = {
   category: string;
   brand: string | null;
   asin: string | null;
+  barcode: string | null;
   createdAt: string;
   updatedAt: string;
+};
+
+export type BarcodeHit = {
+  stapleId: string | null;
+  alreadyOnList: boolean;
+  name: string;
+  store: Store;
+  category: string;
+  brand: string | null;
+  asin: string | null;
+  barcode: string;
 };
 
 type ItemRow = {
@@ -42,6 +56,7 @@ type ItemRow = {
   checked: number;
   brand: string | null;
   asin: string | null;
+  barcode: string | null;
   staple: number;
   staple_id: string | null;
   created_at: string;
@@ -55,14 +70,15 @@ type StapleRow = {
   category: string;
   brand: string | null;
   asin: string | null;
+  barcode: string | null;
   created_at: string;
   updated_at: string;
 };
 
 const ITEM_COLUMNS =
-  "id, name, quantity_note, store, category, checked, brand, asin, staple, staple_id, created_at, updated_at";
+  "id, name, quantity_note, store, category, checked, brand, asin, barcode, staple, staple_id, created_at, updated_at";
 
-const STAPLE_COLUMNS = "id, name, store, category, brand, asin, created_at, updated_at";
+const STAPLE_COLUMNS = "id, name, store, category, brand, asin, barcode, created_at, updated_at";
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -78,6 +94,7 @@ function toItem(row: ItemRow): Item {
     checked: row.checked === 1,
     brand: row.brand,
     asin: row.asin,
+    barcode: row.barcode,
     staple: row.staple === 1,
     stapleId: row.staple_id,
     createdAt: row.created_at,
@@ -93,12 +110,18 @@ function toStaple(row: StapleRow): Staple {
     category: row.category,
     brand: row.brand,
     asin: row.asin,
+    barcode: row.barcode,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
 }
 
-const INSERT_STAPLE = `INSERT INTO staples (${STAPLE_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`;
+const INSERT_STAPLE = `INSERT INTO staples (${STAPLE_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+
+function barcodeClause(code: string): { sql: string; keys: string[] } {
+  const keys = barcodeKeys(code);
+  return { sql: `barcode IN (${keys.map(() => "?").join(", ")})`, keys };
+}
 
 export async function listItems(db: D1Database): Promise<Item[]> {
   const result = await db.prepare(`SELECT ${ITEM_COLUMNS} FROM items ORDER BY created_at ASC`).all<ItemRow>();
@@ -122,6 +145,12 @@ async function getStaple(db: D1Database, id: string): Promise<Staple | null> {
   return row ? toStaple(row) : null;
 }
 
+async function findStapleByBarcode(db: D1Database, code: string): Promise<Staple | null> {
+  const { sql, keys } = barcodeClause(code);
+  const row = await db.prepare(`SELECT ${STAPLE_COLUMNS} FROM staples WHERE ${sql} LIMIT 1`).bind(...keys).first<StapleRow>();
+  return row ? toStaple(row) : null;
+}
+
 async function openItemForStaple(db: D1Database, stapleId: string): Promise<Item | null> {
   const row = await db
     .prepare(`SELECT ${ITEM_COLUMNS} FROM items WHERE staple_id = ? AND checked = 0 LIMIT 1`)
@@ -130,23 +159,92 @@ async function openItemForStaple(db: D1Database, stapleId: string): Promise<Item
   return row ? toItem(row) : null;
 }
 
+async function openItemForBarcode(db: D1Database, code: string): Promise<Item | null> {
+  const { sql, keys } = barcodeClause(code);
+  const row = await db
+    .prepare(`SELECT ${ITEM_COLUMNS} FROM items WHERE ${sql} AND checked = 0 LIMIT 1`)
+    .bind(...keys)
+    .first<ItemRow>();
+  return row ? toItem(row) : null;
+}
+
+export async function lookupBarcode(db: D1Database, code: string): Promise<BarcodeHit | null> {
+  const staple = await findStapleByBarcode(db, code);
+  if (staple) {
+    const open = await openItemForStaple(db, staple.id);
+    return {
+      stapleId: staple.id,
+      alreadyOnList: Boolean(open),
+      name: staple.name,
+      store: staple.store,
+      category: staple.category,
+      brand: staple.brand,
+      asin: staple.asin,
+      barcode: staple.barcode || code,
+    };
+  }
+  const { sql, keys } = barcodeClause(code);
+  const row = await db
+    .prepare(`SELECT ${ITEM_COLUMNS} FROM items WHERE ${sql} ORDER BY updated_at DESC LIMIT 1`)
+    .bind(...keys)
+    .first<ItemRow>();
+  if (!row) return null;
+  const item = toItem(row);
+  const open = await openItemForBarcode(db, code);
+  return {
+    stapleId: item.stapleId,
+    alreadyOnList: Boolean(open),
+    name: item.name,
+    store: item.store,
+    category: item.category,
+    brand: item.brand,
+    asin: item.asin,
+    barcode: item.barcode || code,
+  };
+}
+
+function stapleBind(id: string, fields: StapleInput, now: string) {
+  return [id, fields.name, fields.store, fields.category, fields.brand, fields.asin, fields.barcode, now, now] as const;
+}
+
 export async function createItem(db: D1Database, input: ItemInput): Promise<Item> {
   const id = crypto.randomUUID();
   const now = nowIso();
-  const stapleId = input.staple ? crypto.randomUUID() : null;
+  const remember = Boolean(input.barcode) || input.staple;
+  let stapleId: string | null = null;
   const statements: D1PreparedStatement[] = [];
-  if (stapleId) {
-    statements.push(
-      db
-        .prepare(INSERT_STAPLE)
-        .bind(stapleId, input.name, input.store, input.category, input.brand, input.asin, now, now),
-    );
+  const stapleFields: StapleInput = {
+    name: input.name,
+    store: input.store,
+    category: input.category,
+    brand: input.brand,
+    asin: input.asin,
+    barcode: input.barcode,
+  };
+
+  if (input.barcode) {
+    const existing = await findStapleByBarcode(db, input.barcode);
+    if (existing) {
+      stapleId = existing.id;
+      statements.push(
+        db
+          .prepare(
+            `UPDATE staples SET name = ?, store = ?, category = ?, brand = ?, asin = ?, barcode = ?, updated_at = ? WHERE id = ?`,
+          )
+          .bind(stapleFields.name, stapleFields.store, stapleFields.category, stapleFields.brand, stapleFields.asin, stapleFields.barcode, now, stapleId),
+      );
+    }
   }
+
+  if (remember && !stapleId) {
+    stapleId = crypto.randomUUID();
+    statements.push(db.prepare(INSERT_STAPLE).bind(...stapleBind(stapleId, stapleFields, now)));
+  }
+
+  const stapleFlag = remember ? 1 : 0;
   statements.push(
     db
-      .prepare(
-        `INSERT INTO items (${ITEM_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      )
+      .prepare(`INSERT INTO items (${ITEM_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .bind(
         id,
         input.name,
@@ -156,13 +254,24 @@ export async function createItem(db: D1Database, input: ItemInput): Promise<Item
         input.checked ? 1 : 0,
         input.brand,
         input.asin,
-        input.staple ? 1 : 0,
+        input.barcode,
+        stapleFlag,
         stapleId,
         now,
         now,
       ),
   );
-  await db.batch(statements);
+
+  try {
+    await db.batch(statements);
+  } catch (error) {
+    if (stapleId) {
+      const existing = await openItemForStaple(db, stapleId);
+      if (existing) return existing;
+    }
+    throw error;
+  }
+
   const created = await getItem(db, id);
   if (!created) throw new HttpError(500, "Something went wrong. Try again.");
   return created;
@@ -183,6 +292,7 @@ export async function updateItem(db: D1Database, id: string, patch: ItemPatch): 
     checked: patch.checked ?? existing.checked,
     brand: patch.brand === undefined ? existing.brand : patch.brand,
     asin: patch.asin === undefined ? existing.asin : patch.asin,
+    barcode: patch.barcode === undefined ? existing.barcode : patch.barcode,
     staple: patch.staple ?? existing.staple,
   };
 
@@ -193,6 +303,7 @@ export async function updateItem(db: D1Database, id: string, patch: ItemPatch): 
     category: next.category,
     brand: next.brand,
     asin: next.asin,
+    barcode: next.barcode,
   };
   const touchesTemplate =
     patch.staple !== undefined ||
@@ -200,7 +311,8 @@ export async function updateItem(db: D1Database, id: string, patch: ItemPatch): 
     patch.store !== undefined ||
     patch.category !== undefined ||
     patch.brand !== undefined ||
-    patch.asin !== undefined;
+    patch.asin !== undefined ||
+    patch.barcode !== undefined;
 
   const statements: D1PreparedStatement[] = [];
   let stapleId = existing.stapleId;
@@ -208,18 +320,23 @@ export async function updateItem(db: D1Database, id: string, patch: ItemPatch): 
   if (next.staple && (touchesTemplate || !stapleId)) {
     if (!stapleId) {
       stapleId = crypto.randomUUID();
-      statements.push(
-        db
-          .prepare(INSERT_STAPLE)
-          .bind(stapleId, stapleFields.name, stapleFields.store, stapleFields.category, stapleFields.brand, stapleFields.asin, now, now),
-      );
+      statements.push(db.prepare(INSERT_STAPLE).bind(...stapleBind(stapleId, stapleFields, now)));
     } else if (touchesTemplate) {
       statements.push(
         db
           .prepare(
-            `UPDATE staples SET name = ?, store = ?, category = ?, brand = ?, asin = ?, updated_at = ? WHERE id = ?`,
+            `UPDATE staples SET name = ?, store = ?, category = ?, brand = ?, asin = ?, barcode = ?, updated_at = ? WHERE id = ?`,
           )
-          .bind(stapleFields.name, stapleFields.store, stapleFields.category, stapleFields.brand, stapleFields.asin, now, stapleId),
+          .bind(
+            stapleFields.name,
+            stapleFields.store,
+            stapleFields.category,
+            stapleFields.brand,
+            stapleFields.asin,
+            stapleFields.barcode,
+            now,
+            stapleId,
+          ),
       );
     }
   } else if (!next.staple && patch.staple === false && existing.stapleId) {
@@ -234,7 +351,7 @@ export async function updateItem(db: D1Database, id: string, patch: ItemPatch): 
     db
       .prepare(
         `UPDATE items
-         SET name = ?, quantity_note = ?, store = ?, category = ?, checked = ?, brand = ?, asin = ?, staple = ?, staple_id = ?, updated_at = ?
+         SET name = ?, quantity_note = ?, store = ?, category = ?, checked = ?, brand = ?, asin = ?, barcode = ?, staple = ?, staple_id = ?, updated_at = ?
          WHERE id = ?`,
       )
       .bind(
@@ -245,6 +362,7 @@ export async function updateItem(db: D1Database, id: string, patch: ItemPatch): 
         next.checked ? 1 : 0,
         next.brand,
         next.asin,
+        next.barcode,
         next.staple ? 1 : 0,
         stapleId,
         now,
@@ -274,12 +392,24 @@ export async function clearChecked(db: D1Database, store: Store): Promise<number
 }
 
 export async function createStaple(db: D1Database, input: StapleInput): Promise<Staple> {
+  if (input.barcode) {
+    const existing = await findStapleByBarcode(db, input.barcode);
+    if (existing) {
+      const now = nowIso();
+      await db
+        .prepare(
+          `UPDATE staples SET name = ?, store = ?, category = ?, brand = ?, asin = ?, barcode = ?, updated_at = ? WHERE id = ?`,
+        )
+        .bind(input.name, input.store, input.category, input.brand, input.asin, input.barcode, now, existing.id)
+        .run();
+      const updated = await getStaple(db, existing.id);
+      if (!updated) throw new HttpError(500, "Something went wrong. Try again.");
+      return updated;
+    }
+  }
   const id = crypto.randomUUID();
   const now = nowIso();
-  await db
-    .prepare(INSERT_STAPLE)
-    .bind(id, input.name, input.store, input.category, input.brand, input.asin, now, now)
-    .run();
+  await db.prepare(INSERT_STAPLE).bind(...stapleBind(id, input, now)).run();
   const created = await getStaple(db, id);
   if (!created) throw new HttpError(500, "Something went wrong. Try again.");
   return created;
@@ -309,8 +439,22 @@ export async function addStapleToList(
   const now = nowIso();
   try {
     await db
-      .prepare(`INSERT INTO items (${ITEM_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .bind(itemId, staple.name, null, staple.store, staple.category, 0, staple.brand, staple.asin, 1, staple.id, now, now)
+      .prepare(`INSERT INTO items (${ITEM_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .bind(
+        itemId,
+        staple.name,
+        null,
+        staple.store,
+        staple.category,
+        0,
+        staple.brand,
+        staple.asin,
+        staple.barcode,
+        1,
+        staple.id,
+        now,
+        now,
+      )
       .run();
   } catch (error) {
     const raced = await openItemForStaple(db, id);

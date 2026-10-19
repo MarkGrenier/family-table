@@ -13,6 +13,9 @@ const CATEGORY_ORDER = {
   amazon: ["general"],
 };
 
+const STORE_TABS = ["costco", "local", "amazon"];
+const savedTab = loadTab();
+
 const state = {
   booting: true,
   authed: false,
@@ -21,17 +24,20 @@ const state = {
   items: [],
   staples: [],
   snap: "",
-  tab: loadTab(),
-  category: { costco: "shelf", local: "produce", amazon: "general" },
+  tab: savedTab,
+  listTab: savedTab === "staples" ? "costco" : savedTab,
   quickName: "",
   passcode: "",
   loginError: "",
   sheet: null,
   confirm: null,
+  scanner: null,
   toast: "",
+  onUndo: null,
   saving: false,
   pendingRender: false,
   pendingIds: new Set(),
+  hiddenIds: new Set(),
 };
 
 let pullSeq = 0;
@@ -40,9 +46,9 @@ let toastTimer = 0;
 
 function shouldDelayRender() {
   const active = document.activeElement;
-  if (state.sheet || state.confirm) return true;
+  if (state.sheet || state.confirm || state.scanner) return true;
   if (!active) return false;
-  return active.id === "quick-name" || active.id === "passcode";
+  return active.id === "quick-name" || active.id === "passcode" || active.id === "scan-name" || active.id === "scan-code";
 }
 
 function loadTab() {
@@ -78,21 +84,18 @@ function snapshot() {
   return JSON.stringify(state.items) + "|" + JSON.stringify(state.staples);
 }
 
-function showToast(message) {
+function showToast(message, onUndo) {
   state.toast = message;
-  const el = document.getElementById("toast");
-  if (el) {
-    el.hidden = false;
-    el.textContent = message;
-  } else {
-    render();
-  }
+  state.onUndo = onUndo || null;
+  const existing = document.getElementById("toast");
+  if (existing) existing.outerHTML = toastHtml();
+  else document.getElementById("app")?.insertAdjacentHTML("beforeend", toastHtml());
   window.clearTimeout(toastTimer);
   toastTimer = window.setTimeout(() => {
     state.toast = "";
-    const node = document.getElementById("toast");
-    if (node) node.remove();
-  }, 2600);
+    state.onUndo = null;
+    document.getElementById("toast")?.remove();
+  }, onUndo ? 4800 : 2600);
 }
 
 function render(options = {}) {
@@ -174,10 +177,14 @@ function tabButton(store, label) {
   return `<button type="button" role="tab" data-action="tab" data-store="${store}" aria-selected="${selected ? "true" : "false"}" aria-label="${esc(aria)}">${esc(text)}</button>`;
 }
 
+function visibleItem(item) {
+  return !state.hiddenIds.has(item.id);
+}
+
 function storeHtml(store) {
-  const open = state.items.filter((item) => item.store === store && !item.checked);
+  const open = state.items.filter((item) => item.store === store && !item.checked && visibleItem(item));
   const checked = state.items
-    .filter((item) => item.store === store && item.checked)
+    .filter((item) => item.store === store && item.checked && visibleItem(item))
     .sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1));
   const categories = store === "amazon" ? [] : CATEGORY_ORDER[store];
   let groups = "";
@@ -211,23 +218,13 @@ function newestFirst(a, b) {
 }
 
 function quickHtml(store) {
-  const chips =
-    store === "amazon"
-      ? ""
-      : `<div class="chips" role="group" aria-label="Aisle">${CATEGORY_ORDER[store]
-          .map((category) => {
-            const on = state.category[store] === category;
-            return `<button type="button" data-action="chip" data-category="${category}" aria-pressed="${on ? "true" : "false"}">${esc(CATEGORY_LABEL[category])}</button>`;
-          })
-          .join("")}</div>`;
   return `<form id="quick-form" class="quick">
     <div class="quick-row">
       <label class="sr-only" for="quick-name">Add an item</label>
       <input id="quick-name" type="text" maxlength="80" enterkeyhint="done" autocomplete="off" placeholder="${esc(placeholder(store))}" value="${esc(state.quickName)}">
       <button class="btn-primary btn-add" type="submit" ${state.saving ? "disabled" : ""}>Add</button>
+      <button class="btn-secondary btn-scan" type="button" data-action="scan">Scan</button>
     </div>
-    ${chips}
-    <button class="linkish full" type="button" data-action="details">Add details</button>
   </form>`;
 }
 
@@ -235,6 +232,32 @@ function placeholder(store) {
   if (store === "local") return "Add something for the local store";
   if (store === "amazon") return "Add something for Amazon";
   return "Add something for Costco";
+}
+
+function defaultsFor(name, store) {
+  const key = name.trim().toLowerCase();
+  const matches = [...state.staples, ...state.items].filter((entry) => entry.name.trim().toLowerCase() === key);
+  const match = matches.find((entry) => entry.store === store) || matches[0] || null;
+  const allowed = CATEGORY_ORDER[store] || CATEGORY_ORDER.costco;
+  let category = store === "amazon" ? "general" : "shelf";
+  if (match && allowed.includes(match.category)) category = match.category;
+  const brand = (match && match.brand) || (matches.find((entry) => entry.brand) || {}).brand || "";
+  return { category, brand };
+}
+
+function rememberTab(tab) {
+  try {
+    localStorage.setItem("grocery-tab", tab);
+  } catch {
+    /* private mode */
+  }
+}
+
+function goToStore(store) {
+  const next = STORE_TABS.includes(store) ? store : "costco";
+  state.tab = next;
+  state.listTab = next;
+  rememberTab(next);
 }
 
 function itemHtml(item) {
@@ -246,6 +269,7 @@ function itemHtml(item) {
   const note = bits.join(" · ");
   const label = item.checked ? `Put ${item.name} back on the list` : `Mark ${item.name} as bought`;
   return `<li class="item${item.checked ? " checked" : ""}" data-id="${esc(item.id)}">
+    <span class="swipe-label">Remove</span>
     <button class="check" type="button" data-action="toggle" data-id="${esc(item.id)}" aria-pressed="${item.checked ? "true" : "false"}" aria-label="${esc(label)}" ${state.pendingIds.has(item.id) ? "disabled" : ""}>
       ${item.checked ? boxOn() : `<span class="box" aria-hidden="true"></span>`}
       <span class="item-text">
@@ -253,7 +277,6 @@ function itemHtml(item) {
         ${note ? `<span class="note">${esc(note)}</span>` : ""}
       </span>
     </button>
-    <button class="edit" type="button" data-action="edit" data-id="${esc(item.id)}">Edit</button>
   </li>`;
 }
 
@@ -269,8 +292,12 @@ function staplesHtml() {
   const list = staples.length
     ? `<ul class="staples">${staples.map(stapleHtml).join("")}</ul>`
     : `<p class="empty">No staples yet. Staples are things you buy again and again, like oat milk.</p>`;
-  return `<p class="intro">Things you buy often. Add one to a store when you need it this week.</p>
-    <p class="stack"><button class="btn-primary full" type="button" data-action="new-staple">Add a staple</button></p>
+  return `<button class="back" type="button" data-action="back">Back to the list</button>
+    <p class="intro">Things you buy often. Add one to a store when you need it this week.</p>
+    <div class="stack">
+      <button class="btn-primary full" type="button" data-action="new-staple">Add a staple</button>
+      <button class="btn-secondary full" type="button" data-action="scan">Scan a barcode</button>
+    </div>
     ${list}`;
 }
 
@@ -293,6 +320,7 @@ function stapleHtml(staple) {
 
 function overlayHtml() {
   if (state.confirm) return confirmHtml();
+  if (state.scanner) return scannerHtml();
   if (state.sheet) return sheetHtml();
   return "";
 }
@@ -330,6 +358,7 @@ function sheetHtml() {
     : "";
   return `<div class="backdrop" data-action="backdrop">
     <form class="sheet" id="sheet-form" role="dialog" aria-modal="true" aria-labelledby="sheet-title">
+      <button class="back" type="button" data-action="back">Back</button>
       <h2 id="sheet-title">${esc(title)}</h2>
       <div class="stack">
         <label class="field" for="f-name">Name
@@ -366,7 +395,6 @@ function sheetHtml() {
         ${sheet.error ? `<p class="error" role="alert">${esc(sheet.error)}</p>` : ""}
         <button class="btn-primary full" type="submit" ${state.saving ? "disabled" : ""}>${stapleMode ? "Save staple" : "Save"}</button>
         ${sheet.id ? `<button class="btn-danger full" type="button" data-action="delete-item" data-id="${esc(sheet.id)}">Delete this item</button>` : ""}
-        <button class="btn-secondary full" type="button" data-action="close-sheet">Cancel</button>
       </div>
     </form>
   </div>`;
@@ -374,7 +402,43 @@ function sheetHtml() {
 
 function toastHtml() {
   if (!state.toast) return "";
-  return `<div id="toast" class="toast" role="status">${esc(state.toast)}</div>`;
+  if (state.onUndo) {
+    return `<button id="toast" class="toast" type="button" data-action="undo"><span>${esc(state.toast)}</span><span class="undo-label">Undo</span></button>`;
+  }
+  return `<div id="toast" class="toast" role="status"><span>${esc(state.toast)}</span></div>`;
+}
+
+function scannerHtml() {
+  const scanner = state.scanner;
+  if (scanner.phase === "name") {
+    return `<div class="backdrop" data-action="backdrop">
+      <form class="sheet" id="scan-name-form" role="dialog" aria-modal="true" aria-labelledby="scan-title">
+        <button class="back" type="button" data-action="back">Back</button>
+        <h2 id="scan-title">New item</h2>
+        <p class="intro">${scanner.brand ? esc(scanner.brand) : "Type what this is. Next time the scan will add it."}</p>
+        <div class="stack">
+          <label class="field" for="scan-name">Name
+            <input id="scan-name" type="text" maxlength="80" value="${esc(scanner.name)}" placeholder="Name">
+          </label>
+          ${scanner.error ? `<p class="error" role="alert">${esc(scanner.error)}</p>` : ""}
+          <button class="btn-primary full" type="submit" ${state.saving ? "disabled" : ""}>Add it</button>
+        </div>
+      </form>
+    </div>`;
+  }
+  return `<div class="scanner" role="dialog" aria-modal="true" aria-labelledby="scan-title">
+    <button class="back" type="button" data-action="back">Back</button>
+    <h2 id="scan-title">Scan a barcode</h2>
+    <p class="intro">Point the camera at the barcode on the package.</p>
+    <video id="scan-video" playsinline autoplay muted></video>
+    ${scanner.error ? `<p class="error" role="alert">${esc(scanner.error)}</p>` : ""}
+    <form id="scan-code-form" class="stack">
+      <label class="field" for="scan-code">Or type the barcode
+        <input id="scan-code" type="text" inputmode="numeric" autocomplete="off" maxlength="20" placeholder="Numbers under the bars">
+      </label>
+      <button class="btn-primary full" type="submit">Look up</button>
+    </form>
+  </div>`;
 }
 
 function readSheet() {
@@ -408,7 +472,7 @@ function blankSheet(mode, store) {
     name: mode === "item" ? state.quickName : "",
     quantityNote: "",
     store: chosen,
-    category: chosen === "amazon" ? "general" : state.category[chosen] || CATEGORY_ORDER[chosen][0],
+    category: chosen === "amazon" ? "general" : CATEGORY_ORDER[chosen][0],
     brand: "",
     asin: "",
     staple: mode === "staple",
@@ -510,8 +574,10 @@ async function quickAdd(event) {
     document.getElementById("quick-name")?.focus();
     return;
   }
-  const store = state.tab;
-  const category = store === "amazon" ? "general" : state.category[store];
+  const store = STORE_TABS.includes(state.tab) ? state.tab : state.listTab;
+  const remembered = defaultsFor(name, store);
+  const payload = { name, store, category: remembered.category, staple: false };
+  if (remembered.brand) payload.brand = remembered.brand;
   inflight += 1;
   state.saving = true;
   render({ keepScroll: true, focus: "quick-name" });
@@ -519,7 +585,7 @@ async function quickAdd(event) {
     const res = await fetch("/api/items", {
       method: "POST",
       headers: jsonHeaders(),
-      body: JSON.stringify({ name, store, category, staple: false }),
+      body: JSON.stringify(payload),
     });
     const body = await res.json().catch(() => ({}));
     if (!res.ok) {
@@ -663,17 +729,20 @@ async function removeStaple(id) {
   }
 }
 
-async function removeItem(id) {
+async function removeItem(id, options = {}) {
   inflight += 1;
-  state.confirm = null;
-  state.sheet = null;
+  if (!options.quiet) {
+    state.confirm = null;
+    state.sheet = null;
+  }
   try {
     const res = await fetch(`/api/items/${id}`, { method: "DELETE" });
     const body = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(body.error || "status");
-    showToast("Removed");
+    if (!options.quiet) showToast("Removed");
     await pull({ force: true });
   } catch {
+    state.hiddenIds.delete(id);
     showToast("Couldn't remove that.");
     render({ keepScroll: true });
   } finally {
@@ -743,11 +812,536 @@ function askRemoveStaple(id) {
   render({ keepScroll: false });
 }
 
+let shieldUntil = 0;
+let scanControls = null;
+let scanBusy = false;
+let scanSession = 0;
+let scannerScript = null;
+let pendingDelete = null;
+let deleteToken = 0;
+
+const gesture = {
+  id: 0,
+  pointerId: null,
+  startX: 0,
+  startY: 0,
+  x: 0,
+  y: 0,
+  kind: null,
+  itemEl: null,
+  itemId: "",
+  axis: null,
+  longTimer: 0,
+  longFired: false,
+  moved: false,
+  suppressClick: false,
+  suppressToken: 0,
+};
+
+function loadScannerScript() {
+  if (window.GroceryScanner) return Promise.resolve();
+  if (!scannerScript) {
+    scannerScript = new Promise((resolve, reject) => {
+      const script = document.createElement("script");
+      script.src = "/vendor/scanner.js";
+      script.onload = () => resolve();
+      script.onerror = () => {
+        scannerScript = null;
+        script.remove();
+        reject(new Error("script"));
+      };
+      document.body.appendChild(script);
+    });
+  }
+  return scannerScript;
+}
+
+function stopCamera() {
+  scanSession += 1;
+  const controls = scanControls;
+  scanControls = null;
+  if (controls) {
+    try {
+      controls.stop();
+    } catch {
+      /* already stopped */
+    }
+  }
+  const video = document.getElementById("scan-video");
+  const stream = video && video.srcObject;
+  if (stream && typeof stream.getTracks === "function") {
+    stream.getTracks().forEach((track) => track.stop());
+  }
+  if (video) video.srcObject = null;
+}
+
+function setScannerError(message) {
+  if (!state.scanner) return;
+  state.scanner.error = message;
+  const box = document.querySelector(".scanner");
+  if (!box) {
+    render({ keepScroll: true });
+    return;
+  }
+  let el = box.querySelector(".error");
+  if (!message) {
+    el?.remove();
+    return;
+  }
+  if (!el) {
+    el = document.createElement("p");
+    el.className = "error";
+    el.setAttribute("role", "alert");
+    box.querySelector("form")?.before(el);
+  }
+  el.textContent = message;
+}
+
+function openScanner() {
+  stopCamera();
+  const session = ++scanSession;
+  scanBusy = false;
+  state.sheet = null;
+  state.confirm = null;
+  state.scanner = { phase: "camera", error: "", name: "", brand: "", code: "" };
+  render({ keepScroll: false });
+  if (!navigator.mediaDevices || typeof navigator.mediaDevices.getUserMedia !== "function") {
+    setScannerError("The camera didn't open. Type the barcode instead.");
+    return;
+  }
+  const streamPromise = navigator.mediaDevices.getUserMedia({
+    video: { facingMode: { ideal: "environment" } },
+    audio: false,
+  });
+  const scriptPromise = loadScannerScript();
+  streamPromise
+    .then(async (stream) => {
+      if (session !== scanSession || !state.scanner || state.scanner.phase !== "camera") {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
+      const live = document.getElementById("scan-video");
+      if (!live) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
+      live.srcObject = stream;
+      live.playsInline = true;
+      live.muted = true;
+      try {
+        await live.play();
+      } catch {
+        /* the scanner will try again */
+      }
+      try {
+        await scriptPromise;
+      } catch {
+        if (session === scanSession) setScannerError("The scanner didn't load. Type the barcode instead.");
+        return;
+      }
+      if (session !== scanSession || !state.scanner || state.scanner.phase !== "camera") {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
+      const Reader = window.GroceryScanner && window.GroceryScanner.BrowserMultiFormatReader;
+      if (!Reader) {
+        setScannerError("The scanner didn't load. Type the barcode instead.");
+        return;
+      }
+      try {
+        const controls = await new Reader().decodeFromStream(stream, live, (result) => {
+          if (!result || typeof result.getText !== "function") return;
+          handleScan(result.getText());
+        });
+        if (session !== scanSession) {
+          try {
+            controls.stop();
+          } catch {
+            /* closed */
+          }
+          return;
+        }
+        scanControls = controls;
+      } catch {
+        if (session === scanSession) setScannerError("The camera didn't open. Type the barcode instead.");
+      }
+    })
+    .catch(() => {
+      if (session === scanSession) setScannerError("The camera didn't open. Type the barcode instead.");
+    });
+}
+
+async function addKnownBarcode(body, digits) {
+  inflight += 1;
+  try {
+    const res = body.stapleId
+      ? await fetch(`/api/staples/${body.stapleId}/add`, { method: "POST" })
+      : await fetch("/api/items", {
+          method: "POST",
+          headers: jsonHeaders(),
+          body: JSON.stringify({
+            name: body.name,
+            store: body.store,
+            category: body.category,
+            brand: body.brand,
+            asin: body.asin,
+            barcode: digits,
+            staple: true,
+          }),
+        });
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 401) {
+      state.authed = false;
+      render();
+      return;
+    }
+    if (!res.ok) throw new Error(data.error || "status");
+    goToStore(body.store);
+    const place = STORE_LABEL[body.store] || "the list";
+    showToast(data.alreadyOnList ? `Already on the ${place} list` : `Added to ${place}`);
+    await pull({ force: true });
+  } catch {
+    showToast("Couldn't add that.");
+    render({ keepScroll: true });
+  } finally {
+    inflight -= 1;
+    scanBusy = false;
+  }
+}
+
+async function handleScan(raw) {
+  if (scanBusy || !state.scanner || state.scanner.phase !== "camera") return;
+  const digits = String(raw || "").replace(/\D/g, "");
+  if (digits.length < 6 || digits.length > 14) {
+    setScannerError("That didn't look like a product barcode.");
+    return;
+  }
+  scanBusy = true;
+  setScannerError("");
+  try {
+    const res = await fetch(`/api/barcode/${digits}`, { headers: { Accept: "application/json" } });
+    const body = await res.json().catch(() => ({}));
+    if (res.status === 401) {
+      stopCamera();
+      state.scanner = null;
+      state.authed = false;
+      render();
+      return;
+    }
+    if (!res.ok) {
+      scanBusy = false;
+      setScannerError(body.error || "Couldn't look that up.");
+      return;
+    }
+    stopCamera();
+    if (body.known && body.alreadyOnList) {
+      state.scanner = null;
+      goToStore(body.store);
+      showToast(`${body.name} is already on the ${STORE_LABEL[body.store] || "list"}`);
+      scanBusy = false;
+      render({ keepScroll: false });
+      window.scrollTo(0, 0);
+      return;
+    }
+    if (body.known) {
+      state.scanner = null;
+      render({ keepScroll: false });
+      await addKnownBarcode(body, digits);
+      return;
+    }
+    const suggestion = body.suggestion || {};
+    state.scanner = {
+      phase: "name",
+      code: digits,
+      name: suggestion.name || "",
+      brand: suggestion.brand || "",
+      error: "",
+    };
+    scanBusy = false;
+    render({ focus: "scan-name", keepScroll: false });
+  } catch {
+    scanBusy = false;
+    setScannerError("Couldn't reach the list. Type the barcode instead.");
+  }
+}
+
+async function saveScannedName(event) {
+  event.preventDefault();
+  const scanner = state.scanner;
+  if (!scanner) return;
+  const typed = document.getElementById("scan-name");
+  const name = (typed ? typed.value : scanner.name).trim();
+  scanner.name = name;
+  if (!name) {
+    scanner.error = "Type a name.";
+    render({ focus: "scan-name" });
+    return;
+  }
+  const store = STORE_TABS.includes(state.listTab) ? state.listTab : "costco";
+  const remembered = defaultsFor(name, store);
+  const brand = scanner.brand || remembered.brand || null;
+  inflight += 1;
+  state.saving = true;
+  scanner.error = "";
+  render({ keepScroll: true });
+  try {
+    const res = await fetch("/api/items", {
+      method: "POST",
+      headers: jsonHeaders(),
+      body: JSON.stringify({
+        name,
+        store,
+        category: remembered.category,
+        brand,
+        barcode: scanner.code,
+        staple: true,
+      }),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      scanner.error = body.error || "Couldn't add that.";
+      state.saving = false;
+      render({ focus: "scan-name" });
+      return;
+    }
+    state.scanner = null;
+    state.saving = false;
+    goToStore(store);
+    showToast(`Added to ${STORE_LABEL[store]}`);
+    await pull({ force: true });
+  } catch {
+    scanner.error = "Couldn't reach the list.";
+    state.saving = false;
+    render({ keepScroll: true });
+  } finally {
+    inflight -= 1;
+  }
+}
+
+function backToList() {
+  stopCamera();
+  scanBusy = false;
+  state.sheet = null;
+  state.scanner = null;
+  if (!STORE_TABS.includes(state.tab)) {
+    state.tab = state.listTab;
+    rememberTab(state.tab);
+  }
+  render({ keepScroll: false });
+  window.scrollTo(0, 0);
+}
+
+function shiftTab(direction) {
+  const index = STORE_TABS.indexOf(state.tab);
+  if (index < 0) return;
+  const next = STORE_TABS[(index + direction + STORE_TABS.length) % STORE_TABS.length];
+  goToStore(next);
+  render({ keepScroll: false });
+  window.scrollTo(0, 0);
+}
+
+function openEdit(id) {
+  const item = state.items.find((entry) => entry.id === id);
+  if (!item) return;
+  shieldUntil = Date.now() + 700;
+  state.sheet = {
+    mode: "item",
+    id: item.id,
+    name: item.name,
+    quantityNote: item.quantityNote || "",
+    store: item.store,
+    category: item.category,
+    brand: item.brand || "",
+    asin: item.asin || "",
+    staple: Boolean(item.staple),
+    error: "",
+  };
+  render({ keepScroll: false, focus: "f-name" });
+}
+
+async function commitDelete(id) {
+  await removeItem(id, { quiet: true });
+  state.hiddenIds.delete(id);
+}
+
+function stageDelete(id) {
+  const item = state.items.find((entry) => entry.id === id);
+  if (!item || state.hiddenIds.has(id)) return;
+  if (pendingDelete) {
+    const previous = pendingDelete;
+    window.clearTimeout(previous.timer);
+    pendingDelete = null;
+    commitDelete(previous.id);
+  }
+  const token = ++deleteToken;
+  state.hiddenIds.add(id);
+  pendingDelete = {
+    id,
+    token,
+    timer: window.setTimeout(() => {
+      if (!pendingDelete || pendingDelete.token !== token) return;
+      pendingDelete = null;
+      commitDelete(id);
+    }, 4800),
+  };
+  showToast(`Removed ${item.name}`, () => undoDelete(token, id));
+  render({ keepScroll: true });
+}
+
+function undoDelete(token, id) {
+  if (!pendingDelete || pendingDelete.token !== token) return;
+  window.clearTimeout(pendingDelete.timer);
+  pendingDelete = null;
+  state.hiddenIds.delete(id);
+  state.toast = "";
+  state.onUndo = null;
+  window.clearTimeout(toastTimer);
+  render({ keepScroll: true });
+}
+
+function gestureKind(target, x) {
+  if (!state.authed || state.confirm) return "ignore";
+  if (target.closest("#toast")) return "ignore";
+  const secondary = Boolean(state.sheet || state.scanner || state.tab === "staples");
+  const field = target.closest("input, textarea, select");
+  if (field && !(secondary && x < 28)) return "ignore";
+  if (secondary) return "back";
+  const item = target.closest(".item");
+  if (item) return "item";
+  if (STORE_TABS.includes(state.tab)) return "nav";
+  return "ignore";
+}
+
+function resetGesture() {
+  window.clearTimeout(gesture.longTimer);
+  gesture.pointerId = null;
+  gesture.kind = null;
+  gesture.axis = null;
+  gesture.itemEl?.classList.remove("dragging");
+  gesture.itemEl = null;
+}
+
+document.body.addEventListener("pointerdown", (event) => {
+  if (!event.isPrimary || event.button !== 0) return;
+  if (gesture.pointerId != null) return;
+  const target = event.target;
+  if (!(target instanceof Element)) return;
+  const kind = gestureKind(target, event.clientX);
+  if (kind === "ignore") return;
+  gesture.id += 1;
+  const id = gesture.id;
+  gesture.pointerId = event.pointerId;
+  gesture.startX = event.clientX;
+  gesture.startY = event.clientY;
+  gesture.x = event.clientX;
+  gesture.y = event.clientY;
+  gesture.kind = kind;
+  gesture.itemEl = kind === "item" ? target.closest(".item") : null;
+  gesture.itemId = gesture.itemEl ? gesture.itemEl.dataset.id || "" : "";
+  gesture.axis = null;
+  gesture.longFired = false;
+  gesture.moved = false;
+  window.clearTimeout(gesture.longTimer);
+  if (kind === "item") {
+    gesture.longTimer = window.setTimeout(() => {
+      if (gesture.id !== id || gesture.moved) return;
+      gesture.longFired = true;
+      gesture.suppressClick = true;
+      const check = gesture.itemEl && gesture.itemEl.querySelector(".check");
+      if (check) check.style.transform = "";
+      openEdit(gesture.itemId);
+    }, 550);
+  }
+});
+
+document.body.addEventListener("pointermove", (event) => {
+  if (event.pointerId !== gesture.pointerId) return;
+  gesture.x = event.clientX;
+  gesture.y = event.clientY;
+  const dx = gesture.x - gesture.startX;
+  const dy = gesture.y - gesture.startY;
+  if (!gesture.axis) {
+    if (Math.abs(dx) < 18 && Math.abs(dy) < 18) return;
+    gesture.moved = true;
+    window.clearTimeout(gesture.longTimer);
+    const edgeBack = gesture.kind === "back" && gesture.startX < 36;
+    const mostlyVertical = edgeBack ? Math.abs(dy) > Math.abs(dx) * 1.75 : Math.abs(dy) > Math.abs(dx);
+    if (mostlyVertical) {
+      gesture.axis = "y";
+      return;
+    }
+    gesture.axis = "x";
+    gesture.itemEl?.classList.add("dragging");
+    try {
+      document.body.setPointerCapture(event.pointerId);
+    } catch {
+      /* already captured */
+    }
+  }
+  if (gesture.axis !== "x" || gesture.kind !== "item" || !gesture.itemEl) return;
+  const shift = Math.max(Math.min(0, dx), -140);
+  const check = gesture.itemEl.querySelector(".check");
+  if (check) check.style.transform = `translateX(${shift}px)`;
+});
+
+function finishPointer(event) {
+  if (event.pointerId !== gesture.pointerId) return;
+  const dx = gesture.x - gesture.startX;
+  const kind = gesture.kind;
+  const axis = gesture.axis;
+  const itemEl = gesture.itemEl;
+  const itemId = gesture.itemId;
+  const longFired = gesture.longFired;
+  const moved = gesture.moved;
+  resetGesture();
+  if (longFired || moved) {
+    gesture.suppressClick = true;
+    const token = ++gesture.suppressToken;
+    window.setTimeout(() => {
+      if (gesture.suppressToken === token) gesture.suppressClick = false;
+    }, 500);
+  }
+  if (longFired || axis !== "x") return;
+  if (kind === "item") {
+    const check = itemEl && itemEl.querySelector(".check");
+    if (check) check.style.transform = "";
+    if (dx < -72) stageDelete(itemId);
+    return;
+  }
+  if (kind === "nav") {
+    if (dx <= -56) shiftTab(1);
+    else if (dx >= 56) shiftTab(-1);
+    return;
+  }
+  if (kind === "back" && dx >= 40) backToList();
+}
+
+document.body.addEventListener("pointerup", finishPointer);
+document.body.addEventListener("pointercancel", finishPointer);
+
+document.body.addEventListener("contextmenu", (event) => {
+  const target = event.target;
+  if (target instanceof Element && target.closest(".item")) event.preventDefault();
+});
+
 document.body.addEventListener("click", (event) => {
+  const clicked = event.target instanceof Element ? event.target.closest("[data-action]") : null;
+  const clickedAction = clicked ? clicked.dataset.action : "";
+  if (gesture.suppressClick && clickedAction !== "undo") {
+    gesture.suppressClick = false;
+    event.preventDefault();
+    event.stopPropagation();
+    return;
+  }
+  const backdropEl = event.target instanceof Element ? event.target.closest("[data-action='backdrop']") : null;
+  if (Date.now() < shieldUntil && (clickedAction === "back" || event.target === backdropEl)) {
+    event.preventDefault();
+    event.stopPropagation();
+    return;
+  }
   const backdrop = event.target.closest("[data-action='backdrop']");
   if (backdrop && event.target === backdrop) {
-    state.sheet = null;
-    render({ keepScroll: true });
+    backToList();
     return;
   }
   const button = event.target.closest("[data-action]");
@@ -755,18 +1349,10 @@ document.body.addEventListener("click", (event) => {
   const action = button.dataset.action;
   if (action === "tab") {
     state.tab = button.dataset.store;
-    try {
-      localStorage.setItem("grocery-tab", state.tab);
-    } catch {
-      /* ignore */
-    }
+    if (state.tab !== "staples") state.listTab = state.tab;
+    rememberTab(state.tab);
     render({ keepScroll: false });
     window.scrollTo(0, 0);
-    return;
-  }
-  if (action === "chip") {
-    state.category[state.tab] = button.dataset.category;
-    render({ keepScroll: true });
     return;
   }
   if (action === "noop") return;
@@ -777,32 +1363,8 @@ document.body.addEventListener("click", (event) => {
     }
     return;
   }
-  if (action === "details") {
-    const store = state.tab === "amazon" || state.tab === "costco" || state.tab === "local" ? state.tab : "costco";
-    state.sheet = blankSheet("item", store);
-    render({ keepScroll: false, focus: "f-name" });
-    return;
-  }
   if (action === "new-staple") {
     state.sheet = blankSheet("staple", "costco");
-    render({ keepScroll: false, focus: "f-name" });
-    return;
-  }
-  if (action === "edit") {
-    const item = state.items.find((entry) => entry.id === button.dataset.id);
-    if (!item) return;
-    state.sheet = {
-      mode: "item",
-      id: item.id,
-      name: item.name,
-      quantityNote: item.quantityNote || "",
-      store: item.store,
-      category: item.category,
-      brand: item.brand || "",
-      asin: item.asin || "",
-      staple: Boolean(item.staple),
-      error: "",
-    };
     render({ keepScroll: false, focus: "f-name" });
     return;
   }
@@ -826,9 +1388,16 @@ document.body.addEventListener("click", (event) => {
     askClear();
     return;
   }
-  if (action === "close-sheet") {
-    state.sheet = null;
-    render({ keepScroll: true });
+  if (action === "scan") {
+    openScanner();
+    return;
+  }
+  if (action === "back") {
+    backToList();
+    return;
+  }
+  if (action === "undo") {
+    if (state.onUndo) state.onUndo();
     return;
   }
   if (action === "confirm-no") {
@@ -843,13 +1412,24 @@ document.body.addEventListener("click", (event) => {
     return;
   }
   if (action === "logout") {
+    const pending = pendingDelete;
+    if (pending) {
+      window.clearTimeout(pending.timer);
+      pendingDelete = null;
+      fetch(`/api/items/${pending.id}`, { method: "DELETE" }).catch(() => {});
+    }
+    stopCamera();
     fetch("/api/logout", { method: "POST" }).finally(() => {
       state.authed = false;
       state.items = [];
       state.staples = [];
       state.snap = "";
       state.sheet = null;
+      state.scanner = null;
       state.confirm = null;
+      state.hiddenIds = new Set();
+      state.onUndo = null;
+      state.toast = "";
       state.offline = false;
       render();
     });
@@ -867,11 +1447,18 @@ document.body.addEventListener("submit", (event) => {
   if (event.target.id === "login-form") login(event);
   if (event.target.id === "quick-form") quickAdd(event);
   if (event.target.id === "sheet-form") saveSheet(event);
+  if (event.target.id === "scan-name-form") saveScannedName(event);
+  if (event.target.id === "scan-code-form") {
+    event.preventDefault();
+    const field = document.getElementById("scan-code");
+    handleScan(field ? field.value : "");
+  }
 });
 
 document.body.addEventListener("input", (event) => {
   if (event.target.id === "quick-name") state.quickName = event.target.value;
   if (event.target.id === "passcode") state.passcode = event.target.value;
+  if (event.target.id === "scan-name" && state.scanner) state.scanner.name = event.target.value;
   if (state.sheet && event.target.closest("#sheet-form")) readSheet();
 });
 

@@ -246,6 +246,152 @@ describe("grocery API", () => {
     expect((patched.json?.item as Json).checked).toBe(true);
   });
 
+  it("still adds an item when no barcode is sent", async () => {
+    const token = env.API_TOKEN;
+    const created = await call("/api/items", {
+      method: "POST",
+      token,
+      body: { name: "Rice", store: "costco", category: "shelf" },
+    });
+    expect(created.status).toBe(201);
+    const item = created.json?.item as Json;
+    expect(item.barcode).toBeNull();
+    expect(item.staple).toBe(false);
+
+    const patched = await call(`/api/items/${item.id}`, { method: "PATCH", token, body: { checked: true } });
+    expect((patched.json?.item as Json).barcode).toBeNull();
+    expect((patched.json?.item as Json).checked).toBe(true);
+  });
+
+  it("remembers a barcode on the item and one staple", async () => {
+    const token = env.API_TOKEN;
+    const code = "012345678905";
+    const created = await call("/api/items", {
+      method: "POST",
+      token,
+      body: { name: "Oat milk", store: "costco", category: "refrigerated", brand: "Oatly", barcode: code },
+    });
+    expect(created.status).toBe(201);
+    const item = created.json?.item as Json;
+    expect(item.barcode).toBe(code);
+    expect(item.staple).toBe(true);
+    expect(item.brand).toBe("Oatly");
+
+    const staples = ((await call("/api/staples", { token })).json?.staples ?? []) as Json[];
+    expect(staples).toHaveLength(1);
+    expect(staples[0].barcode).toBe(code);
+
+    const again = await call("/api/items", {
+      method: "POST",
+      token,
+      body: { name: "Oat milk", store: "costco", category: "refrigerated", brand: "Oatly", barcode: code },
+    });
+    expect(again.status).toBe(201);
+    expect((again.json?.item as Json).id).toBe(item.id);
+    expect(((await call("/api/items", { token })).json?.items as Json[])).toHaveLength(1);
+    expect(((await call("/api/staples", { token })).json?.staples as Json[])).toHaveLength(1);
+
+    const known = await call(`/api/barcode/${code}`, { token });
+    expect(known.status).toBe(200);
+    expect(known.json?.known).toBe(true);
+    expect(known.json?.alreadyOnList).toBe(true);
+    expect(known.json?.stapleId).toBe(item.stapleId);
+    expect(known.json?.name).toBe("Oat milk");
+
+    await call(`/api/items/${item.id}`, { method: "PATCH", token, body: { checked: true } });
+    const afterCheck = await call(`/api/barcode/${code}`, { token });
+    expect(afterCheck.json?.alreadyOnList).toBe(false);
+
+    const readded = await call(`/api/staples/${item.stapleId}/add`, { method: "POST", token });
+    expect(readded.json?.alreadyOnList).toBe(false);
+    expect((readded.json?.item as Json).barcode).toBe(code);
+    const items = ((await call("/api/items", { token })).json?.items ?? []) as Json[];
+    expect(items.filter((entry) => entry.checked === false)).toHaveLength(1);
+    expect(((await call("/api/staples", { token })).json?.staples as Json[])).toHaveLength(1);
+
+    const alias = await call("/api/barcode/0012345678905", { token });
+    expect(alias.json?.known).toBe(true);
+    expect(alias.json?.name).toBe("Oat milk");
+  });
+
+  it("keeps a barcode when only the bought box changes, and does not make it a staple by itself", async () => {
+    const token = env.API_TOKEN;
+    const created = await call("/api/items", {
+      method: "POST",
+      token,
+      body: { name: "Crackers", store: "local", category: "shelf" },
+    });
+    const id = (created.json?.item as Json).id;
+    const withCode = await call(`/api/items/${id}`, { method: "PATCH", token, body: { barcode: "555555" } });
+    expect((withCode.json?.item as Json).barcode).toBe("555555");
+    expect((withCode.json?.item as Json).staple).toBe(false);
+    const checked = await call(`/api/items/${id}`, { method: "PATCH", token, body: { checked: true } });
+    expect((checked.json?.item as Json).barcode).toBe("555555");
+    expect((checked.json?.item as Json).staple).toBe(false);
+  });
+
+  it("rejects a bad barcode and hides lookup until sign-in", async () => {
+    const token = env.API_TOKEN;
+    expect((await call("/api/barcode/12345678")).status).toBe(401);
+    expect(
+      (await call("/api/items", { method: "POST", token, body: { name: "Nope", store: "costco", category: "shelf", barcode: "12345" } }))
+        .status,
+    ).toBe(400);
+    expect(
+      (
+        await call("/api/items", {
+          method: "POST",
+          token,
+          body: { name: "Nope", store: "costco", category: "shelf", barcode: "123456789012345" },
+        })
+      ).status,
+    ).toBe(400);
+    const blank = await call("/api/staples", {
+      method: "POST",
+      token,
+      body: { name: "Coffee", store: "amazon" },
+    });
+    expect((blank.json?.staple as Json).barcode).toBeNull();
+    const saved = await call("/api/staples", {
+      method: "POST",
+      token,
+      body: { name: "Coffee", store: "amazon", barcode: "000111222333" },
+    });
+    expect((saved.json?.staple as Json).barcode).toBe("000111222333");
+  });
+
+  it("suggests a name for a new barcode and stays quiet when the lookup misses", async () => {
+    const token = env.API_TOKEN;
+    const original = globalThis.fetch;
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("openfoodfacts.org")) {
+        return new Response(
+          JSON.stringify({ status: 1, product: { product_name: "Oat drink", brands: "Oatly, Other" } }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      return original(input, init);
+    }) as typeof fetch;
+    try {
+      const found = await call("/api/barcode/3017620422003", { token });
+      expect(found.status).toBe(200);
+      expect(found.json?.known).toBe(false);
+      expect(found.json?.suggestion).toEqual({ name: "Oat drink", brand: "Oatly" });
+    } finally {
+      globalThis.fetch = original;
+    }
+
+    globalThis.fetch = (async () => new Response(JSON.stringify({ status: 0 }), { status: 200 })) as typeof fetch;
+    try {
+      const missed = await call("/api/barcode/000000000000", { token });
+      expect(missed.json?.known).toBe(false);
+      expect(missed.json?.suggestion).toBeNull();
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
   it("serves the phone page", async () => {
     const response = await exports.default.fetch("https://grocery.test/");
     expect(response.status).toBe(200);

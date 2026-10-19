@@ -17,6 +17,7 @@ export type ItemInput = {
   checked: boolean;
   brand: string | null;
   asin: string | null;
+  barcode: string | null;
   staple: boolean;
 };
 
@@ -28,6 +29,7 @@ export type ItemPatch = {
   checked?: boolean;
   brand?: string | null;
   asin?: string | null;
+  barcode?: string | null;
   staple?: boolean;
 };
 
@@ -37,6 +39,7 @@ export type StapleInput = {
   category: string;
   brand: string | null;
   asin: string | null;
+  barcode: string | null;
 };
 
 export function isStore(value: string): value is Store {
@@ -82,6 +85,28 @@ function cleanBool(value: unknown, label: string): boolean {
   return value;
 }
 
+export function cleanBarcode(value: unknown): string | null {
+  if (value == null) return null;
+  if (typeof value !== "string" && typeof value !== "number") {
+    throw new HttpError(400, "The barcode should be numbers.");
+  }
+  const digits = String(value).replace(/\D/g, "");
+  if (!digits) return null;
+  if (digits.length < 6 || digits.length > 14) {
+    throw new HttpError(400, "That barcode should be 6 to 14 numbers.");
+  }
+  return digits;
+}
+
+export function barcodeKeys(code: string): string[] {
+  const keys = new Set<string>([code]);
+  if (code.length === 12) keys.add(`0${code}`);
+  if (code.length === 13 && code.startsWith("0")) keys.add(code.slice(1));
+  const stripped = code.replace(/^0+/, "");
+  if (stripped.length >= 6) keys.add(stripped);
+  return [...keys];
+}
+
 export function cleanAsin(value: unknown): string | null {
   if (value == null) return null;
   if (typeof value !== "string") throw new HttpError(400, "The Amazon code should be text.");
@@ -106,6 +131,7 @@ export function parseNewItem(body: Record<string, unknown>): ItemInput {
     checked: body.checked == null ? false : cleanBool(body.checked, "Bought"),
     brand: cleanOptional(body.brand, "Brand", 80),
     asin: cleanAsin(body.asin),
+    barcode: body.barcode == null || body.barcode === "" ? null : cleanBarcode(body.barcode),
     staple: body.staple == null ? false : cleanBool(body.staple, "Staple"),
   };
 }
@@ -122,6 +148,7 @@ export function parseItemPatch(body: Record<string, unknown>): ItemPatch {
   if ("checked" in body) patch.checked = cleanBool(body.checked, "Bought");
   if ("brand" in body) patch.brand = cleanOptional(body.brand, "Brand", 80);
   if ("asin" in body) patch.asin = cleanAsin(body.asin);
+  if ("barcode" in body) patch.barcode = cleanBarcode(body.barcode);
   if ("staple" in body) patch.staple = cleanBool(body.staple, "Staple");
   if (Object.keys(patch).length === 0) {
     throw new HttpError(400, "Nothing to change.");
@@ -137,6 +164,7 @@ export function parseStaple(body: Record<string, unknown>): StapleInput {
     category: cleanCategory(body.category, store),
     brand: cleanOptional(body.brand, "Brand", 80),
     asin: cleanAsin(body.asin),
+    barcode: body.barcode == null || body.barcode === "" ? null : cleanBarcode(body.barcode),
   };
 }
 

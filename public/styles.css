@@ -52,11 +52,13 @@ body {
   font-size: 18px;
   line-height: 1.35;
   -webkit-text-size-adjust: 100%;
+  touch-action: pan-y;
+  overscroll-behavior-x: none;
 }
 
 button, input, select { font: inherit; color: inherit; }
 
-button { touch-action: manipulation; }
+button { touch-action: pan-y; }
 
 :focus-visible {
   outline: 3px solid var(--accent);
@@ -152,10 +154,11 @@ button { touch-action: manipulation; }
 
 .quick-row {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
-.quick-row input { flex: 1; min-width: 0; }
+.quick-row input { flex: 1 1 12rem; min-width: 0; }
 
 input[type="text"],
 input[type="password"],
@@ -187,7 +190,7 @@ select {
   color: var(--accent-ink);
 }
 
-.btn-add { min-width: 5.5rem; }
+.btn-add, .btn-scan { min-width: 5.2rem; flex: 0 0 auto; }
 
 .btn-secondary,
 .linkish {
@@ -252,29 +255,57 @@ select {
   gap: 8px;
 }
 
-.item, .staple {
+.staple {
   background: var(--bg-elev);
   border: 1.5px solid var(--line);
   border-radius: 16px;
 }
 
 .item {
+  position: relative;
   display: flex;
   align-items: stretch;
+  overflow: hidden;
+  border-radius: 16px;
+  background: #9d2c2c;
+  touch-action: pan-y;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.swipe-label {
+  position: absolute;
+  right: 16px;
+  top: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  color: #fff;
+  font-weight: 800;
 }
 
 .check {
+  position: relative;
   flex: 1;
   display: flex;
   gap: 12px;
   align-items: center;
   text-align: left;
+  width: 100%;
   min-height: 68px;
-  padding: 12px 8px 12px 14px;
-  border: 0;
-  background: transparent;
+  padding: 12px 14px;
+  border: 1.5px solid var(--line);
+  border-radius: 16px;
+  background: var(--bg-elev);
   color: inherit;
+  touch-action: pan-y;
+  -webkit-user-select: none;
+  user-select: none;
+  transition: transform 0.16s ease;
 }
+
+.item.dragging .check { transition: none; }
 
 .box {
   width: 36px;
@@ -324,7 +355,7 @@ select {
   padding: 8px;
 }
 
-.item.checked { background: transparent; }
+.item.checked .check { background: var(--bg); }
 
 .item.checked .name,
 .item.checked .note {
@@ -411,7 +442,7 @@ label.field { display: flex; flex-direction: column; gap: 6px; font-weight: 700;
   box-shadow: var(--shadow);
 }
 
-.sheet h2, .dialog h2 {
+.sheet h2, .dialog h2, .scanner h2 {
   font-family: var(--serif);
   font-size: 1.8rem;
   font-weight: 600;
@@ -436,19 +467,83 @@ label.field { display: flex; flex-direction: column; gap: 6px; font-weight: 700;
 
 .help { font-weight: 500; }
 
+.back {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 48px;
+  margin: 0 0 8px;
+  padding: 8px 4px;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font-weight: 800;
+  font-size: 1.15rem;
+}
+
+.back::before {
+  content: "‹";
+  font-size: 2rem;
+  line-height: 0.8;
+}
+
+.scanner {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  overflow: auto;
+  background: var(--bg);
+  color: var(--ink);
+  padding: calc(12px + env(safe-area-inset-top)) 16px calc(20px + env(safe-area-inset-bottom));
+  touch-action: pan-y;
+}
+
+.scanner video {
+  display: block;
+  width: 100%;
+  max-height: 46dvh;
+  margin: 8px 0 12px;
+  background: #111;
+  border-radius: 16px;
+  object-fit: cover;
+}
+
+.sheet, .backdrop { touch-action: pan-y; }
+
 .toast {
   position: fixed;
   left: 50%;
   bottom: calc(16px + env(safe-area-inset-bottom));
   transform: translateX(-50%);
   z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
   max-width: min(28rem, calc(100% - 24px));
-  padding: 14px 16px;
+  padding: 10px 12px 10px 16px;
   border-radius: 16px;
   background: var(--ink);
   color: var(--bg);
   font-weight: 700;
-  text-align: center;
+  text-align: left;
+}
+
+button.toast {
+  border: 0;
+  font: inherit;
+  text-align: left;
+}
+
+.undo-label {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 8px 14px;
+  border-radius: 12px;
+  background: var(--bg);
+  color: var(--ink);
+  font-weight: 800;
 }
 
 .noscript {

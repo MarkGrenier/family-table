@@ -64,25 +64,13 @@ npx wrangler login
 
 A browser window opens. Sign in to Cloudflare and approve the question it asks. Come back to Terminal when it says you are logged in.
 
-### 2. Create the database
+### 2. The database
 
-This is the little database that stores the list.
+`wrangler.toml` already has the live database id. Leave that line as it is.
 
-```bash
-npx wrangler d1 create grocery
-```
+### 3. Add the barcode column on the live list
 
-Cloudflare prints a database id. It looks like `a1b2c3d4-1234-5678-9abc-def012345678`.
-
-Open the file `wrangler.toml` in TextEdit (or any text editor). Find this line:
-
-```toml
-database_id = "00000000-0000-0000-0000-000000000000"
-```
-
-Replace the zeros with the id Cloudflare printed. Save the file. Leave every other line as it is.
-
-### 3. Create the empty list
+The phones already have a list. This step only adds a place to remember barcodes. It does not erase milk, bananas, or anything else.
 
 ```bash
 npx wrangler d1 migrations apply grocery --remote
@@ -90,7 +78,13 @@ npx wrangler d1 migrations apply grocery --remote
 
 If it asks you to continue, type `y` and press Enter.
 
-The live list starts empty. The practice milk and bananas stay on your computer.
+Then publish the new pages:
+
+```bash
+npx wrangler deploy
+```
+
+The practice milk and bananas stay on your computer. They are not copied to the live list.
 
 ### 4. Choose the passcode
 
@@ -137,13 +131,15 @@ Open the list on both phones. When one of you adds or checks something, the othe
 
 ## Using the list
 
-- The buttons at the top are Costco, Local, Amazon, and Staples.
-- Type a name and tap **Add**. On Costco and Local, tap the aisle first: Produce, Shelf-stable, Refrigerated, or Frozen. Costco has no Produce aisle. Amazon is one list, with no aisles.
-- **Add details** is for a quantity, a brand, an Amazon code, or marking it as a staple.
+- The buttons at the top are Costco, Local, Amazon, and Staples. Swipe left or right on the list to move between Costco, Local, and Amazon.
+- Type a name and tap **Add**. It goes on the store you are looking at. If you have bought that thing before, the aisle and brand are filled in from last time. A new Costco or local item starts as Shelf-stable. Amazon has no aisles.
+- Tap **Scan** to use the camera on a barcode, mostly for things you buy again. The first time, the phone asks to use the camera. If that barcode was scanned before, the item goes on the list in one step, with the same name, store, aisle, and brand. If it is new, the list looks up a name. You can change it before saving. Next time, that barcode is one step. If the camera will not open, type the numbers under the bars.
 - Tap an item to mark it bought. Bought items drop to the bottom and turn grey. Tap again to put it back.
-- **Edit** changes the name and the other details. **Delete this item** is inside that screen, so it is harder to tap by mistake.
+- Hold your finger on an item to change the note, brand, Amazon code, aisle, or staple.
+- Swipe an item to the left to remove it. **Undo** shows for a few seconds.
+- Staples, the edit screen, and the scanner each have a **Back** button. Swipe right from any of those to return to the list.
 - **Clear already got** takes the bought items off that store. It asks you first.
-- A staple is something you buy often. Tick **Staple** when you save an item, or tap **Add a staple** on the Staples tab. **Add to this week** puts it on that store's list. If it is already there and not bought yet, the button says **On the list**. After you check it off, you can add it again.
+- A staple is something you buy often. Tick **Staple** when you edit an item, or tap **Add a staple** on the Staples tab. **Add to this week** puts it on that store's list. If it is already there and not bought yet, the button says **On the list**. After you check it off, you can add it again. A scanned barcode is remembered the same way.
 - **Sign out on this phone** is at the bottom. It only signs out that phone.
 
 ## If something goes wrong
@@ -189,13 +185,16 @@ Returns `{ "items": [ ... ] }`.
   "category": "refrigerated",
   "brand": "Oatly",
   "asin": "",
+  "barcode": "012345678905",
   "staple": true
 }
 ```
 
+`barcode` is optional. Leave it out, or send `""`, and the item is saved with `"barcode": null`. A new item that includes a barcode is also remembered as a staple, so the next scan can add it in one step. Old requests that never send `barcode` still work.
+
 `PATCH /api/items/ID`
 
-Send only what changed. Example: `{ "checked": true }`.
+Send only what changed. Example: `{ "checked": true }`. Leaving `barcode` out keeps the one already saved. Sending a barcode here does not, by itself, turn the item into a staple.
 
 `DELETE /api/items/ID`
 
@@ -218,9 +217,12 @@ Removes bought items for that store only. Staples stay.
   "name": "Paper towels",
   "store": "costco",
   "category": "shelf",
-  "brand": "Kirkland"
+  "brand": "Kirkland",
+  "barcode": ""
 }
 ```
+
+`barcode` is optional here too. Omit it and the staple is saved with `"barcode": null`.
 
 `POST /api/staples/ID/add`
 
@@ -229,6 +231,32 @@ Puts that staple on this week's list. If it is already there and not bought yet,
 `DELETE /api/staples/ID`
 
 Removes the staple. Anything already on this week's list stays there.
+
+### Barcodes
+
+`GET /api/barcode/012345678905`
+
+Needs the same sign-in as the rest of the list.
+
+If that barcode was saved before, the reply looks like:
+
+```json
+{
+  "barcode": "012345678905",
+  "known": true,
+  "name": "Oat milk",
+  "store": "costco",
+  "category": "refrigerated",
+  "brand": "Oatly",
+  "asin": null,
+  "stapleId": "…",
+  "alreadyOnList": true
+}
+```
+
+`alreadyOnList` is true when an unchecked copy is already on the list. A 12-digit code and the same code with a leading 0 are treated as the same barcode.
+
+If it is new, the reply is `{ "barcode", "known": false, "suggestion" }`. `suggestion` is `{ "name", "brand" }` when a free product lookup finds it, or `null` when it does not. No key is required for that lookup.
 
 ### Backup
 
