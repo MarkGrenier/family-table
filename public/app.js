@@ -29,7 +29,7 @@ const state = {
   quickName: "",
   passcode: "",
   loginError: "",
-  sheet: null,
+  edit: null,
   confirm: null,
   scanner: null,
   toast: "",
@@ -38,6 +38,7 @@ const state = {
   pendingRender: false,
   pendingIds: new Set(),
   hiddenIds: new Set(),
+  hiddenStapleIds: new Set(),
 };
 
 let pullSeq = 0;
@@ -46,9 +47,9 @@ let toastTimer = 0;
 
 function shouldDelayRender() {
   const active = document.activeElement;
-  if (state.sheet || state.confirm || state.scanner) return true;
+  if (state.edit || state.confirm || state.scanner) return true;
   if (!active) return false;
-  return active.id === "quick-name" || active.id === "passcode" || active.id === "scan-name" || active.id === "scan-code";
+  return active.id === "quick-name" || active.id === "passcode" || active.id === "scan-name" || active.id === "scan-code" || active.id === "edit-name" || active.id === "edit-qty";
 }
 
 function loadTab() {
@@ -261,11 +262,10 @@ function goToStore(store) {
 }
 
 function itemHtml(item) {
+  if (state.edit && state.edit.id === item.id) return editingHtml(item);
   const bits = [];
   if (item.quantityNote) bits.push(item.quantityNote);
   if (item.brand) bits.push(item.brand);
-  const aisle = item.store !== "amazon" && item.checked ? CATEGORY_LABEL[item.category] : "";
-  if (aisle) bits.push(aisle);
   const note = bits.join(" · ");
   const label = item.checked ? `Put ${item.name} back on the list` : `Mark ${item.name} as bought`;
   return `<li class="item${item.checked ? " checked" : ""}" data-id="${esc(item.id)}">
@@ -273,10 +273,51 @@ function itemHtml(item) {
     <button class="check" type="button" data-action="toggle" data-id="${esc(item.id)}" aria-pressed="${item.checked ? "true" : "false"}" aria-label="${esc(label)}" ${state.pendingIds.has(item.id) ? "disabled" : ""}>
       ${item.checked ? boxOn() : `<span class="box" aria-hidden="true"></span>`}
       <span class="item-text">
-        <span class="name">${esc(item.name)}${item.staple ? `<span class="tag">Staple</span>` : ""}</span>
+        <span class="name">${esc(item.name)}${item.staple ? `<span class="star-mark" aria-hidden="true">★</span>` : ""}</span>
         ${note ? `<span class="note">${esc(note)}</span>` : ""}
       </span>
     </button>
+  </li>`;
+}
+
+function chip(action, value, label, pressed, aria) {
+  return `<button type="button" class="mini" data-action="${action}" data-value="${esc(value)}" aria-pressed="${pressed ? "true" : "false"}" aria-label="${esc(aria)}">${esc(label)}</button>`;
+}
+
+function editingHtml(item) {
+  const edit = state.edit;
+  const aisles = CATEGORY_ORDER[edit.store] || [];
+  const aisleChips =
+    edit.store === "amazon"
+      ? ""
+      : `<div class="minis" role="group" aria-label="Aisle">${aisles
+          .map((category) =>
+            chip(
+              "pick-aisle",
+              category,
+              category === "shelf" ? "Shelf" : category === "refrigerated" ? "Cold" : CATEGORY_LABEL[category],
+              edit.category === category,
+              CATEGORY_LABEL[category],
+            ),
+          )
+          .join("")}</div>`;
+  return `<li class="item editing${item.checked ? " checked" : ""}" data-id="${esc(item.id)}">
+    <span class="swipe-label">Remove</span>
+    <div class="check">
+      <button class="box-hit" type="button" data-action="toggle" data-id="${esc(item.id)}" aria-pressed="${item.checked ? "true" : "false"}" aria-label="${item.checked ? "Put it back" : "Mark as bought"}">
+        ${item.checked ? boxOn() : `<span class="box" aria-hidden="true"></span>`}
+      </button>
+      <div class="item-text">
+        <input id="edit-name" class="inline-name" type="text" maxlength="80" enterkeyhint="done" autocomplete="off" aria-label="Name" value="${esc(edit.name)}">
+        ${item.brand ? `<span class="note">${esc(item.brand)}</span>` : ""}
+        <div class="edit-line">
+          <input id="edit-qty" class="inline-qty" type="text" maxlength="140" enterkeyhint="done" autocomplete="off" aria-label="Quantity" placeholder="Qty" value="${esc(edit.quantity)}">
+          <button class="star" type="button" data-action="star" aria-pressed="${edit.staple ? "true" : "false"}" aria-label="${edit.staple ? "Staple. Tap to turn off." : "Tap to make it a staple."}">${edit.staple ? "★" : "☆"}</button>
+        </div>
+        <div class="minis" role="group" aria-label="Store">${STORES.map((store) => chip("pick-store", store, store === "local" ? "Local" : STORE_LABEL[store], edit.store === store, STORE_LABEL[store])).join("")}</div>
+        ${aisleChips}
+      </div>
+    </div>
   </li>`;
 }
 
@@ -289,16 +330,9 @@ function staplesHtml() {
   const staples = [...state.staples].sort(
     (a, b) => rank[a.store] - rank[b.store] || a.name.localeCompare(b.name),
   );
-  const list = staples.length
-    ? `<ul class="staples">${staples.map(stapleHtml).join("")}</ul>`
-    : `<p class="empty">No staples yet. Staples are things you buy again and again, like oat milk.</p>`;
-  return `<button class="back" type="button" data-action="back">Back to the list</button>
-    <p class="intro">Things you buy often. Add one to a store when you need it this week.</p>
-    <div class="stack">
-      <button class="btn-primary full" type="button" data-action="new-staple">Add a staple</button>
-      <button class="btn-secondary full" type="button" data-action="scan">Scan a barcode</button>
-    </div>
-    ${list}`;
+  const visible = staples.filter((staple) => !state.hiddenStapleIds.has(staple.id));
+  if (!visible.length) return "";
+  return `<ul class="staples">${visible.map(stapleHtml).join("")}</ul>`;
 }
 
 function stapleOnList(staple) {
@@ -310,18 +344,19 @@ function stapleHtml(staple) {
   const bits = [STORE_LABEL[staple.store]];
   if (staple.store !== "amazon") bits.push(CATEGORY_LABEL[staple.category]);
   if (staple.brand) bits.push(staple.brand);
-  return `<li class="staple">
-    <h3>${esc(staple.name)}</h3>
-    <p class="meta">${esc(bits.join(" · "))}</p>
-    <button class="btn-primary full" type="button" data-action="add-staple" data-id="${esc(staple.id)}" ${onList || state.pendingIds.has(staple.id) ? "disabled" : ""}>${onList ? "On the list" : "Add to this week"}</button>
-    <button class="btn-quiet full" type="button" data-action="remove-staple" data-id="${esc(staple.id)}">Remove staple</button>
+  return `<li class="staple" data-id="${esc(staple.id)}">
+    <span class="swipe-label">Remove</span>
+    <div class="staple-face">
+      <h3>${esc(staple.name)}</h3>
+      <p class="meta">${esc(bits.join(" · "))}</p>
+      <button class="btn-primary full" type="button" data-action="add-staple" data-id="${esc(staple.id)}" ${onList || state.pendingIds.has(staple.id) ? "disabled" : ""}>${onList ? "On the list" : "Add to this week"}</button>
+    </div>
   </li>`;
 }
 
 function overlayHtml() {
   if (state.confirm) return confirmHtml();
   if (state.scanner) return scannerHtml();
-  if (state.sheet) return sheetHtml();
   return "";
 }
 
@@ -339,67 +374,6 @@ function confirmHtml() {
   </div>`;
 }
 
-function sheetHtml() {
-  const sheet = state.sheet;
-  const stapleMode = sheet.mode === "staple";
-  const title = stapleMode ? "New staple" : sheet.id ? "Edit item" : "New item";
-  const categories = CATEGORY_ORDER[sheet.store] || CATEGORY_ORDER.costco;
-  const categoryField =
-    sheet.store === "amazon"
-      ? ""
-      : `<label class="field" for="f-category">Aisle
-          <select id="f-category">${categories
-            .map((category) => `<option value="${category}" ${sheet.category === category ? "selected" : ""}>${esc(CATEGORY_LABEL[category])}</option>`)
-            .join("")}</select>
-        </label>`;
-  const asin = String(sheet.asin || "").trim().toUpperCase();
-  const amazonLink = /^[A-Z0-9]{10}$/.test(asin)
-    ? `<a class="btn-secondary full amazon-link" href="https://www.amazon.com/dp/${asin}" target="_blank" rel="noopener noreferrer">Open on Amazon</a>`
-    : "";
-  return `<div class="backdrop" data-action="backdrop">
-    <form class="sheet" id="sheet-form" role="dialog" aria-modal="true" aria-labelledby="sheet-title">
-      <button class="back" type="button" data-action="back">Back</button>
-      <h2 id="sheet-title">${esc(title)}</h2>
-      <div class="stack">
-        <label class="field" for="f-name">Name
-          <input id="f-name" type="text" maxlength="80" required value="${esc(sheet.name)}">
-        </label>
-        ${
-          stapleMode
-            ? ""
-            : `<label class="field" for="f-note">Quantity or note
-                <input id="f-note" type="text" maxlength="140" placeholder="2 cartons, or a note" value="${esc(sheet.quantityNote)}">
-              </label>`
-        }
-        <label class="field" for="f-store">Store
-          <select id="f-store">
-            ${STORES.map((store) => `<option value="${store}" ${sheet.store === store ? "selected" : ""}>${esc(STORE_LABEL[store])}</option>`).join("")}
-          </select>
-        </label>
-        ${categoryField}
-        <label class="field" for="f-brand">Brand
-          <input id="f-brand" type="text" maxlength="80" placeholder="Optional" value="${esc(sheet.brand)}">
-        </label>
-        <label class="field" for="f-asin">Amazon code
-          <input id="f-asin" type="text" maxlength="200" placeholder="Optional ASIN or product link" autocapitalize="characters" value="${esc(sheet.asin)}">
-        </label>
-        ${amazonLink}
-        ${
-          stapleMode
-            ? ""
-            : `<label class="checkline" for="f-staple">
-                <input id="f-staple" type="checkbox" ${sheet.staple ? "checked" : ""}>
-                <span>Staple — we buy this often<span class="help"><br>It stays on the Staples tab. Uncheck this to take it off that list. This week's name, store, and brand are kept with the staple.</span></span>
-              </label>`
-        }
-        ${sheet.error ? `<p class="error" role="alert">${esc(sheet.error)}</p>` : ""}
-        <button class="btn-primary full" type="submit" ${state.saving ? "disabled" : ""}>${stapleMode ? "Save staple" : "Save"}</button>
-        ${sheet.id ? `<button class="btn-danger full" type="button" data-action="delete-item" data-id="${esc(sheet.id)}">Delete this item</button>` : ""}
-      </div>
-    </form>
-  </div>`;
-}
-
 function toastHtml() {
   if (!state.toast) return "";
   if (state.onUndo) {
@@ -413,7 +387,6 @@ function scannerHtml() {
   if (scanner.phase === "name") {
     return `<div class="backdrop" data-action="backdrop">
       <form class="sheet" id="scan-name-form" role="dialog" aria-modal="true" aria-labelledby="scan-title">
-        <button class="back" type="button" data-action="back">Back</button>
         <h2 id="scan-title">New item</h2>
         <p class="intro">${scanner.brand ? esc(scanner.brand) : "Type what this is. Next time the scan will add it."}</p>
         <div class="stack">
@@ -427,7 +400,7 @@ function scannerHtml() {
     </div>`;
   }
   return `<div class="scanner" role="dialog" aria-modal="true" aria-labelledby="scan-title">
-    <button class="back" type="button" data-action="back">Back</button>
+    <button class="close-x" type="button" data-action="close-scan" aria-label="Close">×</button>
     <h2 id="scan-title">Scan a barcode</h2>
     <p class="intro">Point the camera at the barcode on the package.</p>
     <video id="scan-video" playsinline autoplay muted></video>
@@ -441,43 +414,99 @@ function scannerHtml() {
   </div>`;
 }
 
-function readSheet() {
-  const sheet = state.sheet;
-  if (!sheet) return;
-  const value = (id) => {
-    const el = document.getElementById(id);
-    return el ? el.value : undefined;
-  };
-  const name = value("f-name");
-  if (name !== undefined) sheet.name = name;
-  const note = value("f-note");
-  if (note !== undefined) sheet.quantityNote = note;
-  const store = value("f-store");
-  if (store) sheet.store = store;
-  const category = value("f-category");
-  if (category) sheet.category = category;
-  const brand = value("f-brand");
-  if (brand !== undefined) sheet.brand = brand;
-  const asin = value("f-asin");
-  if (asin !== undefined) sheet.asin = asin;
-  const staple = document.getElementById("f-staple");
-  if (staple) sheet.staple = staple.checked;
+let editGen = 0;
+let editStayUntil = 0;
+
+function readEditDom() {
+  const edit = state.edit;
+  if (!edit) return;
+  const name = document.getElementById("edit-name");
+  const qty = document.getElementById("edit-qty");
+  if (name) edit.name = name.value;
+  if (qty) edit.quantity = qty.value;
 }
 
-function blankSheet(mode, store) {
-  const chosen = store || "costco";
-  return {
-    mode,
-    id: null,
-    name: mode === "item" ? state.quickName : "",
-    quantityNote: "",
-    store: chosen,
-    category: chosen === "amazon" ? "general" : CATEGORY_ORDER[chosen][0],
-    brand: "",
-    asin: "",
-    staple: mode === "staple",
-    error: "",
+function openEdit(id) {
+  const item = state.items.find((entry) => entry.id === id);
+  if (!item) return;
+  if (state.edit && state.edit.id !== id) {
+    const pending = closeEdit(true);
+    if (pending) sendEdit(pending);
+  }
+  state.edit = {
+    id: item.id,
+    name: item.name,
+    quantity: item.quantityNote || "",
+    store: item.store,
+    category: item.category,
+    staple: Boolean(item.staple),
   };
+  render({ keepScroll: true, focus: "edit-name" });
+  const input = document.getElementById("edit-name");
+  if (input && typeof input.select === "function") input.select();
+}
+
+function closeEdit(save) {
+  const edit = state.edit;
+  if (!edit) return null;
+  readEditDom();
+  editGen += 1;
+  state.edit = null;
+  const item = state.items.find((entry) => entry.id === edit.id);
+  if (!save || !item) return null;
+  const name = edit.name.trim().replace(/\s+/g, " ");
+  if (!name) return null;
+  const quantity = edit.quantity.trim().replace(/\s+/g, " ");
+  const staple = Boolean(edit.staple);
+  const changed =
+    name !== item.name ||
+    quantity !== (item.quantityNote || "") ||
+    edit.store !== item.store ||
+    edit.category !== item.category ||
+    staple !== Boolean(item.staple);
+  if (!changed) return null;
+  item.name = name;
+  item.quantityNote = quantity || null;
+  item.store = edit.store;
+  item.category = edit.category;
+  item.staple = staple;
+  return {
+    id: item.id,
+    store: edit.store,
+    body: {
+      name,
+      quantityNote: quantity,
+      store: edit.store,
+      category: edit.category,
+      staple,
+    },
+  };
+}
+
+function sendEdit(pending) {
+  if (!pending) return;
+  inflight += 1;
+  fetch(`/api/items/${pending.id}`, { method: "PATCH", headers: jsonHeaders(), body: JSON.stringify(pending.body) })
+    .then(async (res) => {
+      if (!res.ok) throw new Error("status");
+      await pull({ force: true });
+    })
+    .catch(() => {
+      showToast("Couldn't save that.");
+      pull({ force: true });
+    })
+    .finally(() => {
+      inflight -= 1;
+    });
+}
+
+function finishEdit(save) {
+  const pending = closeEdit(save);
+  if (pending && pending.store && pending.store !== state.tab && STORE_TABS.includes(pending.store)) {
+    goToStore(pending.store);
+  }
+  render({ keepScroll: true });
+  sendEdit(pending);
 }
 
 async function pull(options = {}) {
@@ -511,7 +540,7 @@ async function pull(options = {}) {
     state.items = itemsBody.items;
     state.staples = staplesBody.staples;
     if (changed || options.force) {
-      if (!options.force && shouldDelayRender()) {
+      if (shouldDelayRender() && (!options.force || state.edit || state.scanner || state.confirm)) {
         state.pendingRender = true;
         return;
       }
@@ -607,58 +636,6 @@ async function quickAdd(event) {
   }
 }
 
-async function saveSheet(event) {
-  event.preventDefault();
-  readSheet();
-  const sheet = state.sheet;
-  if (!sheet.name.trim()) {
-    sheet.error = "Add a name.";
-    render({ focus: "f-name", keepScroll: true });
-    return;
-  }
-  const payload = {
-    name: sheet.name,
-    store: sheet.store,
-    category: sheet.store === "amazon" ? "general" : sheet.category,
-    brand: sheet.brand,
-    asin: sheet.asin,
-  };
-  if (sheet.mode === "item") {
-    payload.quantityNote = sheet.quantityNote;
-    payload.staple = Boolean(sheet.staple);
-  }
-  inflight += 1;
-  state.saving = true;
-  sheet.error = "";
-  render({ keepScroll: true });
-  try {
-    const creatingItem = sheet.mode === "item" && !sheet.id;
-    const path = sheet.mode === "staple" ? "/api/staples" : creatingItem ? "/api/items" : `/api/items/${sheet.id}`;
-    const method = creatingItem || sheet.mode === "staple" ? "POST" : "PATCH";
-    const res = await fetch(path, { method, headers: jsonHeaders(), body: JSON.stringify(payload) });
-    const body = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      sheet.error = body.error || "Couldn't save that.";
-      state.saving = false;
-      render({ focus: "f-name", keepScroll: true });
-      return;
-    }
-    const createdId = body.item && body.item.id;
-    state.sheet = null;
-    if (creatingItem) state.quickName = "";
-    state.saving = false;
-    showToast(sheet.mode === "staple" ? "Saved staple" : creatingItem ? `Added to ${STORE_LABEL[payload.store]}` : "Saved");
-    await pull({ force: true });
-    if (createdId) document.querySelector(`[data-id="${CSS.escape(createdId)}"]`)?.scrollIntoView({ block: "nearest" });
-  } catch {
-    sheet.error = "Couldn't reach the list.";
-    state.saving = false;
-    render({ keepScroll: true });
-  } finally {
-    inflight -= 1;
-  }
-}
-
 async function toggleItem(id) {
   const item = state.items.find((entry) => entry.id === id);
   if (!item || state.pendingIds.has(id)) return;
@@ -712,16 +689,16 @@ async function addStaple(id) {
   }
 }
 
-async function removeStaple(id) {
+async function removeStaple(id, options = {}) {
   inflight += 1;
-  state.confirm = null;
   try {
     const res = await fetch(`/api/staples/${id}`, { method: "DELETE" });
     const body = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(body.error || "status");
-    showToast("Removed from staples");
+    if (!options.quiet) showToast("Removed from staples");
     await pull({ force: true });
   } catch {
+    state.hiddenStapleIds.delete(id);
     showToast("Couldn't remove that staple.");
     render({ keepScroll: true });
   } finally {
@@ -731,10 +708,7 @@ async function removeStaple(id) {
 
 async function removeItem(id, options = {}) {
   inflight += 1;
-  if (!options.quiet) {
-    state.confirm = null;
-    state.sheet = null;
-  }
+  if (!options.quiet) state.confirm = null;
   try {
     const res = await fetch(`/api/items/${id}`, { method: "DELETE" });
     const body = await res.json().catch(() => ({}));
@@ -786,33 +760,6 @@ function askClear() {
   render({ keepScroll: false });
 }
 
-function askDeleteItem(id) {
-  const item = state.items.find((entry) => entry.id === id);
-  state.confirm = {
-    title: "Remove this item?",
-    text: item ? `Remove ${item.name} from this week's list?` : "Remove this item from this week's list?",
-    yes: "Yes, remove it",
-    no: "Keep it",
-    run: () => removeItem(id),
-  };
-  render({ keepScroll: false });
-}
-
-function askRemoveStaple(id) {
-  const staple = state.staples.find((entry) => entry.id === id);
-  state.confirm = {
-    title: "Remove this staple?",
-    text: staple
-      ? `Remove ${staple.name} from staples? It stays on this week's list if it's already there.`
-      : "Remove this staple?",
-    yes: "Yes, remove it",
-    no: "Keep it",
-    run: () => removeStaple(id),
-  };
-  render({ keepScroll: false });
-}
-
-let shieldUntil = 0;
 let scanControls = null;
 let scanBusy = false;
 let scanSession = 0;
@@ -898,10 +845,13 @@ function setScannerError(message) {
 }
 
 function openScanner() {
+  if (state.edit) {
+    const pending = closeEdit(true);
+    sendEdit(pending);
+  }
   stopCamera();
   const session = ++scanSession;
   scanBusy = false;
-  state.sheet = null;
   state.confirm = null;
   state.scanner = { phase: "camera", error: "", name: "", brand: "", code: "" };
   render({ keepScroll: false });
@@ -1121,7 +1071,6 @@ async function saveScannedName(event) {
 function backToList() {
   stopCamera();
   scanBusy = false;
-  state.sheet = null;
   state.scanner = null;
   if (!STORE_TABS.includes(state.tab)) {
     state.tab = state.listTab;
@@ -1140,59 +1089,53 @@ function shiftTab(direction) {
   window.scrollTo(0, 0);
 }
 
-function openEdit(id) {
-  const item = state.items.find((entry) => entry.id === id);
-  if (!item) return;
-  shieldUntil = Date.now() + 700;
-  state.sheet = {
-    mode: "item",
-    id: item.id,
-    name: item.name,
-    quantityNote: item.quantityNote || "",
-    store: item.store,
-    category: item.category,
-    brand: item.brand || "",
-    asin: item.asin || "",
-    staple: Boolean(item.staple),
-    error: "",
-  };
-  render({ keepScroll: false, focus: "f-name" });
+function rowFace(el) {
+  return el ? el.querySelector(".check, .staple-face") : null;
 }
 
-async function commitDelete(id) {
-  await removeItem(id, { quiet: true });
-  state.hiddenIds.delete(id);
+async function commitDelete(pending) {
+  if (!pending) return;
+  if (pending.kind === "staple") {
+    await removeStaple(pending.id, { quiet: true });
+    state.hiddenStapleIds.delete(pending.id);
+    return;
+  }
+  await removeItem(pending.id, { quiet: true });
+  state.hiddenIds.delete(pending.id);
 }
 
-function stageDelete(id) {
-  const item = state.items.find((entry) => entry.id === id);
-  if (!item || state.hiddenIds.has(id)) return;
+function stageRemoval(kind, id, label) {
+  const hidden = kind === "staple" ? state.hiddenStapleIds : state.hiddenIds;
+  if (hidden.has(id)) return;
   if (pendingDelete) {
     const previous = pendingDelete;
     window.clearTimeout(previous.timer);
     pendingDelete = null;
-    commitDelete(previous.id);
+    commitDelete(previous);
   }
   const token = ++deleteToken;
-  state.hiddenIds.add(id);
+  hidden.add(id);
   pendingDelete = {
     id,
+    kind,
     token,
     timer: window.setTimeout(() => {
       if (!pendingDelete || pendingDelete.token !== token) return;
       pendingDelete = null;
-      commitDelete(id);
+      commitDelete({ id, kind });
     }, 4800),
   };
-  showToast(`Removed ${item.name}`, () => undoDelete(token, id));
+  showToast(`Removed ${label}`, () => undoRemoval(token));
   render({ keepScroll: true });
 }
 
-function undoDelete(token, id) {
+function undoRemoval(token) {
   if (!pendingDelete || pendingDelete.token !== token) return;
   window.clearTimeout(pendingDelete.timer);
+  const pending = pendingDelete;
   pendingDelete = null;
-  state.hiddenIds.delete(id);
+  if (pending.kind === "staple") state.hiddenStapleIds.delete(pending.id);
+  else state.hiddenIds.delete(pending.id);
   state.toast = "";
   state.onUndo = null;
   window.clearTimeout(toastTimer);
@@ -1202,12 +1145,14 @@ function undoDelete(token, id) {
 function gestureKind(target, x) {
   if (!state.authed || state.confirm) return "ignore";
   if (target.closest("#toast")) return "ignore";
-  const secondary = Boolean(state.sheet || state.scanner || state.tab === "staples");
   const field = target.closest("input, textarea, select");
+  const onStaples = state.tab === "staples";
+  const secondary = Boolean(state.scanner || onStaples);
   if (field && !(secondary && x < 28)) return "ignore";
+  const row = target.closest(".item, .staple");
+  if (row && row.classList.contains("item")) return "item";
+  if (row && row.classList.contains("staple")) return "staple";
   if (secondary) return "back";
-  const item = target.closest(".item");
-  if (item) return "item";
   if (STORE_TABS.includes(state.tab)) return "nav";
   return "ignore";
 }
@@ -1225,6 +1170,11 @@ document.body.addEventListener("pointerdown", (event) => {
   if (!event.isPrimary || event.button !== 0) return;
   if (gesture.pointerId != null) return;
   const target = event.target;
+  if (target instanceof Element && state.edit && !target.closest(".editing")) {
+    const pending = closeEdit(true);
+    if (pending && pending.store && pending.store !== state.tab && STORE_TABS.includes(pending.store)) goToStore(pending.store);
+    sendEdit(pending);
+  }
   if (!(target instanceof Element)) return;
   const kind = gestureKind(target, event.clientX);
   if (kind === "ignore") return;
@@ -1236,19 +1186,19 @@ document.body.addEventListener("pointerdown", (event) => {
   gesture.x = event.clientX;
   gesture.y = event.clientY;
   gesture.kind = kind;
-  gesture.itemEl = kind === "item" ? target.closest(".item") : null;
+  gesture.itemEl = kind === "item" || kind === "staple" ? target.closest(".item, .staple") : null;
   gesture.itemId = gesture.itemEl ? gesture.itemEl.dataset.id || "" : "";
   gesture.axis = null;
   gesture.longFired = false;
   gesture.moved = false;
   window.clearTimeout(gesture.longTimer);
-  if (kind === "item") {
+  if (kind === "item" && !(state.edit && state.edit.id === gesture.itemId)) {
     gesture.longTimer = window.setTimeout(() => {
       if (gesture.id !== id || gesture.moved) return;
       gesture.longFired = true;
       gesture.suppressClick = true;
-      const check = gesture.itemEl && gesture.itemEl.querySelector(".check");
-      if (check) check.style.transform = "";
+      const face = rowFace(gesture.itemEl);
+      if (face) face.style.transform = "";
       openEdit(gesture.itemId);
     }, 550);
   }
@@ -1278,10 +1228,10 @@ document.body.addEventListener("pointermove", (event) => {
       /* already captured */
     }
   }
-  if (gesture.axis !== "x" || gesture.kind !== "item" || !gesture.itemEl) return;
+  if (gesture.axis !== "x" || (gesture.kind !== "item" && gesture.kind !== "staple") || !gesture.itemEl) return;
   const shift = Math.max(Math.min(0, dx), -140);
-  const check = gesture.itemEl.querySelector(".check");
-  if (check) check.style.transform = `translateX(${shift}px)`;
+  const face = rowFace(gesture.itemEl);
+  if (face) face.style.transform = `translateX(${shift}px)`;
 });
 
 function finishPointer(event) {
@@ -1302,10 +1252,21 @@ function finishPointer(event) {
     }, 500);
   }
   if (longFired || axis !== "x") return;
-  if (kind === "item") {
-    const check = itemEl && itemEl.querySelector(".check");
-    if (check) check.style.transform = "";
-    if (dx < -72) stageDelete(itemId);
+  if (kind === "item" || kind === "staple") {
+    const face = rowFace(itemEl);
+    if (face) face.style.transform = "";
+    if (dx < -72) {
+      if (kind === "staple") {
+        const staple = state.staples.find((entry) => entry.id === itemId);
+        if (staple) stageRemoval("staple", itemId, staple.name);
+      } else {
+        if (state.edit && state.edit.id === itemId) closeEdit(false);
+        const item = state.items.find((entry) => entry.id === itemId);
+        if (item) stageRemoval("item", itemId, item.name);
+      }
+    } else if (kind === "staple" && dx >= 40) {
+      backToList();
+    }
     return;
   }
   if (kind === "nav") {
@@ -1327,23 +1288,15 @@ document.body.addEventListener("contextmenu", (event) => {
 document.body.addEventListener("click", (event) => {
   const clicked = event.target instanceof Element ? event.target.closest("[data-action]") : null;
   const clickedAction = clicked ? clicked.dataset.action : "";
-  if (gesture.suppressClick && clickedAction !== "undo") {
+  if (gesture.suppressClick) {
     gesture.suppressClick = false;
-    event.preventDefault();
-    event.stopPropagation();
-    return;
+    if (clickedAction === "toggle" || clickedAction === "add-staple") {
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
   }
-  const backdropEl = event.target instanceof Element ? event.target.closest("[data-action='backdrop']") : null;
-  if (Date.now() < shieldUntil && (clickedAction === "back" || event.target === backdropEl)) {
-    event.preventDefault();
-    event.stopPropagation();
-    return;
-  }
-  const backdrop = event.target.closest("[data-action='backdrop']");
-  if (backdrop && event.target === backdrop) {
-    backToList();
-    return;
-  }
+  if (!(event.target instanceof Element)) return;
   const button = event.target.closest("[data-action]");
   if (!button) return;
   const action = button.dataset.action;
@@ -1363,9 +1316,18 @@ document.body.addEventListener("click", (event) => {
     }
     return;
   }
-  if (action === "new-staple") {
-    state.sheet = blankSheet("staple", "costco");
-    render({ keepScroll: false, focus: "f-name" });
+  if (action === "star" || action === "pick-store" || action === "pick-aisle") {
+    if (!state.edit) return;
+    editStayUntil = Date.now() + 400;
+    readEditDom();
+    if (action === "star") state.edit.staple = !state.edit.staple;
+    if (action === "pick-store") {
+      state.edit.store = button.dataset.value;
+      const allowed = CATEGORY_ORDER[state.edit.store] || ["shelf"];
+      if (!allowed.includes(state.edit.category)) state.edit.category = allowed[0];
+    }
+    if (action === "pick-aisle") state.edit.category = button.dataset.value;
+    render({ keepScroll: true });
     return;
   }
   if (action === "toggle") {
@@ -1376,14 +1338,6 @@ document.body.addEventListener("click", (event) => {
     addStaple(button.dataset.id);
     return;
   }
-  if (action === "remove-staple") {
-    askRemoveStaple(button.dataset.id);
-    return;
-  }
-  if (action === "delete-item") {
-    askDeleteItem(button.dataset.id);
-    return;
-  }
   if (action === "clear") {
     askClear();
     return;
@@ -1392,7 +1346,7 @@ document.body.addEventListener("click", (event) => {
     openScanner();
     return;
   }
-  if (action === "back") {
+  if (action === "close-scan") {
     backToList();
     return;
   }
@@ -1416,7 +1370,8 @@ document.body.addEventListener("click", (event) => {
     if (pending) {
       window.clearTimeout(pending.timer);
       pendingDelete = null;
-      fetch(`/api/items/${pending.id}`, { method: "DELETE" }).catch(() => {});
+      const path = pending.kind === "staple" ? `/api/staples/${pending.id}` : `/api/items/${pending.id}`;
+      fetch(path, { method: "DELETE" }).catch(() => {});
     }
     stopCamera();
     fetch("/api/logout", { method: "POST" }).finally(() => {
@@ -1424,10 +1379,11 @@ document.body.addEventListener("click", (event) => {
       state.items = [];
       state.staples = [];
       state.snap = "";
-      state.sheet = null;
+      state.edit = null;
       state.scanner = null;
       state.confirm = null;
       state.hiddenIds = new Set();
+      state.hiddenStapleIds = new Set();
       state.onUndo = null;
       state.toast = "";
       state.offline = false;
@@ -1446,7 +1402,6 @@ document.body.addEventListener("click", (event) => {
 document.body.addEventListener("submit", (event) => {
   if (event.target.id === "login-form") login(event);
   if (event.target.id === "quick-form") quickAdd(event);
-  if (event.target.id === "sheet-form") saveSheet(event);
   if (event.target.id === "scan-name-form") saveScannedName(event);
   if (event.target.id === "scan-code-form") {
     event.preventDefault();
@@ -1459,25 +1414,40 @@ document.body.addEventListener("input", (event) => {
   if (event.target.id === "quick-name") state.quickName = event.target.value;
   if (event.target.id === "passcode") state.passcode = event.target.value;
   if (event.target.id === "scan-name" && state.scanner) state.scanner.name = event.target.value;
-  if (state.sheet && event.target.closest("#sheet-form")) readSheet();
+  if (state.edit && event.target.id === "edit-name") state.edit.name = event.target.value;
+  if (state.edit && event.target.id === "edit-qty") state.edit.quantity = event.target.value;
+});
+
+document.body.addEventListener("keydown", (event) => {
+  if (!state.edit) return;
+  if (event.target.id !== "edit-name" && event.target.id !== "edit-qty") return;
+  if (event.key === "Escape") {
+    event.preventDefault();
+    finishEdit(false);
+  }
+  if (event.key === "Enter") {
+    event.preventDefault();
+    finishEdit(true);
+  }
 });
 
 document.body.addEventListener("focusout", () => {
+  const gen = editGen;
   window.setTimeout(() => {
+    if (state.edit && gen === editGen && Date.now() >= editStayUntil) {
+      const active = document.activeElement;
+      if (!(active && active.closest && active.closest(".editing"))) {
+        finishEdit(true);
+        return;
+      }
+    }
+    if (!state.edit && document.querySelector(".editing")) {
+      render({ keepScroll: true });
+      return;
+    }
     if (!state.pendingRender || shouldDelayRender()) return;
     render({ keepScroll: true });
-  }, 60);
-});
-
-document.body.addEventListener("change", (event) => {
-  if (event.target.id === "f-store" && state.sheet) {
-    readSheet();
-    const allowed = CATEGORY_ORDER[state.sheet.store];
-    if (!allowed.includes(state.sheet.category)) state.sheet.category = allowed[0];
-    render({ keepScroll: true, focus: "f-store" });
-  }
-  if (event.target.id === "f-staple" && state.sheet) state.sheet.staple = event.target.checked;
-  if (event.target.id === "f-category" && state.sheet) state.sheet.category = event.target.value;
+  }, 80);
 });
 
 syncTheme();

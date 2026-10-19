@@ -256,9 +256,13 @@ select {
 }
 
 .staple {
-  background: var(--bg-elev);
-  border: 1.5px solid var(--line);
+  position: relative;
+  overflow: hidden;
+  padding: 0;
+  border: 0;
   border-radius: 16px;
+  background: #9d2c2c;
+  touch-action: pan-y;
 }
 
 .item {
@@ -335,14 +339,105 @@ select {
 
 .note { font-size: 1rem; }
 
-.tag {
-  display: inline-block;
+.star-mark {
   margin-left: 6px;
-  font-size: 0.82rem;
+  color: var(--accent);
+  font-size: 0.95rem;
+}
+
+.box-hit {
+  align-self: flex-start;
+  margin-top: 6px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+input.inline-name,
+input.inline-qty {
+  min-height: 44px;
+  background: transparent;
+}
+
+input.inline-name {
+  padding: 6px 0;
+  border: 0;
+  border-bottom: 2px solid var(--ink);
+  border-radius: 0;
+  font-size: 1.22rem;
   font-weight: 700;
-  letter-spacing: 0.02em;
-  color: var(--good);
-  vertical-align: 2px;
+}
+
+input.inline-qty {
+  width: 7.5rem;
+  padding: 8px 10px;
+  border-radius: 12px;
+  background: var(--bg);
+}
+
+.edit-line {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 8px;
+}
+
+.star {
+  width: 48px;
+  height: 48px;
+  flex: 0 0 48px;
+  border-radius: 14px;
+  border: 1.5px solid var(--line);
+  background: var(--bg);
+  color: var(--accent);
+  font-size: 1.45rem;
+  line-height: 1;
+}
+
+.star[aria-pressed="true"] {
+  background: var(--ink);
+  color: var(--bg);
+  border-color: var(--ink);
+}
+
+.minis {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.mini {
+  min-height: 40px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1.5px solid var(--line);
+  background: var(--chip);
+  color: var(--chip-ink);
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+
+.mini[aria-pressed="true"] {
+  background: var(--ink);
+  color: var(--bg);
+  border-color: var(--ink);
+}
+
+.close-x {
+  position: absolute;
+  top: calc(8px + env(safe-area-inset-top));
+  right: 8px;
+  z-index: 2;
+  width: 44px;
+  height: 44px;
+  border: 0;
+  border-radius: 22px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 2rem;
+  line-height: 1;
+  font-weight: 400;
 }
 
 .edit {
@@ -366,7 +461,18 @@ select {
 
 .clear-row { margin-top: 18px; }
 
-.staple { padding: 14px; display: flex; flex-direction: column; gap: 8px; }
+.staple-face {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+  background: var(--bg-elev);
+  border: 1.5px solid var(--line);
+  border-radius: 16px;
+  transition: transform 0.16s ease;
+}
+
+.staple.dragging .staple-face { transition: none; }
 
 .staple h3 {
   margin: 0;

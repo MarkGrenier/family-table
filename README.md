@@ -132,14 +132,15 @@ Open the list on both phones. When one of you adds or checks something, the othe
 ## Using the list
 
 - The buttons at the top are Costco, Local, Amazon, and Staples. Swipe left or right on the list to move between Costco, Local, and Amazon.
-- Type a name and tap **Add**. It goes on the store you are looking at. If you have bought that thing before, the aisle and brand are filled in from last time. A new Costco or local item starts as Shelf-stable. Amazon has no aisles.
-- Tap **Scan** to use the camera on a barcode, mostly for things you buy again. The first time, the phone asks to use the camera. If that barcode was scanned before, the item goes on the list in one step, with the same name, store, aisle, and brand. If it is new, the list looks up a name. You can change it before saving. Next time, that barcode is one step. If the camera will not open, type the numbers under the bars.
+- Type a name and tap **Add**, or tap **Scan**. It goes on the store you are looking at. If you have bought that thing before, the aisle and brand are filled in from last time. A new Costco or local item starts as Shelf-stable. Amazon has no aisles.
+- Tap **Scan** to use the camera on a barcode, mostly for things you buy again. The first time, the phone asks to use the camera. If that barcode was scanned before, the item goes on the list in one step. If it is new, the list looks up a name. You can change it before saving. Next time, that barcode is one step. If the camera will not open, type the numbers under the bars. The **×** on the camera screen closes it. On the name screen, swipe right to go back.
 - Tap an item to mark it bought. Bought items drop to the bottom and turn grey. Tap again to put it back.
-- Hold your finger on an item to change the note, brand, Amazon code, aisle, or staple.
+- Hold your finger on an item to rename it right there. In that same row you can set a short quantity, tap the star if you buy it often, and tap a store or aisle to move it. Done, or tapping somewhere else, saves it. If you didn't change anything, it just closes.
+- A brand, when we know it, shows in grey under the name.
 - Swipe an item to the left to remove it. **Undo** shows for a few seconds.
-- Staples, the edit screen, and the scanner each have a **Back** button. Swipe right from any of those to return to the list.
+- Swipe left or right on the page to move between Costco, Local, and Amazon. From Staples or the scanner, swipe right to come back to the list.
 - **Clear already got** takes the bought items off that store. It asks you first.
-- A staple is something you buy often. Tick **Staple** when you edit an item, or tap **Add a staple** on the Staples tab. **Add to this week** puts it on that store's list. If it is already there and not bought yet, the button says **On the list**. After you check it off, you can add it again. A scanned barcode is remembered the same way.
+- A staple is something you buy often. Hold the item and tap the star. On the Staples tab, **Add to this week** puts it on that store's list. If it is already there and not bought yet, the button says **On the list**. Swipe a staple to the left to take it off the Staples tab. It stays on this week's list if it is already there. A scanned barcode is remembered the same way.
 - **Sign out on this phone** is at the bottom. It only signs out that phone.
 
 ## If something goes wrong
