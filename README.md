@@ -72,7 +72,7 @@ A browser window opens. Sign in to Cloudflare and approve the question it asks. 
 
 The phones already have the grocery list. This step adds recipes, the week plan, and family events. It does not erase anything already on the list.
 
-The new file is `migrations/0003_food.sql`. Older migration files stay as they are.
+New files are added as `migrations/0003_food.sql`, `migrations/0004_recipe_sections.sql`, and so on. Older migration files stay as they are. The command below applies every one that is not on the live list yet.
 
 ```bash
 npx wrangler d1 migrations apply grocery --remote
