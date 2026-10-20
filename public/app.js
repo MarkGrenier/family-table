@@ -25,6 +25,7 @@ const state = {
   comment: "",
   calMode: "week",
   calStart: null,
+  monthPick: null,
   prepDone: {},
   undo: null,
   todayPanel: "ingredients",
@@ -155,7 +156,9 @@ function render() {
   }
   const bare = ["recipe", "feedback", "item", "add-item"].includes(state.page?.kind);
   const todayCook = state.tab === "today" && !state.page && Boolean(tonightRecipe());
-  app.innerHTML = `<main class="${bare ? "bare" : todayCook ? "screen today-screen" : "screen"}">${bodyHtml()}</main>${bare ? "" : tabsHtml()}${sheetHtml()}${toastHtml()}`;
+  const prepDock = todayCook && prepStyle() === "bottom" && duePrepSteps().length;
+  const mainClass = bare ? "bare" : todayCook ? `screen today-screen${prepDock ? " has-prep" : ""}` : "screen";
+  app.innerHTML = `<main class="${mainClass}">${bodyHtml()}</main>${bare ? "" : tabsHtml()}${sheetHtml()}${toastHtml()}`;
   const focus = document.getElementById("add-search");
   if (focus && state.page?.kind === "add-item") focus.focus();
 }
@@ -210,7 +213,10 @@ function todayHtml() {
       state.todayServingsOpen = false;
     }
   }
-  return `${prepLine()}
+  const style = prepStyle();
+  const showLine = style === "line" || (style === "photo" && !(recipe && recipe.imageUrl));
+  return `${style === "header" ? prepHeader() : ""}
+    ${showLine ? prepLine() : ""}
     ${recipe && dinner ? recipeView(recipe, dinner.type === "leftovers" ? "leftovers" : "today") : emptyTonight()}
     ${eventsHtml(events)}
     ${recipe ? cookDock(recipe, true) : ""}`;
@@ -250,11 +256,49 @@ function duePrepSteps() {
   return steps;
 }
 
+function prepStyle() {
+  const value = new URLSearchParams(location.search).get("prepStyle");
+  if (value === "header" || value === "photo" || value === "bottom") return value;
+  return "line";
+}
+
+function prepCountLabel() {
+  const count = duePrepSteps().length;
+  if (!count) return "";
+  return `Prep for tomorrow · ${count} ${count === 1 ? "step" : "steps"}`;
+}
+
+function softStep(text) {
+  const clean = String(text).replace(/[.]+$/, "").trim();
+  return clean.charAt(0).toLowerCase() + clean.slice(1);
+}
+
 function prepLine() {
   const steps = duePrepSteps();
   if (!steps.length) return "";
   const word = steps.length === 1 ? "step" : "steps";
   return `<button class="prep-line" type="button" data-action="open-prep">Prep for tomorrow: ${steps.length} ${word}</button>`;
+}
+
+function prepHeader() {
+  const steps = duePrepSteps();
+  if (!steps.length) return "";
+  const label = steps.length === 1
+    ? `🌙 Tonight: ${softStep(steps[0].text)} for tomorrow`
+    : `🌙 Tonight: ${steps.length} steps for tomorrow`;
+  return `<button class="prep-header" type="button" data-action="open-prep">${esc(label)}</button>`;
+}
+
+function prepPhotoTag() {
+  const label = prepCountLabel();
+  if (!label) return "";
+  return `<button class="prep-tag" type="button" data-action="open-prep">${esc(label)}</button>`;
+}
+
+function prepChip() {
+  const label = prepCountLabel();
+  if (!label) return "";
+  return `<button class="prep-chip" type="button" data-action="open-prep">${esc(label)}</button>`;
 }
 
 function prepSheet() {
@@ -302,7 +346,30 @@ function monthHtml() {
       <button type="button" data-action="cal-shift" data-delta="1" aria-label="Next month">${chevRight()}</button>
       <button class="icon-btn is-on" type="button" data-action="cal-mode" aria-label="Back to this week">${cal()}</button>
     </div>
-    <div class="cal-board">${monthGrid(anchor)}</div>`;
+    <div class="cal-board">${monthGrid(anchor, monthSelection(anchor))}</div>
+    ${monthPanel(monthSelection(anchor))}`;
+}
+
+function monthSelection(anchor) {
+  const month = String(anchor || "").slice(0, 7);
+  const today = nyToday();
+  if (state.monthPick && state.monthPick.slice(0, 7) === month && state.monthPick >= today) return state.monthPick;
+  if (today.slice(0, 7) === month) return today;
+  const first = `${month}-01`;
+  return first >= today ? first : today;
+}
+
+function monthPanel(date) {
+  const meals = mealsOn(date);
+  const events = eventsOn(date);
+  const heading = date === nyToday() ? `Today · ${longDate(date)}` : longDate(date);
+  return `<section class="month-panel">
+      <div class="month-panel-head"><h2>${esc(heading)}</h2>
+        <button class="text-green" type="button" data-action="open-day" data-date="${esc(date)}">Edit</button>
+      </div>
+      ${meals.length ? meals.map(mealRow).join("") : `<p class="muted">Nothing planned</p>`}
+      ${events.map((event) => `<p class="event-line">${event.time ? `<time>${esc(event.time)}</time>` : ""}${esc(event.title)}</p>`).join("")}
+    </section>`;
 }
 
 function monthTitle(iso) {
@@ -344,7 +411,7 @@ function mealLabel(meal) {
   return "Dinner";
 }
 
-function monthGrid(iso) {
+function monthGrid(iso, selected) {
   const [year, month] = iso.split("-").map(Number);
   const first = `${iso.slice(0, 7)}-01`;
   const start = mondayOf(first);
@@ -356,16 +423,17 @@ function monthGrid(iso) {
   }
   const names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
   return `<div class="month-names">${names.map((name) => `<span>${name}</span>`).join("")}</div>
-    <div class="month-grid">${cells.map((date) => monthCell(date, Number(date.slice(5, 7)) === month, year)).join("")}</div>`;
+    <div class="month-grid">${cells.map((date) => monthCell(date, Number(date.slice(5, 7)) === month, selected)).join("")}</div>`;
 }
 
-function monthCell(date, inMonth) {
+function monthCell(date, inMonth, selected) {
   const today = date === nyToday();
   const past = date < nyToday();
   const planned = inMonth && !past && (mealsOn(date).length > 0 || eventsOn(date).length > 0);
   const open = inMonth && !past;
-  return `<div class="month-cell${inMonth ? "" : " is-out"}${today ? " is-today" : ""}${past ? " is-past" : ""}">
-      <button type="button" ${open ? `data-action="open-day" data-date="${esc(date)}"` : "disabled"}>${Number(date.slice(8))}</button>
+  const picked = open && date === selected;
+  return `<div class="month-cell${inMonth ? "" : " is-out"}${today ? " is-today" : ""}${past ? " is-past" : ""}${picked ? " is-picked" : ""}">
+      <button type="button" ${open ? `data-action="select-day" data-date="${esc(date)}" aria-pressed="${picked ? "true" : "false"}"` : "disabled"}>${Number(date.slice(8))}</button>
       <span class="dot${planned ? " is-on" : ""}"></span>
     </div>`;
 }
@@ -455,7 +523,8 @@ function recipeView(recipe, mode) {
   const factor = servings / (recipe.servings || 1);
   const panel = embedded ? state.todayPanel || "ingredients" : state.page.panel || "ingredients";
   const open = embedded ? state.todayServingsOpen : state.page.servingsOpen;
-  return `${hero(recipe, !embedded)}
+  const tag = embedded && prepStyle() === "photo" && recipe.imageUrl ? prepPhotoTag() : "";
+  return `${hero(recipe, !embedded, tag)}
     <div class="pad">
       ${mode === "leftovers" ? `<p class="leftover-flag">Leftovers</p>` : ""}
       <div class="title-row"><h1>${esc(recipe.name)}</h1>
@@ -475,18 +544,21 @@ function recipeView(recipe, mode) {
 
 function cookDock(recipe, raised) {
   const cooked = Boolean(recipe.cookedToday);
-  return `<div class="dock${raised ? " dock-raised" : ""}">
+  const chip = raised && prepStyle() === "bottom" ? prepChip() : "";
+  return `<div class="dock${raised ? " dock-raised" : ""}${chip ? " has-prep" : ""}">
+      ${chip}
       ${cooked ? `<div class="cooked-pill">✓ Cooked</div><button class="gray-btn" type="button" data-action="feedback" data-id="${esc(recipe.id)}">Give Feedback</button>` : `<button class="outline-btn" type="button" data-action="mark-cooked" data-id="${esc(recipe.id)}">${checkOutline()} Mark cooked</button><button class="green-btn" type="button" data-action="cook" data-id="${esc(recipe.id)}">Start cooking</button>`}
     </div>`;
 }
 
-function hero(recipe, showBack) {
+function hero(recipe, showBack, prepTag = "") {
   const menu = `<button class="float right" type="button" data-action="recipe-menu" aria-label="More">${dots()}</button>`;
   if (!recipe.imageUrl) {
     return `<div class="topbar">${showBack ? `<button class="back" type="button" data-action="back" aria-label="Back">${chevLeft()}</button>` : "<span></span>"}<span></span>${menu.replace("float right", "text-btn")}</div>`;
   }
   return `<div class="hero"><img src="${esc(safeSrc(recipe.imageUrl))}" alt="">
       ${showBack ? `<button class="float left" type="button" data-action="back" aria-label="Back">${chevLeft()}</button>` : ""}
+      ${prepTag}
       ${menu}
     </div>`;
 }
@@ -771,10 +843,20 @@ async function onClick(event) {
   if (action === "cal-shift") return shiftCalendar(Number(button.dataset.delta));
   if (action === "cal-mode") {
     state.calMode = state.calMode === "month" ? "week" : "month";
-    if (state.calMode === "month") state.calStart = `${nyToday().slice(0, 7)}-01`;
+    if (state.calMode === "month") {
+      state.calStart = `${nyToday().slice(0, 7)}-01`;
+      state.monthPick = null;
+    }
     state.page = null;
     render();
     refresh(true);
+    return;
+  }
+  if (action === "select-day") {
+    const date = button.dataset.date;
+    if (!date || date < nyToday()) return;
+    state.monthPick = date;
+    render();
     return;
   }
   if (action === "open-prep") {
@@ -1405,6 +1487,7 @@ function shiftCalendar(delta) {
   const [year, month] = current.split("-").map(Number);
   const next = new Date(Date.UTC(year, month - 1 + delta, 1));
   state.calStart = next.toISOString().slice(0, 10);
+  state.monthPick = null;
   render();
   refresh(true);
 }
