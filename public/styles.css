@@ -844,6 +844,24 @@ body:has(.night-screen),
 
 .recipes-head { display: flex; align-items: center; gap: 0.25rem; }
 .recipes-head h1 { flex: 1; text-align: left; }
+.pick-bar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  margin-bottom: 0.15rem;
+}
+.pick-bar h1 {
+  position: absolute;
+  left: 2.2rem;
+  right: 2.2rem;
+  text-align: center;
+  font-size: 1.15rem;
+  line-height: 1.2;
+  pointer-events: none;
+}
+.day-meals { margin-top: 1.15rem; }
+.day-meals .primary { margin-top: 0.4rem; }
 .review-pill {
   display: inline-flex;
   align-self: flex-start;

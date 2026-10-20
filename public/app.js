@@ -10,8 +10,8 @@ const state = {
   items: [],
   recipeQuery: "",
   recipeSort: "favorites",
-  dayQuery: "",
   addQuery: "",
+  pickBack: null,
   notice: "",
   error: "",
   loginError: "",
@@ -33,7 +33,6 @@ const state = {
   todayServings: null,
   todayServingsOpen: false,
   todayId: null,
-  mealQuery: "",
 };
 
 const SECTIONS = [
@@ -155,6 +154,7 @@ function viewKey() {
   if (page.kind === "cook") return `cook:${page.id}:${page.step || 0}`;
   if (page.kind === "recipe") return `recipe:${page.id}:${page.planDate || ""}:${page.planMeal || ""}`;
   if (page.kind === "day") return `day:${page.date}`;
+  if (page.kind === "pick") return `pick:${page.date}:${page.meal || "dinner"}`;
   if (page.kind === "feedback") return `feedback:${page.id}`;
   if (page.kind === "item") return `item:${page.id}`;
   return page.kind;
@@ -228,6 +228,7 @@ function loginHtml() {
 
 function bodyHtml() {
   if (state.page?.kind === "day") return dayHtml(state.page.date);
+  if (state.page?.kind === "pick") return pickHtml();
   if (state.page?.kind === "recipe") return recipeHtml(state.page.id);
   if (state.page?.kind === "feedback") return feedbackHtml(state.page.id);
   if (state.page?.kind === "item") return itemHtml(state.page.id);
@@ -442,10 +443,8 @@ function monthPanel(date) {
   const events = eventsOn(date);
   const heading = date === nyToday() ? `Today · ${longDate(date)}` : longDate(date);
   return `<section class="month-panel">
-      <div class="month-panel-head"><h2>${esc(heading)}</h2>
-        <button class="text-green" type="button" data-action="open-day" data-date="${esc(date)}">Edit</button>
-      </div>
-      ${meals.length ? meals.map(mealRow).join("") : `<p class="muted">Nothing planned</p>`}
+      <div class="month-panel-head"><h2>${esc(heading)}</h2></div>
+      ${meals.length ? meals.map(mealRow).join("") : `<button class="week-empty" type="button" data-action="add-meal" data-date="${esc(date)}" data-meal="dinner">Nothing planned</button>`}
       ${events.map((event) => `<p class="event-line">${event.time ? `<time>${esc(event.time)}</time>` : ""}${esc(event.title)}</p>`).join("")}
     </section>`;
 }
@@ -524,32 +523,28 @@ function mealsOn(date) {
 
 function dayHtml(date) {
   const dinner = mealOn(date, "dinner");
-  const recipe = recipeForEntry(dinner);
-  if (dinner?.type === "leftovers") return leftoversNight(dinner, recipe, { back: true, remove: true });
-  const planned = !dinner
-    ? ""
-    : `<p class="title day-title">${recipe ? `<button type="button" class="text-link" data-action="open-recipe" data-id="${esc(recipe.id)}" data-date="${esc(date)}" data-meal="dinner">${esc(planTitle(dinner))}</button>` : esc(planTitle(dinner))}</p><button class="text-green" type="button" data-action="clear-meal" data-id="${esc(dinner.id)}">Remove</button>`;
+  if (dinner?.type === "leftovers") return leftoversNight(dinner, recipeForEntry(dinner), { back: true, remove: true });
+  const meals = mealsOn(date);
+  const body = meals.length
+    ? meals.map(mealRow).join("")
+    : `<button class="primary" type="button" data-action="add-meal" data-date="${esc(date)}" data-meal="dinner">Add dinner</button>`;
   return `<button class="text-green" type="button" data-action="back">Week</button>
     <h1>${esc(longDate(date))}</h1>
-    <section><p class="kicker">Dinner</p>
-      ${planned}
-      ${pickerHtml(date, "dinner", dinner?.type !== "leftovers")}
-    </section>`;
+    <section class="day-meals">${body}</section>`;
 }
 
-function pickerHtml(date, meal, showRecipes = true) {
-  const query = state.dayQuery.trim().toLowerCase();
-  const recipes = (query ? state.recipes.filter((recipe) => recipe.name.toLowerCase().includes(query)) : state.recipes).slice(0, 8);
-  const finder = showRecipes ? `<label class="search">Search recipes
-      <input class="field-box day-search" type="search" value="${esc(state.dayQuery)}" placeholder="Chili, pasta…" data-date="${esc(date)}" data-meal="${meal}">
+function pickHtml() {
+  const date = state.page.date;
+  const label = formatUtc(date, { weekday: "short", month: "short", day: "numeric" });
+  return `<div class="pick-bar"><button class="text-green" type="button" data-action="cancel-pick">Cancel</button><h1>Add to ${esc(label)}</h1></div>
+    ${state.error ? `<p class="error">${esc(state.error)}</p>` : ""}
+    <label class="search">
+      <input id="recipe-search" class="field-box" type="search" value="${esc(state.recipeQuery)}" placeholder="Search recipes" aria-label="Search recipes" autocomplete="off">
     </label>
-    ${recipes.map((recipe) => `<button class="link-row" type="button" data-action="pick-recipe" data-id="${esc(recipe.id)}" data-date="${esc(date)}" data-meal="${meal}">${esc(recipe.name)}</button>`).join("")}` : "";
-  return `${finder}
-    <button class="gray-btn" type="button" data-action="leftovers" data-date="${esc(date)}" data-meal="${meal}">Leftovers</button>
-    <form data-form="day-note" class="stack day-note">
-      <input class="field-box" name="note" maxlength="140" placeholder="Eating out" aria-label="Short note" data-date="${esc(date)}" data-meal="${meal}">
-      <button class="gray-btn" type="submit">Save note</button>
-    </form>`;
+    <div class="sort" role="group" aria-label="Sort recipes">
+      ${sortButton("favorites", "Favorites")}${sortButton("recent", "Recent")}${sortButton("az", "A-Z")}
+    </div>
+    <div id="recipe-list">${recipeListHtml()}</div>`;
 }
 
 function recipesHtml() {
@@ -560,7 +555,7 @@ function recipesHtml() {
     <div class="sort" role="group" aria-label="Sort recipes">
       ${sortButton("favorites", "Favorites")}${sortButton("recent", "Recent")}${sortButton("az", "A-Z")}
     </div>
-    <div id="recipe-list">${recipeList(visibleRecipes())}</div>`;
+    <div id="recipe-list">${recipeListHtml()}</div>`;
 }
 
 function sortButton(sort, label) {
@@ -584,10 +579,29 @@ function visibleRecipes() {
   return recipes.sort((a, b) => Number(Boolean(b.favorite)) - Number(Boolean(a.favorite)) || byName(a, b));
 }
 
+function recipeListHtml() {
+  if (state.page?.kind !== "pick") return recipeList(visibleRecipes());
+  const date = state.page.date;
+  const meal = state.page.meal || "dinner";
+  const query = state.recipeQuery.trim().toLowerCase();
+  const picks = chefPicks().filter((recipe) => !query || recipe.name.toLowerCase().includes(query));
+  const pickIds = new Set(picks.map((recipe) => recipe.id));
+  const rest = visibleRecipes().filter((recipe) => !pickIds.has(recipe.id));
+  if (!picks.length && !rest.length) return `<p class="empty">${query ? "Nothing matches that." : "No recipes yet."}</p>`;
+  const options = { pick: true, date, meal };
+  return `${picks.length ? `<p class="pick-label">Chef's picks</p>${recipeRows(picks, options)}` : ""}${recipeRows(rest, options)}`;
+}
+
 function recipeList(recipes) {
   if (!recipes.length) return `<p class="empty">${state.recipeQuery ? "Nothing matches that." : "No recipes yet."}</p>`;
+  return recipeRows(recipes);
+}
+
+function recipeRows(recipes, options = {}) {
+  const action = options.pick ? "pick-recipe" : "open-recipe";
+  const when = options.pick ? ` data-date="${esc(options.date)}" data-meal="${esc(options.meal)}"` : "";
   return recipes.map((recipe) => `<div class="recipe-row">
-      <button type="button" data-action="open-recipe" data-id="${esc(recipe.id)}" class="recipe-open">
+      <button type="button" data-action="${action}" data-id="${esc(recipe.id)}"${when} class="recipe-open">
         ${recipeThumb(recipe)}
         <span class="recipe-copy"><span>${esc(recipe.name)}</span>${recipe.needsReview ? `<span class="review-pill">Needs a look</span>` : ""}${lastMadeText(recipe) ? `<span class="small">${esc(lastMadeText(recipe))}</span>` : ""}</span>
       </button>
@@ -815,7 +829,7 @@ function newRecipeHtml() {
 
 function mealContext() {
   const sheet = state.sheet;
-  if (sheet?.date && sheet?.meal && (sheet.kind === "recipe-menu" || sheet.kind === "change-meal" || sheet.kind === "edit-recipe")) {
+  if (sheet?.date && sheet?.meal && (sheet.kind === "recipe-menu" || sheet.kind === "edit-recipe")) {
     return { date: sheet.date, meal: sheet.meal };
   }
   if (state.page?.kind === "recipe" && state.page.planDate && state.page.planMeal) {
@@ -844,29 +858,10 @@ function activeRecipe() {
   return null;
 }
 
-function changeMealHtml() {
-  const query = state.mealQuery.trim().toLowerCase();
-  const matches = (recipe) => !query || recipe.name.toLowerCase().includes(query);
-  const recipes = state.recipes.filter(matches).sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
-  const picks = chefPicks().filter(matches);
-  return `<div class="sheet"><div class="sheet-card" role="dialog" aria-label="Swap meal">
-      <div class="sheet-head"><button class="text-green" type="button" data-action="close-sheet">Cancel</button><strong>Swap meal</strong><span></span></div>
-      ${state.sheet.error ? `<p class="error">${esc(state.sheet.error)}</p>` : ""}
-      <label class="search">Search
-        <input id="meal-search" class="field-box" type="search" value="${esc(state.mealQuery)}" placeholder="Search recipes" autocomplete="off">
-      </label>
-      ${picks.length ? `<p class="pick-label">Chef's picks</p><div class="pick-list">${picks.map((recipe) => pickRow(recipe, "pick-alternate")).join("")}</div>` : ""}
-      <button class="menu-row" type="button" data-action="pick-leftovers">Leftovers</button>
-      <div class="pick-list">${recipes.length ? recipes.map((recipe) => pickRow(recipe, "pick-change")).join("") : `<p class="muted">Nothing matches that.</p>`}</div>
-    </div></div>`;
-}
-
-function pickRow(recipe, action) {
-  return `<button class="pick-row" type="button" data-action="${action}" data-id="${esc(recipe.id)}">${recipeThumb(recipe)}<span>${esc(recipe.name)}</span></button>`;
-}
-
 function chefPicks() {
-  const context = mealContext();
+  const context = state.page?.kind === "pick"
+    ? { date: state.page.date, meal: state.page.meal || "dinner" }
+    : mealContext();
   if (!context) return [];
   const entry = mealOn(context.date, context.meal);
   const currentId = entry?.recipeId || null;
@@ -914,34 +909,6 @@ function editableSteps(recipe) {
   const cook = (recipe.cookSteps || []).map((step) => (typeof step === "string" ? step : step?.text)).filter(Boolean);
   const lines = cook.length ? cook : (recipe.steps || []).filter(Boolean);
   return lines.join("\n");
-}
-
-async function changeMeal(extra) {
-  const context = mealContext();
-  if (!context) return;
-  const nextId = extra.recipeId || null;
-  const body = { date: context.date, meal: context.meal, type: extra.type };
-  if (nextId) body.recipeId = nextId;
-  if (extra.note) body.note = extra.note;
-  if (Array.isArray(extra.alternates)) body.alternates = extra.alternates;
-  try {
-    await api("/api/plan", { method: "POST", body });
-    if (state.page?.kind === "recipe") {
-      if (nextId && recipeById(nextId)) {
-        const recipe = recipeById(nextId);
-        state.page = { kind: "recipe", id: nextId, servings: recipe.servings || 4, panel: "ingredients", planDate: context.date, planMeal: context.meal };
-      } else if (!nextId) {
-        state.tab = context.date === nyToday() ? "today" : "calendar";
-        state.page = null;
-      }
-    }
-    state.sheet = null;
-    state.mealQuery = "";
-    await refresh(true);
-  } catch (error) {
-    state.sheet = { kind: "change-meal", error: error.message };
-    render();
-  }
 }
 
 function ingredientBase() {
@@ -1143,12 +1110,11 @@ function sheetHtml() {
     const recipe = activeRecipe();
     return `<div class="sheet"><div class="sheet-card" role="dialog" aria-label="Recipe">
         <div class="sheet-head"><span></span><button type="button" data-action="close-sheet" aria-label="Close">✕</button></div>
-        ${planned ? `<button class="menu-row" type="button" data-action="change-meal">Swap meal</button>` : ""}
+        ${planned ? `<button class="menu-row" type="button" data-action="add-meal" data-date="${esc(planned.date)}" data-meal="${esc(planned.meal)}">Add</button>` : ""}
         ${planned ? `<button class="menu-row" type="button" data-action="remove-meal" data-id="${esc(planned.id)}">Remove</button>` : ""}
         ${recipe ? `<button class="menu-row" type="button" data-action="edit-recipe">Edit recipe</button>` : ""}
       </div></div>`;
   }
-  if (state.sheet?.kind === "change-meal") return changeMealHtml();
   if (state.sheet?.kind === "edit-recipe") return editRecipeHtml();
   if (state.sheet?.kind === "cook-list") {
     const recipe = recipeById(state.page?.id);
@@ -1291,10 +1257,12 @@ async function onClick(event) {
     state.page = null;
     state.sheet = null;
     state.swipeId = null;
+    state.pickBack = null;
     render();
     return;
   }
   if (action === "back") {
+    if (state.page?.kind === "pick") return closePick();
     const kind = state.page?.kind;
     state.sheet = null;
     if (kind === "recipe" && state.recipeBack) {
@@ -1316,9 +1284,9 @@ async function onClick(event) {
   if (action === "plan-dinner" || action === "open-day") {
     const date = button.dataset.date || nyToday();
     if (date < nyToday()) return;
+    if (!mealOn(date, "dinner")) return openAddMeal(date, "dinner");
     state.tab = "calendar";
     state.page = { kind: "day", date };
-    state.dayQuery = "";
     state.sheet = null;
     render();
     return;
@@ -1339,9 +1307,12 @@ async function onClick(event) {
     const date = button.dataset.date;
     if (!date || date < nyToday()) return;
     state.monthPick = date;
+    if (!mealOn(date, "dinner")) return openAddMeal(date, "dinner");
     render();
     return;
   }
+  if (action === "add-meal") return openAddMeal(button.dataset.date || nyToday(), button.dataset.meal || "dinner");
+  if (action === "cancel-pick") return closePick();
   if (action === "open-prep") {
     state.sheet = { kind: "prep" };
     render();
@@ -1355,7 +1326,6 @@ async function onClick(event) {
   }
   if (action === "undo-check") return undoCheck();
   if (action === "pick-recipe") return planRecipe(button.dataset.date, button.dataset.meal, button.dataset.id);
-  if (action === "leftovers") return savePlanEntry(leftoversPlan(button.dataset.date, button.dataset.meal));
   if (action === "clear-meal" || action === "remove-meal") return removeMeal(button.dataset.id);
   if (action === "open-recipe") {
     const recipe = recipeById(button.dataset.id);
@@ -1417,12 +1387,6 @@ async function onClick(event) {
     render();
     return;
   }
-  if (action === "change-meal") {
-    state.mealQuery = "";
-    state.sheet = { kind: "change-meal", error: "", date: state.sheet?.date || null, meal: state.sheet?.meal || null };
-    render();
-    return;
-  }
   if (action === "edit-recipe") {
     const recipe = activeRecipe();
     if (!recipe) return;
@@ -1444,19 +1408,6 @@ async function onClick(event) {
     render();
     if (action === "add-ingredient") document.querySelector(".ing-edit:last-of-type [name=ing-name]")?.focus();
     return;
-  }
-  if (action === "pick-change") return changeMeal({ type: "recipe", recipeId: button.dataset.id });
-  if (action === "pick-alternate") {
-    const context = mealContext();
-    if (!context) return;
-    const nextId = button.dataset.id;
-    return changeMeal({ type: "recipe", recipeId: nextId, alternates: swappedAlternates(mealOn(context.date, context.meal), nextId) });
-  }
-  if (action === "pick-leftovers") {
-    const context = mealContext();
-    if (!context) return;
-    const plan = leftoversPlan(context.date, context.meal);
-    return changeMeal({ type: "leftovers", recipeId: plan.recipeId, note: plan.note });
   }
   if (action === "cook") return openCook(button.dataset.id);
   if (action === "cook-step") return moveCook(Number(button.dataset.delta));
@@ -1556,10 +1507,6 @@ async function onSubmit(event) {
     return signIn(state.passcode);
   }
   if (form.dataset.form === "item-edit") return saveItem(new FormData(form));
-  if (form.dataset.form === "day-note") {
-    const input = form.querySelector("input");
-    return savePlanEntry({ date: input.dataset.date, meal: input.dataset.meal, type: "note", note: new FormData(form).get("note") });
-  }
   if (form.dataset.form === "fetch-recipe") return fetchRecipe(new FormData(form).get("url"));
   if (form.dataset.form === "edit-recipe") return saveRecipeEdit(form);
 }
@@ -1572,7 +1519,7 @@ function onInput(event) {
   if (event.target.id === "recipe-search") {
     state.recipeQuery = event.target.value;
     const list = document.getElementById("recipe-list");
-    if (list) list.innerHTML = recipeList(visibleRecipes());
+    if (list) list.innerHTML = recipeListHtml();
     return;
   }
   if (event.target.id === "add-search") {
@@ -1582,25 +1529,6 @@ function onInput(event) {
     return;
   }
   if (event.target.id === "feedback-comment") state.comment = event.target.value;
-  if (event.target.id === "meal-search") {
-    state.mealQuery = event.target.value;
-    render();
-    const field = document.getElementById("meal-search");
-    if (field) {
-      field.focus();
-      field.setSelectionRange(field.value.length, field.value.length);
-    }
-    return;
-  }
-  if (event.target.classList?.contains("day-search")) {
-    state.dayQuery = event.target.value;
-    render();
-    const field = document.querySelector(".day-search");
-    if (field) {
-      field.focus();
-      field.setSelectionRange(field.value.length, field.value.length);
-    }
-  }
 }
 
 async function signIn(passcode) {
@@ -1626,18 +1554,49 @@ async function signIn(passcode) {
   }
 }
 
-async function savePlanEntry(body) {
+function openAddMeal(date, meal) {
+  if (!date || date < nyToday()) return;
+  state.pickBack = { tab: state.tab, page: state.page ? { ...state.page } : null };
+  state.recipeQuery = "";
+  state.error = "";
+  state.sheet = null;
+  state.tab = "recipes";
+  state.page = { kind: "pick", date, meal: meal || "dinner" };
+  render();
+}
+
+function closePick() {
+  const back = state.pickBack;
+  state.recipeQuery = "";
+  state.error = "";
+  state.sheet = null;
+  state.pickBack = null;
+  state.tab = back?.tab || state.tab;
+  state.page = back?.page || null;
+  render();
+}
+
+async function planRecipe(date, meal, recipeId) {
+  const slot = meal || "dinner";
   try {
-    await api("/api/plan", { method: "POST", body });
+    await api("/api/plan", { method: "POST", body: { date, meal: slot, type: "recipe", recipeId } });
+    state.recipeQuery = "";
+    state.error = "";
+    state.pickBack = null;
+    state.sheet = null;
+    if (date === nyToday()) {
+      state.tab = "today";
+      state.page = null;
+    } else {
+      state.tab = "calendar";
+      state.monthPick = date;
+      state.page = { kind: "day", date };
+    }
     await refresh(true);
   } catch (error) {
     state.error = error.message;
     render();
   }
-}
-
-async function planRecipe(date, meal, recipeId) {
-  await savePlanEntry({ date, meal, type: "recipe", recipeId });
 }
 
 async function removeMeal(id) {
@@ -2091,33 +2050,6 @@ function tonightRecipe() {
   return recipeForEntry(mealOn(nyToday(), "dinner"));
 }
 
-function swappedAlternates(entry, nextId) {
-  const previous = (entry?.alternates || []).filter((id) => id && id !== nextId);
-  const oldId = entry?.type === "recipe" ? entry.recipeId : null;
-  const next = [];
-  if (oldId && oldId !== nextId) next.push(oldId);
-  for (const id of previous) if (!next.includes(id)) next.push(id);
-  return next.slice(0, 3);
-}
-
-function leftoversPlan(date, meal) {
-  const current = mealOn(date, meal);
-  const source = leftoverSource(date, meal);
-  const note = current?.note || source?.name || null;
-  const recipeId = current?.note ? current.recipeId || source?.id || null : source?.id || current?.recipeId || null;
-  const body = { date, meal, type: "leftovers" };
-  if (recipeId) body.recipeId = recipeId;
-  if (note) body.note = note;
-  return body;
-}
-
-function leftoverSource(date, meal) {
-  const earlier = state.plan
-    .filter((entry) => entry.type === "recipe" && entry.recipeId && entry.meal === meal && entry.date < date)
-    .sort((a, b) => (a.date < b.date ? 1 : -1));
-  return earlier[0] ? recipeById(earlier[0].recipeId) : null;
-}
-
 function canShiftMonth(delta) {
   if (delta > 0) return true;
   const current = state.calStart || `${nyToday().slice(0, 7)}-01`;
@@ -2164,7 +2096,8 @@ function visibleRange() {
     if (daysBetween(from, gridEnd) > 60) from = addDays(gridEnd, -60);
     return { from, to: gridEnd };
   }
-  const end = state.page?.kind === "day" && state.page.date > addDays(today, 6) ? state.page.date : addDays(today, 6);
+  const focus = state.page?.kind === "day" || state.page?.kind === "pick" ? state.page.date : "";
+  const end = focus > addDays(today, 6) ? focus : addDays(today, 6);
   return { from: today, to: addDays(end, 1) };
 }
 function formatUtc(iso, options) {
