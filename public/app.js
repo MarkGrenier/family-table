@@ -156,9 +156,7 @@ function render() {
   }
   const bare = ["recipe", "feedback", "item", "add-item"].includes(state.page?.kind);
   const todayCook = state.tab === "today" && !state.page && Boolean(tonightRecipe());
-  const prepDock = todayCook && prepStyle() === "bottom" && duePrepSteps().length;
-  const mainClass = bare ? "bare" : todayCook ? `screen today-screen${prepDock ? " has-prep" : ""}` : "screen";
-  app.innerHTML = `<main class="${mainClass}">${bodyHtml()}</main>${bare ? "" : tabsHtml()}${sheetHtml()}${toastHtml()}`;
+  app.innerHTML = `<main class="${bare ? "bare" : todayCook ? "screen today-screen" : "screen"}">${bodyHtml()}</main>${bare ? "" : tabsHtml()}${sheetHtml()}${toastHtml()}`;
   const focus = document.getElementById("add-search");
   if (focus && state.page?.kind === "add-item") focus.focus();
 }
@@ -213,10 +211,8 @@ function todayHtml() {
       state.todayServingsOpen = false;
     }
   }
-  const style = prepStyle();
-  const showLine = style === "line" || (style === "photo" && !(recipe && recipe.imageUrl));
-  return `${style === "header" ? prepHeader() : ""}
-    ${showLine ? prepLine() : ""}
+  const tag = recipe?.imageUrl ? "" : prepPhotoTag(false);
+  return `${tag}
     ${recipe && dinner ? recipeView(recipe, dinner.type === "leftovers" ? "leftovers" : "today") : emptyTonight()}
     ${eventsHtml(events)}
     ${recipe ? cookDock(recipe, true) : ""}`;
@@ -256,49 +252,11 @@ function duePrepSteps() {
   return steps;
 }
 
-function prepStyle() {
-  const value = new URLSearchParams(location.search).get("prepStyle");
-  if (value === "header" || value === "photo" || value === "bottom") return value;
-  return "line";
-}
-
-function prepCountLabel() {
+function prepPhotoTag(onPhoto = true) {
   const count = duePrepSteps().length;
   if (!count) return "";
-  return `Prep for tomorrow · ${count} ${count === 1 ? "step" : "steps"}`;
-}
-
-function softStep(text) {
-  const clean = String(text).replace(/[.]+$/, "").trim();
-  return clean.charAt(0).toLowerCase() + clean.slice(1);
-}
-
-function prepLine() {
-  const steps = duePrepSteps();
-  if (!steps.length) return "";
-  const word = steps.length === 1 ? "step" : "steps";
-  return `<button class="prep-line" type="button" data-action="open-prep">Prep for tomorrow: ${steps.length} ${word}</button>`;
-}
-
-function prepHeader() {
-  const steps = duePrepSteps();
-  if (!steps.length) return "";
-  const label = steps.length === 1
-    ? `🌙 Tonight: ${softStep(steps[0].text)} for tomorrow`
-    : `🌙 Tonight: ${steps.length} steps for tomorrow`;
-  return `<button class="prep-header" type="button" data-action="open-prep">${esc(label)}</button>`;
-}
-
-function prepPhotoTag() {
-  const label = prepCountLabel();
-  if (!label) return "";
-  return `<button class="prep-tag" type="button" data-action="open-prep">${esc(label)}</button>`;
-}
-
-function prepChip() {
-  const label = prepCountLabel();
-  if (!label) return "";
-  return `<button class="prep-chip" type="button" data-action="open-prep">${esc(label)}</button>`;
+  const label = `Prep for tomorrow · ${count} ${count === 1 ? "step" : "steps"}`;
+  return `<button class="prep-tag${onPhoto ? "" : " is-fallback"}" type="button" data-action="open-prep">${esc(label)}</button>`;
 }
 
 function prepSheet() {
@@ -523,7 +481,7 @@ function recipeView(recipe, mode) {
   const factor = servings / (recipe.servings || 1);
   const panel = embedded ? state.todayPanel || "ingredients" : state.page.panel || "ingredients";
   const open = embedded ? state.todayServingsOpen : state.page.servingsOpen;
-  const tag = embedded && prepStyle() === "photo" && recipe.imageUrl ? prepPhotoTag() : "";
+  const tag = embedded && recipe.imageUrl ? prepPhotoTag() : "";
   return `${hero(recipe, !embedded, tag)}
     <div class="pad">
       ${mode === "leftovers" ? `<p class="leftover-flag">Leftovers</p>` : ""}
@@ -544,9 +502,7 @@ function recipeView(recipe, mode) {
 
 function cookDock(recipe, raised) {
   const cooked = Boolean(recipe.cookedToday);
-  const chip = raised && prepStyle() === "bottom" ? prepChip() : "";
-  return `<div class="dock${raised ? " dock-raised" : ""}${chip ? " has-prep" : ""}">
-      ${chip}
+  return `<div class="dock${raised ? " dock-raised" : ""}">
       ${cooked ? `<div class="cooked-pill">✓ Cooked</div><button class="gray-btn" type="button" data-action="feedback" data-id="${esc(recipe.id)}">Give Feedback</button>` : `<button class="outline-btn" type="button" data-action="mark-cooked" data-id="${esc(recipe.id)}">${checkOutline()} Mark cooked</button><button class="green-btn" type="button" data-action="cook" data-id="${esc(recipe.id)}">Start cooking</button>`}
     </div>`;
 }
