@@ -1770,20 +1770,22 @@ async function toggleItem(id) {
     return;
   }
   const generation = ++checkGeneration;
-  state.checking = id;
+  item.checked = true;
+  state.checking = null;
+  showUndo({ id, name: item.name, kind: "check" });
   render();
-  await wait(700);
-  if (generation !== checkGeneration) return;
-  document.querySelector(`.g-swipe[data-id="${cssEscape(id)}"]`)?.classList.add("is-leaving");
-  await wait(220);
-  if (generation !== checkGeneration) return;
   try {
     await api(`/api/items/${id}`, { method: "PATCH", body: { checked: true } });
-    state.checking = null;
-    showUndo({ id, name: item.name, kind: "check" });
+    if (generation !== checkGeneration) {
+      await api(`/api/items/${id}`, { method: "PATCH", body: { checked: false } });
+      await refresh(true);
+      return;
+    }
     await refresh(true);
   } catch (error) {
-    state.checking = null;
+    if (generation !== checkGeneration) return;
+    item.checked = false;
+    if (state.undo?.id === id && state.undo.kind === "check") clearUndo();
     state.error = error.message;
     render();
   }

@@ -1702,6 +1702,10 @@ describe("grocery API", () => {
     expect(js).not.toContain("Coming up");
     expect(js).not.toContain("coming-up");
     expect(js).toContain("month-screen");
+    const toggleItem = js.slice(js.indexOf("async function toggleItem"), js.indexOf("async function undoCheck"));
+    expect(toggleItem).not.toContain("wait(");
+    expect(toggleItem).not.toContain("is-leaving");
+    expect(toggleItem.indexOf("showUndo")).toBeLessThan(toggleItem.indexOf("checked: true"));
     expect(js).toContain('class="dot');
     expect(js).not.toContain("day-dish");
     expect(js).not.toContain("day-num");
