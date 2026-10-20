@@ -1671,6 +1671,9 @@ describe("grocery API", () => {
     expect(js).toContain("Tomorrow: leftovers");
     expect(js).not.toContain("Coming up");
     expect(js).not.toContain("coming-up");
+    expect(js).toContain("month-screen");
+    expect(js).toContain("day-num");
+    expect(js).toContain("day-dish");
     expect(js).toContain('aria-label="Search recipes"');
     const recipesPage = js.slice(js.indexOf("function recipesHtml"), js.indexOf("function sortButton"));
     expect(recipesPage).toContain('placeholder="Search recipes"');

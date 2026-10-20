@@ -979,30 +979,117 @@ body:has(.night-screen),
   color: #6d5b2a;
 }
 
-.month-names, .month-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 0.25rem; }
-.month-names span { color: var(--muted); font-size: 0.72rem; font-weight: 700; text-align: center; }
+html:has(.month-screen),
+body:has(.month-screen),
+#app:has(.month-screen) {
+  height: 100dvh;
+  min-height: 100dvh;
+  max-height: 100dvh;
+  overflow: hidden;
+}
+
+.screen.month-screen {
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  height: 100dvh;
+  min-height: 0;
+  max-height: 100dvh;
+  overflow: hidden;
+  padding: calc(0.15rem + var(--safe-t)) 0.85rem calc(var(--tab-bar) + 0.55rem);
+}
+
+.month-screen .month-bar { flex: none; margin-bottom: 0; }
+.month-screen .cal-board {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.month-screen .month-panel { flex: none; }
+
+.month-names, .month-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); }
+.month-names { flex: none; gap: 0; margin: 0.15rem 0 0.2rem; }
+.month-names span { color: var(--muted); font-size: 0.68rem; font-weight: 650; text-align: center; letter-spacing: 0.01em; }
+.month-grid {
+  flex: 1 1 auto;
+  min-height: 0;
+  gap: 0;
+  grid-auto-rows: 1fr;
+  border-top: 1px solid #e4e4e6;
+}
 .month-cell {
-  min-height: 3.4rem;
+  min-height: 0;
   min-width: 0;
-  padding: 0.1rem;
-  border-radius: 10px;
+  padding: 0;
+  border-radius: 0;
+  border-bottom: 1px solid #e4e4e6;
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: stretch;
 }
-.month-cell > button { min-width: 44px; min-height: 44px; font-weight: 750; }
-.month-cell > button:disabled { color: #b0b0b4; }
-.month-cell.is-today { background: var(--green-soft); }
-.month-cell.is-picked { box-shadow: inset 0 0 0 2px var(--green); }
-.month-cell.is-out { opacity: 0.35; }
-.month-cell.is-past { opacity: 0.4; }
+.month-cell:nth-last-child(-n + 7) { border-bottom: 0; }
+.month-cell > button {
+  min-width: 0;
+  min-height: 0;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.12rem;
+  padding: 0.28rem 0.08rem 0.15rem;
+  font-weight: 600;
+  font-size: 0.95rem;
+  color: var(--ink);
+}
+.month-cell > button:disabled { color: #6e6e74; opacity: 1; }
+.day-num {
+  display: grid;
+  place-items: center;
+  width: 1.7rem;
+  height: 1.7rem;
+  border-radius: 50%;
+  line-height: 1;
+}
+.month-cell.is-today .day-num { background: var(--green); color: #fff; font-weight: 700; }
+.month-cell.is-picked > button { background: #ececef; border-radius: 12px; }
+.month-cell.is-past > button,
+.month-cell.is-past > button:disabled { color: #6e6e74; }
+.month-cell.is-out > button,
+.month-cell.is-out > button:disabled { color: #b7b7bc; }
+.day-dish {
+  width: 100%;
+  max-width: 100%;
+  padding: 0 1px;
+  color: var(--green-dark);
+  font-size: 0.6rem;
+  font-weight: 700;
+  line-height: 1.15;
+  letter-spacing: -0.01em;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.month-cell.is-past .day-dish { color: #8a8a90; font-weight: 650; }
 
-.month-panel { margin-top: 0.85rem; padding-top: 0.35rem; border-top: 1px solid var(--line); text-align: left; }
+.month-panel { margin-top: 0.15rem; padding-top: 0.15rem; border-top: 1px solid var(--line); text-align: left; }
 .month-panel-head { display: flex; align-items: center; justify-content: space-between; gap: 0.6rem; }
-.month-panel h2 { margin: 0; font-size: 1.15rem; font-weight: 750; text-align: left; }
-.month-panel .meal-row { min-height: 56px; }
-.month-panel .muted { margin: 0.4rem 0; }
+.month-panel h2 { margin: 0; font-size: 1rem; font-weight: 750; text-align: left; line-height: 1.2; }
+.month-panel .text-green { min-height: 2rem; }
+.month-panel .meal-row,
+.month-panel .meal-open { min-height: 46px; }
+.month-panel .meal-row .thumb,
+.month-panel .meal-row .thumb-tile,
+.month-panel .thumb,
+.month-panel .thumb-tile { width: 40px; height: 40px; }
+.month-panel .thumb-tile .app-mark { width: 40px; height: 40px; }
+.month-panel .meal-copy strong { font-size: 1rem; }
+.month-panel .leftover-row { padding: 0.1rem 0 0.15rem; }
+.month-panel .event-line { margin: 0; font-size: 0.9rem; }
+.month-panel .muted { margin: 0.15rem 0; }
 
 .dot { width: 6px; height: 6px; border-radius: 50%; background: transparent; }
 .dot.is-on { background: var(--green); }

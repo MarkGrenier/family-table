@@ -206,7 +206,8 @@ function render() {
   const dayDinner = state.page?.kind === "day" ? mealOn(state.page.date, "dinner") : null;
   const todayCook = dinnerTonight?.type === "recipe" && Boolean(recipeForEntry(dinnerTonight));
   const leftoversNightOn = dinnerTonight?.type === "leftovers" || dayDinner?.type === "leftovers";
-  const mainClass = bare ? "bare" : todayCook ? "screen today-screen" : leftoversNightOn ? "screen today-screen no-dock night-screen" : "screen";
+  const monthOn = state.tab === "calendar" && state.calMode === "month" && !state.page;
+  const mainClass = bare ? "bare" : todayCook ? "screen today-screen" : leftoversNightOn ? "screen today-screen no-dock night-screen" : monthOn ? "screen month-screen" : "screen";
   app.innerHTML = `<main class="${mainClass}">${bodyHtml()}</main>${bare ? "" : tabsHtml()}${sheetHtml()}${toastHtml()}`;
   const focus = document.getElementById("add-search");
   if (focus && state.page?.kind === "add-item") focus.focus();
@@ -514,12 +515,13 @@ function monthGrid(iso, selected) {
 function monthCell(date, inMonth, selected) {
   const today = date === nyToday();
   const past = date < nyToday();
-  const planned = inMonth && !past && (mealsOn(date).length > 0 || eventsOn(date).length > 0);
+  const dinner = inMonth ? mealOn(date, "dinner") : null;
+  const label = dinner ? dishName(dinner, recipeForEntry(dinner)) : "";
   const open = inMonth && !past;
   const picked = open && date === selected;
+  const mark = label ? `<span class="day-dish">${esc(label)}</span>` : "";
   return `<div class="month-cell${inMonth ? "" : " is-out"}${today ? " is-today" : ""}${past ? " is-past" : ""}${picked ? " is-picked" : ""}">
-      <button type="button" ${open ? `data-action="select-day" data-date="${esc(date)}" aria-pressed="${picked ? "true" : "false"}"` : "disabled"}>${Number(date.slice(8))}</button>
-      <span class="dot${planned ? " is-on" : ""}"></span>
+      <button type="button" ${open ? `data-action="select-day" data-date="${esc(date)}" aria-pressed="${picked ? "true" : "false"}"` : "disabled"}><span class="day-num">${Number(date.slice(8))}</span>${mark}</button>
     </div>`;
 }
 
