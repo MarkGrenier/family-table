@@ -1,6 +1,7 @@
 :root {
   color-scheme: light;
   --bg: #f7f7f5;
+  --safe-t: env(safe-area-inset-top);
   --safe-b: env(safe-area-inset-bottom);
   --tab-bar: calc(3.55rem + var(--safe-b));
   --dock-pad: 0.7rem;
@@ -48,7 +49,7 @@ a { color: var(--green-dark); }
 }
 
 .screen {
-  padding: calc(0.85rem + env(safe-area-inset-top)) 1.15rem calc(var(--tab-bar) + 1.2rem);
+  padding: calc(0.85rem + var(--safe-t)) 1.15rem calc(var(--tab-bar) + 1.2rem);
 }
 
 .bare { padding-bottom: calc(var(--dock-btn) + var(--dock-pad) + var(--dock-pad) + 1.1rem + var(--safe-b)); }
@@ -754,17 +755,43 @@ select.box { appearance: none; padding-right: 2.2rem; }
   text-transform: none;
 }
 
-.night-screen { display: flex; flex-direction: column; }
-.leftover-night { display: flex; flex-direction: column; flex: 1; }
-.night-hero { height: 448px; background: #f6e8cd; }
+html:has(.night-screen),
+body:has(.night-screen),
+#app:has(.night-screen) {
+  height: 100dvh;
+  min-height: 100dvh;
+  max-height: 100dvh;
+  overflow: hidden;
+}
+
+.screen.night-screen {
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  height: 100dvh;
+  min-height: 0;
+  max-height: 100dvh;
+  overflow: hidden;
+  padding-bottom: calc(var(--tab-bar) + 0.75rem);
+}
+
+.leftover-night { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+.night-hero {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: auto;
+  max-height: min(448px, calc(100dvh - var(--tab-bar) - var(--safe-t) - 17.5rem));
+  background: #f6e8cd;
+  overflow: hidden;
+}
 .night-hero img { width: 100%; height: 100%; object-fit: cover; object-position: center 46%; }
 .leftover-night .meal-kicker { margin: 0 0 0.45rem; }
 .leftover-night .lo-pill { margin: 0 0 0.45rem; font-size: 0.84rem; padding: 0.22rem 0.7rem; }
 .leftover-night h1 { margin-top: 0; }
-.night-line { margin: 0.85rem 0 0; color: #6f6f74; font-size: 1.05rem; }
+.night-line { margin: 0.65rem 0 0; color: #6f6f74; font-size: 1.05rem; }
 .night-remove { margin-top: 0.35rem; }
-.night-gap { flex: 1 1 auto; min-height: 3.5rem; }
-.leftover-night .tomorrow { margin-top: 0; }
+.night-gap { flex: 0 0 auto; height: 1.25rem; min-height: 1.25rem; }
+.leftover-night .tomorrow { margin-top: 0; margin-bottom: 0; }
 .tomorrow {
   display: flex;
   align-items: center;
