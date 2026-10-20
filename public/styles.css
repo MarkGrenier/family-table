@@ -834,24 +834,6 @@ select.box { appearance: none; padding-right: 2.2rem; }
   font-size: 0.72rem;
   font-weight: 600;
 }
-.share-lead, .share-note { margin: 0.2rem 0 0.7rem; text-align: left; }
-.share-note { color: var(--muted); font-size: 0.92rem; }
-.share-steps { margin: 0 0 0.8rem; padding-left: 1.2rem; text-align: left; }
-.share-steps li { margin: 0.35rem 0; }
-.share-key {
-  margin: 0.15rem 0 0.2rem;
-  padding: 0.7rem 0.75rem;
-  border-radius: 12px;
-  background: var(--field);
-  text-align: left;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.82rem;
-  line-height: 1.35;
-  word-break: break-all;
-}
-.share-person { margin-top: 0.85rem; text-align: left; }
-.share-sheet .field-label { margin-bottom: 0.15rem; }
-
 .week-head, .month-bar {
   display: flex;
   align-items: center;

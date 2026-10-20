@@ -6,16 +6,19 @@ A signed shortcut file is not included. This project was built on a computer tha
 
 ## Before you start
 
-1. Open Family Table on the iPhone and sign in. The address has to be the real website, not one that starts with `http://127`. An address like that only works on the computer at home.
-2. Tap **Recipes**.
-3. Tap the three dots next to Recipes.
-4. Tap **Share button**.
-5. Tap **Copy address**.
-6. Tap **Copy key** under your own name. Mark uses Mark's key. Emma uses Emma's key.
+The keys live on the computer that runs Family Table. They are not shown in the app.
 
-Leave that sheet open, or paste the address and the key into Notes so you can copy them into Shortcuts.
+On that computer, in the project folder, run:
 
-The key is only for adding recipes. It is not the passcode, and it is not the helper password. It cannot open the grocery list or change the week.
+```bash
+npm run share-keys
+```
+
+That prints Mark's key and Emma's key, and saves the same text in `share-keys.txt` in the project folder. Mark's key starts with `ft_mark_`. Emma's key starts with `ft_emma_`. Each key only adds a recipe.
+
+The shortcut address is your live website plus `/api/share`. Use that website. An address that starts with `http://127` only works on the computer at home.
+
+Copy the address and your own key into Notes on the iPhone so you can paste them into Shortcuts.
 
 ## Build the shortcut
 
@@ -98,8 +101,8 @@ The page address is kept with the recipe so it can be fetched again. It is not s
 
 The line is: **That share key didn't work.**
 
-Check the Authorization value. It starts with `Bearer `, with a space, then the key from the Share button sheet for the person whose phone this is. Copy the key again from Family Table. Do not use the passcode.
+Check the Authorization value. It starts with `Bearer `, with a space, then the key from `share-keys.txt` for the person whose phone this is. Run `npm run share-keys` again if you need a fresh copy.
 
 ## If you change phones
 
-Build the same shortcut again. Copy the address and that person's key from the Share button sheet on the new phone.
+Build the same shortcut again. Copy the address and that person's key from `share-keys.txt`.

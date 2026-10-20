@@ -11,6 +11,7 @@
     "start": "wrangler dev",
     "dev": "wrangler dev",
     "setup": "node scripts/setup.mjs",
+    "share-keys": "node scripts/print-share-keys.mjs",
     "seed": "wrangler d1 execute grocery --local --yes --file=./seed.sql",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",

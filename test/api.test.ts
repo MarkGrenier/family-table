@@ -1,5 +1,6 @@
 import { env, exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
+import { deriveShareKey, sha256Hex } from "../src/auth";
 
 type Json = Record<string, unknown>;
 
@@ -1466,29 +1467,17 @@ describe("grocery API", () => {
 
   it("imports from a share key without shopping or opening the rest of the list", async () => {
     const token = env.API_TOKEN;
-    const setup = await call("/api/share-setup", { token });
-    expect(setup.status).toBe(200);
-    const people = (setup.json?.people ?? []) as Json[];
-    expect(people.map((person) => person.person)).toEqual(["Mark", "Emma"]);
-    const mark = people[0];
-    const emma = people[1];
-    expect(String(mark.key)).toMatch(/^ft_mark_[a-f0-9]{32}$/);
-    expect(String(emma.key)).toMatch(/^ft_emma_[a-f0-9]{32}$/);
-    expect(mark.key).not.toBe(emma.key);
-    const stored = await env.DB.prepare(`SELECT key_hash FROM share_keys WHERE person = ?`).bind("Mark").first<{ key_hash: string }>();
-    expect(stored?.key_hash).toMatch(/^[a-f0-9]{64}$/);
-    expect(stored?.key_hash).not.toBe(mark.key);
-
-    const again = await call("/api/share-setup", { token });
-    expect((again.json?.people as Json[])[0].key).toBe(mark.key);
-    const rows = await env.DB.prepare(`SELECT COUNT(*) AS n FROM share_keys`).first<{ n: number }>();
-    expect(Number(rows?.n)).toBe(2);
-
-    expect((await call("/api/share-setup", { token: String(mark.key) })).status).toBe(401);
-    expect((await call("/api/items", { token: String(mark.key) })).status).toBe(401);
-    expect((await call("/api/recipes", { token: String(mark.key) })).status).toBe(401);
-    expect((await call("/api/recipes/import", { method: "POST", token: String(mark.key), body: { url: "https://recipes.example/pasta" } })).status).toBe(401);
-    expect((await call("/api/plan", { method: "POST", token: String(mark.key), body: { date: "2026-12-16", meal: "dinner", type: "note", note: "nope" } })).status).toBe(401);
+    const markKey = await deriveShareKey(env.PASSCODE, "Mark");
+    const emmaKey = await deriveShareKey(env.PASSCODE, "Emma");
+    expect(markKey).toMatch(/^ft_mark_[a-f0-9]{32}$/);
+    expect(emmaKey).toMatch(/^ft_emma_[a-f0-9]{32}$/);
+    expect(markKey).not.toBe(emmaKey);
+    expect((await call("/api/share-setup", { token })).status).toBe(404);
+    expect((await call("/api/share-setup", { token: markKey })).status).toBe(401);
+    expect((await call("/api/items", { token: markKey })).status).toBe(401);
+    expect((await call("/api/recipes", { token: markKey })).status).toBe(401);
+    expect((await call("/api/recipes/import", { method: "POST", token: markKey, body: { url: "https://recipes.example/pasta" } })).status).toBe(401);
+    expect((await call("/api/plan", { method: "POST", token: markKey, body: { date: "2026-12-16", meal: "dinner", type: "note", note: "nope" } })).status).toBe(401);
 
     const blocked = await shareText(token, JSON.stringify({ url: "https://recipes.example/chili" }));
     expect(blocked.status).toBe(401);
@@ -1525,20 +1514,25 @@ describe("grocery API", () => {
       return original(input, init);
     }) as typeof fetch;
     try {
-      const added = await shareText(String(mark.key), JSON.stringify({ URL: "https://recipes.example/pasta" }));
+      const added = await shareText(markKey, JSON.stringify({ URL: "https://recipes.example/pasta" }));
       expect(added.status).toBe(200);
       expect(added.type).toContain("text/plain");
       expect(added.text).toBe("Added: Lemon pasta");
-      const half = await shareText(String(emma.key), "https://recipes.example/half extra words", "text/plain");
+      const stored = await env.DB.prepare(`SELECT key_hash FROM share_keys WHERE person = ?`).bind("Mark").first<{ key_hash: string }>();
+      expect(stored?.key_hash).toBe(await sha256Hex(markKey));
+      expect(stored?.key_hash).not.toBe(markKey);
+      const rows = await env.DB.prepare(`SELECT COUNT(*) AS n FROM share_keys`).first<{ n: number }>();
+      expect(Number(rows?.n)).toBe(2);
+      const half = await shareText(emmaKey, "https://recipes.example/half extra words", "text/plain");
       expect(half.status).toBe(200);
       expect(half.type).toContain("text/plain");
       expect(half.text).toBe("Saved for Chef to finish: Half a soup");
-      const stub = await shareText(String(mark.key), JSON.stringify({ url: "https://recipes.example/notes" }));
+      const stub = await shareText(markKey, JSON.stringify({ url: "https://recipes.example/notes" }));
       expect(stub.status).toBe(200);
       expect(stub.text).toBe("Saved for Chef to finish: Tuesday notes");
-      const missed = await shareText(String(mark.key), JSON.stringify({ url: "https://recipes.example/down" }));
+      const missed = await shareText(markKey, JSON.stringify({ url: "https://recipes.example/down" }));
       expect(missed.text).toBe("Saved for Chef to finish: Recipe");
-      const bad = await shareText(String(mark.key), JSON.stringify({ url: "http://recipes.example/pasta" }));
+      const bad = await shareText(markKey, JSON.stringify({ url: "http://recipes.example/pasta" }));
       expect(bad.status).toBe(400);
       expect(bad.text).toBe("Paste a full https link.");
     } finally {
@@ -1610,13 +1604,19 @@ describe("grocery API", () => {
     expect(js).toContain("recipeThumb(recipe)");
     expect(js).toContain("Chef's picks");
     expect(js).toContain('class="lo-pill"');
+    const night = js.slice(js.indexOf("function leftoversNight"), js.indexOf("function foodPhoto"));
+    expect(night.indexOf('class="lo-pill"')).toBeGreaterThan(-1);
+    expect(night.indexOf('class="lo-pill"')).toBeLessThan(night.indexOf("<h1>"));
+    expect(js).toContain("leftoversNight(dinner, recipe);");
     expect(js).toContain("mealLabel(entry.meal)");
     expect(js).toContain("Night off. Enjoy the leftovers.");
     expect(js).toContain("fallback-photo");
     expect(js).toContain("onPhotoError");
     expect(js).not.toContain("onerror=");
-    expect(js).toContain("Share button");
-    expect(js).toContain('data-action="copy-share-key"');
+    expect(js).not.toContain("Share button");
+    expect(js).not.toContain("share-setup");
+    expect(js).not.toContain("copy-share-key");
+    expect(js).not.toContain("recipes-menu");
     expect(js).toContain("Needs a look");
     expect(js).not.toContain("sourceUrl");
     expect(js).toContain("/photos/leftovers-hero.jpg");

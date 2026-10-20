@@ -29,7 +29,7 @@ import {
 } from "./food";
 import { cleanWeekStart, dateRange, parseEvent, parseEventList, parsePlan, parsePlanAlternates, parseRecipe, parseRecipePatch, parseServingsOverride, parseWeek } from "./food-validate";
 import { HttpError, json, readJson, text } from "./http";
-import { ensureShareKeys, importSharedRecipe, personForShareKey, shareNotice } from "./share";
+import { importSharedRecipe, personForShareKey, shareNotice } from "./share";
 import { importRecipeFromUrl } from "./import-recipe";
 import { cleanBarcode, cleanStore, parseItemPatch, parseNewItem, parseStaple } from "./validate";
 
@@ -304,12 +304,6 @@ async function handleFood(request: Request, env: Env, path: string, method: stri
     const recipe = await createRecipe(env.DB, { ...imported, favorite: false });
     return json({ recipe }, 201);
   }
-  if (path === "/api/share-setup" && method === "GET") {
-    if (!env.PASSCODE) throw new HttpError(503, "The list isn't ready yet. The passcode hasn't been set.");
-    return json({ people: await ensureShareKeys(env.DB, env.PASSCODE) });
-  }
-  if (path === "/api/share-setup") throw new HttpError(405, "That action isn't available.");
-
   if (path === "/api/recipes" && method === "GET") {
     const params = new URL(request.url).searchParams;
     return json({

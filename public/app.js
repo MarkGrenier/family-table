@@ -524,7 +524,7 @@ function pickerHtml(date, meal, showRecipes = true) {
 }
 
 function recipesHtml() {
-  return `<div class="recipes-head"><h1>Recipes</h1><button class="icon-btn" type="button" data-action="recipes-menu" aria-label="More">${dots()}</button></div>
+  return `<div class="recipes-head"><h1>Recipes</h1></div>
     <label class="search">Search
       <input id="recipe-search" class="field-box" type="search" value="${esc(state.recipeQuery)}" placeholder="Search recipes" autocomplete="off">
     </label>
@@ -760,35 +760,6 @@ function newRecipeHtml() {
   return `<div class="pad"><button class="text-green" type="button" data-action="back">Recipes</button><h1>Add a recipe</h1>
     <form data-form="fetch-recipe" class="stack"><input class="field-box" name="url" type="url" placeholder="Paste a link"><button class="green-btn" type="submit">Fetch recipe</button></form>
     ${state.page.error ? `<p class="error">${esc(state.page.error)}</p>` : ""}</div>`;
-}
-
-function shareSetupHtml() {
-  const sheet = state.sheet || {};
-  const people = sheet.people || [];
-  const address = `${location.origin}/api/share`;
-  const steps = [
-    "Open Shortcuts, tap +, and name it Add to Family Table.",
-    "Tap the info button and turn on Show in Share Sheet. Leave URLs and Safari web pages on.",
-    "Add Get URLs from Shortcut Input.",
-    "Add Get Contents of URL. Method POST. Address is the one below. Header Authorization, value Bearer, a space, then your key. Body JSON, field url, from those URLs.",
-    "Add Show Notification. The body is the reply from that request.",
-  ];
-  return `<div class="sheet"><div class="sheet-card share-sheet" role="dialog" aria-label="Share button">
-      <div class="sheet-head"><strong>Share button</strong><button type="button" data-action="close-sheet" aria-label="Close">✕</button></div>
-      <p class="share-lead">Send a recipe page from Safari into the cookbook. Groceries stay put until someone plans that dinner.</p>
-      <ol class="share-steps">${steps.map((step) => `<li>${esc(step)}</li>`).join("")}</ol>
-      <p class="share-note">On your iPhone, open Family Table on its website first, then copy the address and key shown there. An address that starts with http://127 does not work from the phone.</p>
-      <p class="field-label">Address</p>
-      <p class="share-key">${esc(address)}</p>
-      <button class="text-green" type="button" data-action="copy-share-key" data-copy="${esc(address)}">${sheet.copied === address ? "Copied" : "Copy address"}</button>
-      ${sheet.loading ? `<p class="muted">Getting your keys…</p>` : ""}
-      ${sheet.error ? `<p class="error">${esc(sheet.error)}</p>` : ""}
-      ${people.map((person) => `<section class="share-person">
-          <p class="field-label">${esc(person.person)}</p>
-          <p class="share-key">${esc(person.key)}</p>
-          <button class="text-green" type="button" data-action="copy-share-key" data-copy="${esc(person.key)}">${sheet.copied === person.key ? "Copied" : "Copy key"}</button>
-        </section>`).join("")}
-    </div></div>`;
 }
 
 function mealContext() {
@@ -1115,20 +1086,12 @@ function sheetHtml() {
         <button class="sheet-delete" type="button" data-action="delete-item" data-id="${esc(item.id)}">Delete item</button>
       </form></div>`;
   }
-  if (state.sheet?.kind === "recipes-menu") {
-    return `<div class="sheet"><div class="sheet-card" role="dialog" aria-label="Recipes">
-        <div class="sheet-head"><span></span><button type="button" data-action="close-sheet" aria-label="Close">✕</button></div>
-        <button class="menu-row" type="button" data-action="share-setup">Share button</button>
-      </div></div>`;
-  }
-  if (state.sheet?.kind === "share-setup") return shareSetupHtml();
   if (state.sheet?.kind === "recipe-menu") {
     const context = mealContext();
     return `<div class="sheet"><div class="sheet-card" role="dialog" aria-label="Recipe">
         <div class="sheet-head"><span></span><button type="button" data-action="close-sheet" aria-label="Close">✕</button></div>
         ${context ? `<button class="menu-row" type="button" data-action="change-meal">Swap meal</button>` : ""}
         <button class="menu-row" type="button" data-action="edit-recipe">Edit recipe</button>
-        <button class="menu-row" type="button" data-action="share-setup">Share button</button>
       </div></div>`;
   }
   if (state.sheet?.kind === "change-meal") return changeMealHtml();
@@ -1399,13 +1362,6 @@ async function onClick(event) {
     render();
     return;
   }
-  if (action === "recipes-menu") {
-    state.sheet = { kind: "recipes-menu" };
-    render();
-    return;
-  }
-  if (action === "share-setup") return openShareSetup();
-  if (action === "copy-share-key") return copyShareValue(button.dataset.copy || "", button);
   if (action === "change-meal") {
     state.mealQuery = "";
     state.sheet = { kind: "change-meal", error: "", date: state.sheet?.date || null, meal: state.sheet?.meal || null };
@@ -1856,31 +1812,6 @@ async function saveItem(form) {
     state.error = error.message;
     render();
   }
-}
-
-async function openShareSetup() {
-  state.sheet = { kind: "share-setup", loading: true, people: [], error: "", copied: "" };
-  render();
-  try {
-    const data = await api("/api/share-setup");
-    if (state.sheet?.kind !== "share-setup") return;
-    state.sheet = { kind: "share-setup", loading: false, people: data.people || [], error: "", copied: "" };
-  } catch (error) {
-    if (state.sheet?.kind !== "share-setup") return;
-    state.sheet = { kind: "share-setup", loading: false, people: [], error: error.message, copied: "" };
-  }
-  render();
-}
-
-async function copyShareValue(value) {
-  if (!value || state.sheet?.kind !== "share-setup") return;
-  try {
-    await navigator.clipboard.writeText(value);
-  } catch {
-    return;
-  }
-  state.sheet.copied = value;
-  render();
 }
 
 async function fetchRecipe(url) {
