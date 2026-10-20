@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- J. Filled white plate with the app green fork and knife cut out on top. Full-bleed 512. Wire sized/j over public/icons when chosen. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <rect width="512" height="512" fill="#5dbb24"/>
+  <g transform="translate(0.50 0.50)">
+  <circle cx="256" cy="256" r="154" fill="#ffffff"/>
+  <circle cx="256" cy="256" r="116" fill="none" stroke="#cfe3bf" stroke-width="9"/>
+  <g fill="#5dbb24" transform="translate(192.96 258.00) rotate(0) scale(0.960 0.960) translate(-36.50 -105.50)">
+  <path d="M0 16 C0 5 16 5 16 16 L16 98 L0 98 Z"/>
+  <path d="M29 11 C29 0 45 0 45 11 L45 106 L29 106 Z"/>
+  <path d="M58 16 C58 5 74 5 74 16 L74 98 L58 98 Z"/>
+  <path d="M0 80 C0 112 18 128 29 134 L29 198 C29 214 46 214 46 198 L46 134 C57 128 74 112 74 80 C64 100 54 108 37 108 C20 108 10 100 0 80 Z"/></g>
+  <g fill="#5dbb24" transform="translate(299.84 258.00) rotate(0) scale(-0.960 0.960) translate(-18.50 -109.50)">
+  <path d="M18 10 C26 12 32 24 34 40 C38 62 36 86 30 108 C26 124 22 136 20 148 L20 198 C20 214 2 214 2 198 L2 36 C2 20 8 10 18 10 Z"/></g>
+</g>
+</svg>

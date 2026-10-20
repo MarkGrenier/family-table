@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- K. Warmer, softer green, cream plate, white fork and knife. Full-bleed 512. Wire sized/k over public/icons when chosen. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <rect width="512" height="512" fill="#7eaf52"/>
+  <g transform="translate(20.50 -4.00)">
+  <circle cx="256" cy="258" r="102" fill="#f6f1e6"/>
+  <circle cx="256" cy="258" r="74" fill="none" stroke="#e3d0b2" stroke-width="8"/>
+  <g fill="#fff" transform="translate(99.50 260.00) rotate(0) scale(1.000 1.000) translate(-36.50 -105.50)">
+  <path d="M0 16 C0 5 16 5 16 16 L16 98 L0 98 Z"/>
+  <path d="M29 11 C29 0 45 0 45 11 L45 106 L29 106 Z"/>
+  <path d="M58 16 C58 5 74 5 74 16 L74 98 L58 98 Z"/>
+  <path d="M0 80 C0 112 18 128 29 134 L29 198 C29 214 46 214 46 198 L46 134 C57 128 74 112 74 80 C64 100 54 108 37 108 C20 108 10 100 0 80 Z"/></g>
+  <g fill="#fff" transform="translate(392.50 260.00) rotate(0) scale(-1.000 1.000) translate(-18.50 -109.50)">
+  <path d="M18 10 C26 12 32 24 34 40 C38 62 36 86 30 108 C26 124 22 136 20 148 L20 198 C20 214 2 214 2 198 L2 36 C2 20 8 10 18 10 Z"/></g>
+</g>
+</svg>
