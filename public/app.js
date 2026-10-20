@@ -509,13 +509,11 @@ function monthGrid(iso, selected) {
 function monthCell(date, inMonth, selected) {
   const today = date === nyToday();
   const past = date < nyToday();
-  const dinner = inMonth ? mealOn(date, "dinner") : null;
-  const label = dinner ? dishName(dinner, recipeForEntry(dinner)) : "";
+  const planned = inMonth && !past && (mealsOn(date).length > 0 || eventsOn(date).length > 0);
   const open = inMonth && !past;
   const picked = open && date === selected;
-  const mark = label ? `<span class="day-dish">${esc(label)}</span>` : "";
   return `<div class="month-cell${inMonth ? "" : " is-out"}${today ? " is-today" : ""}${past ? " is-past" : ""}${picked ? " is-picked" : ""}">
-      <button type="button" ${open ? `data-action="select-day" data-date="${esc(date)}" aria-pressed="${picked ? "true" : "false"}"` : "disabled"}><span class="day-num">${Number(date.slice(8))}</span>${mark}</button>
+      <button type="button" ${open ? `data-action="select-day" data-date="${esc(date)}" aria-pressed="${picked ? "true" : "false"}"` : "disabled"}>${Number(date.slice(8))}<span class="dot${planned ? " is-on" : ""}"></span></button>
     </div>`;
 }
 
