@@ -1,8 +1,9 @@
 import { clearSessionCookie, passcodeMatches, requestAuthed, rollingSessionCookie, sessionCookie, sessionOk, sessionToken } from "./auth";
-import { addStapleToList, clearChecked, createItem, createStaple, deleteItem, deleteStaple, listItems, listStaples, lookupBarcode, updateItem } from "./db";
+import { addOnHand, addStapleToList, clearChecked, createItem, createStaple, deleteItem, deleteOnHand, deleteOnHandByName, deleteStaple, listItems, listOnHand, listStaples, lookupBarcode, updateItem } from "./db";
 import {
   addPlanGroceries,
   addRecipeToGroceries,
+  rebuildPlanGroceries,
   createEvent,
   createRecipe,
   deleteEvent,
@@ -180,6 +181,44 @@ async function handleApi(request: Request, env: Env, path: string): Promise<Resp
       listAllEvents(env.DB),
     ]);
     return json({ exportedAt: new Date().toISOString(), items, staples, recipes, plan, events });
+  }
+
+  if (path === "/api/on-hand") {
+    if (method === "GET") return json({ items: await listOnHand(env.DB) });
+    if (method === "POST") {
+      const body = await readJson(request);
+      if (typeof body.name !== "string") throw new HttpError(400, "Type a name.");
+      const saved = await addOnHand(env.DB, body.name);
+      return json({ item: saved.item }, saved.created ? 201 : 200);
+    }
+    if (method === "DELETE") {
+      const body = await readJson(request);
+      if (typeof body.id === "string" && body.id.trim()) {
+        await deleteOnHand(env.DB, body.id.trim());
+        return json({ ok: true });
+      }
+      if (typeof body.name === "string") {
+        await deleteOnHandByName(env.DB, body.name);
+        return json({ ok: true });
+      }
+      throw new HttpError(400, "Send the name or id to remove.");
+    }
+    throw new HttpError(405, "That action isn't available.");
+  }
+  const onHandMatch = /^\/api\/on-hand\/([A-Za-z0-9-]{1,80})$/.exec(path);
+  if (onHandMatch) {
+    if (method !== "DELETE") throw new HttpError(405, "That action isn't available.");
+    await deleteOnHand(env.DB, onHandMatch[1]);
+    return json({ ok: true });
+  }
+  if (path === "/api/groceries/rebuild") {
+    if (method !== "POST") throw new HttpError(405, "That action isn't available.");
+    const body = await readJson(request);
+    const hasFrom = body.from != null && body.from !== "";
+    const hasTo = body.to != null && body.to !== "";
+    if (hasFrom !== hasTo) throw new HttpError(400, "Send both a start and an end date.");
+    const range = hasFrom ? dateRange(body.from, body.to, 400) : null;
+    return json(await rebuildPlanGroceries(env.DB, range));
   }
 
   const food = await handleFood(request, env, path, method);

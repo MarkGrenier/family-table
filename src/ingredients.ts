@@ -113,6 +113,14 @@ const UNIT_WORDS: Record<string, string> = {
   quarts: "quart",
   gallon: "gallon",
   gallons: "gallon",
+  bottle: "bottle",
+  bottles: "bottle",
+  carton: "carton",
+  cartons: "carton",
+  stick: "stick",
+  sticks: "stick",
+  ear: "ear",
+  ears: "ear",
 };
 
 const PLURAL: Record<string, string> = {
@@ -132,7 +140,36 @@ const PLURAL: Record<string, string> = {
   quart: "quarts",
   gallon: "gallons",
   pinch: "pinches",
+  bottle: "bottles",
+  carton: "cartons",
+  stick: "sticks",
+  ear: "ears",
 };
+
+const NO_SINGULAR = new Set(["asparagus", "couscous", "hummus", "molasses", "chips", "cookies", "brownies"]);
+
+const HIDDEN_UNITS = new Set(["tsp", "tbsp", "cup", "ml", "l", "pinch"]);
+
+const COUNT_UNITS = new Set([
+  "clove",
+  "can",
+  "package",
+  "bunch",
+  "slice",
+  "piece",
+  "stalk",
+  "head",
+  "bag",
+  "jar",
+  "box",
+  "pint",
+  "quart",
+  "gallon",
+  "bottle",
+  "carton",
+  "stick",
+  "ear",
+]);
 
 const NICE_FRACTIONS: Array<[number, number, string]> = [
   [1, 2, "½"],
@@ -461,6 +498,82 @@ export function groceryName(name: string): string {
   const clean = name.trim().replace(/\s+/g, " ");
   const titled = clean.charAt(0).toUpperCase() + clean.slice(1);
   return titled.slice(0, 80);
+}
+
+export function singularize(word: string): string {
+  const clean = word.trim().toLowerCase();
+  if (clean.length < 4 || NO_SINGULAR.has(clean)) return clean;
+  if (clean.endsWith("ies")) return `${clean.slice(0, -3)}y`;
+  if (/(ches|shes|xes|zes|oes|ses)$/.test(clean)) return clean.slice(0, -2);
+  if (clean.endsWith("s") && !clean.endsWith("ss") && !clean.endsWith("us") && !clean.endsWith("is")) {
+    return clean.slice(0, -1);
+  }
+  return clean;
+}
+
+export function groceryKey(name: string): string {
+  const words = name.trim().toLowerCase().replace(/\s+/g, " ").split(" ").filter(Boolean);
+  if (words.length === 0) return "";
+  words[words.length - 1] = singularize(words[words.length - 1]);
+  return words.join(" ");
+}
+
+export type ShoppingPart = { quantity: number | null; unit: string | null };
+
+function canonicalUnit(unit: string | null): string | null {
+  if (!unit) return null;
+  const word = unit.trim().toLowerCase().replace(/\.$/, "");
+  if (!word) return null;
+  return UNIT_WORDS[word] ?? word;
+}
+
+function purchaseKind(unit: string | null): "count" | "oz" | "g" | "hidden" | "other" {
+  const canonical = canonicalUnit(unit);
+  if (!canonical) return "count";
+  if (HIDDEN_UNITS.has(canonical)) return "hidden";
+  if (canonical === "oz" || canonical === "lb") return "oz";
+  if (canonical === "g" || canonical === "kg") return "g";
+  if (COUNT_UNITS.has(canonical)) return "count";
+  return "other";
+}
+
+export function shoppingAmount(parts: ShoppingPart[], recipeCount: number): string | null {
+  const hint = recipeCount > 1 ? `for ${recipeCount} recipes` : null;
+  const usable = parts.filter((part) => part.quantity != null && part.quantity > 0);
+  if (usable.length === 0) return hint;
+  const kinds = usable.map((part) => purchaseKind(part.unit));
+  if (kinds.some((kind) => kind === "hidden" || kind === "other")) return hint;
+
+  if (kinds.every((kind) => kind === "count")) {
+    const units = new Set(usable.map((part) => canonicalUnit(part.unit)));
+    if (units.size !== 1) return hint;
+    const total = usable.reduce((sum, part) => sum + (part.quantity ?? 0), 0);
+    return amountText(total, [...units][0]) || hint;
+  }
+
+  if (kinds.every((kind) => kind === "oz")) {
+    const preferLb = usable.some((part) => canonicalUnit(part.unit) === "lb");
+    const ounces = usable.reduce((sum, part) => {
+      const qty = part.quantity ?? 0;
+      return sum + (canonicalUnit(part.unit) === "lb" ? qty * 16 : qty);
+    }, 0);
+    const rounded = Math.round(ounces * 1000) / 1000;
+    if (preferLb || rounded >= 16) return amountText(rounded / 16, "lb") || hint;
+    return amountText(rounded, "oz") || hint;
+  }
+
+  if (kinds.every((kind) => kind === "g")) {
+    const preferKg = usable.some((part) => canonicalUnit(part.unit) === "kg");
+    const grams = usable.reduce((sum, part) => {
+      const qty = part.quantity ?? 0;
+      return sum + (canonicalUnit(part.unit) === "kg" ? qty * 1000 : qty);
+    }, 0);
+    const rounded = Math.round(grams * 1000) / 1000;
+    if (preferKg || rounded >= 1000) return amountText(rounded / 1000, "kg") || hint;
+    return amountText(rounded, "g") || hint;
+  }
+
+  return hint;
 }
 
 export function combineAmounts(existing: string | null, addition: Ingredient): string | null {

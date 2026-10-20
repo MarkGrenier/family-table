@@ -1,5 +1,5 @@
 import { HttpError } from "./http";
-import type { FoodSection } from "./ingredients";
+import { groceryKey, groceryName, type FoodSection } from "./ingredients";
 import {
   barcodeKeys,
   mergedCategory,
@@ -518,4 +518,50 @@ export async function addStapleToList(
   const created = await getItem(db, itemId);
   if (!created) throw new HttpError(500, "Something went wrong. Try again.");
   return { item: created, alreadyOnList: false };
+}
+
+export type OnHandItem = { id: string; name: string };
+
+export async function listOnHand(db: D1Database): Promise<OnHandItem[]> {
+  const rows = await db
+    .prepare(`SELECT id, name FROM on_hand ORDER BY created_at ASC`)
+    .all<OnHandItem>();
+  return rows.results ?? [];
+}
+
+export async function onHandKeys(db: D1Database): Promise<Set<string>> {
+  const rows = await db.prepare(`SELECT name_key FROM on_hand`).all<{ name_key: string }>();
+  return new Set((rows.results ?? []).map((row) => row.name_key));
+}
+
+export async function addOnHand(db: D1Database, rawName: string): Promise<{ item: OnHandItem; created: boolean }> {
+  const name = groceryName(rawName);
+  const key = groceryKey(name);
+  if (!name || !key) throw new HttpError(400, "Type a name.");
+  const existing = await db.prepare(`SELECT id, name FROM on_hand WHERE name_key = ?`).bind(key).first<OnHandItem>();
+  if (existing) return { item: existing, created: false };
+  const id = crypto.randomUUID();
+  try {
+    await db
+      .prepare(`INSERT INTO on_hand (id, name, name_key, created_at) VALUES (?, ?, ?, ?)`)
+      .bind(id, name, key, nowIso())
+      .run();
+  } catch (error) {
+    const raced = await db.prepare(`SELECT id, name FROM on_hand WHERE name_key = ?`).bind(key).first<OnHandItem>();
+    if (raced) return { item: raced, created: false };
+    throw error;
+  }
+  return { item: { id, name }, created: true };
+}
+
+export async function deleteOnHand(db: D1Database, id: string): Promise<void> {
+  const result = await db.prepare(`DELETE FROM on_hand WHERE id = ?`).bind(id).run();
+  if (!result.meta.changes) throw new HttpError(404, "That isn't on the usually-on-hand list.");
+}
+
+export async function deleteOnHandByName(db: D1Database, rawName: string): Promise<void> {
+  const key = groceryKey(rawName);
+  if (!key) throw new HttpError(400, "Type a name.");
+  const result = await db.prepare(`DELETE FROM on_hand WHERE name_key = ?`).bind(key).run();
+  if (!result.meta.changes) throw new HttpError(404, "That isn't on the usually-on-hand list.");
 }

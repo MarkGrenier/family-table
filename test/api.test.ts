@@ -41,6 +41,7 @@ describe("grocery API", () => {
     await env.DB.prepare("DELETE FROM recipes").run();
     await env.DB.prepare("DELETE FROM items").run();
     await env.DB.prepare("DELETE FROM staples").run();
+    await env.DB.prepare("DELETE FROM on_hand").run();
   });
 
   it("starts empty, with no practice items from the seed file", async () => {
@@ -998,7 +999,7 @@ describe("grocery API", () => {
     const id = recipe.id as string;
     await call("/api/plan", { method: "POST", token, body: { date: "2026-11-02", meal: "dinner", type: "recipe", recipeId: id } });
     const items = ((await call("/api/items", { token })).json?.items ?? []) as Json[];
-    expect(items.find((item) => item.name === "Rice")?.quantityNote).toBe("½ cup");
+    expect(items.find((item) => item.name === "Rice")?.quantityNote ?? null).toBeNull();
     expect(items.some((item) => item.name === "Shrimp")).toBe(true);
     expect(items.some((item) => item.name === "Avocado")).toBe(false);
     const leftover = await call("/api/plan", {
@@ -1197,6 +1198,190 @@ describe("grocery API", () => {
     const day = ((week.json?.days ?? []) as Json[])[0];
     expect(day.alternates).toEqual([salmonId]);
     expect(day.recipeId).toBe(mainId);
+  });
+
+  it("merges plurals, hides cooking measures, and keeps different sections apart", async () => {
+    const token = env.API_TOKEN;
+    const first = await call("/api/recipes", {
+      method: "POST",
+      token,
+      body: {
+        name: "Lemon chicken",
+        ingredients: [
+          "2 lemons",
+          "2 English cucumbers",
+          "8 1/2 tsp garlic",
+          "1 bag carrots",
+          { text: "4 cube butter", name: "butter", qty: 4, unit: "cube", section: "dairy", buy: true },
+        ],
+        steps: ["Cook."],
+      },
+    });
+    const second = await call("/api/recipes", {
+      method: "POST",
+      token,
+      body: {
+        name: "Lemon salad",
+        ingredients: ["1 lemon", "1 English cucumber", "1 tsp garlic", "1 1/2 cups carrots"],
+        steps: ["Toss."],
+      },
+    });
+    const jarred = await call("/api/recipes", {
+      method: "POST",
+      token,
+      body: {
+        name: "Jarred garlic pasta",
+        ingredients: [{ text: "1 jar garlic", name: "garlic", qty: 1, unit: "jar", section: "pantry", buy: true }],
+        steps: ["Warm."],
+      },
+    });
+    expect(first.status).toBe(201);
+    expect(second.status).toBe(201);
+    const ids = [first, second, jarred].map((response) => (response.json?.recipe as Json).id as string);
+    const dates = ["2026-12-01", "2026-12-02", "2026-12-03"];
+    for (let index = 0; index < ids.length; index += 1) {
+      const planned = await call("/api/plan", {
+        method: "POST",
+        token,
+        body: { date: dates[index], meal: "dinner", type: "recipe", recipeId: ids[index] },
+      });
+      expect(planned.status).toBe(200);
+    }
+
+    const items = ((await call("/api/items", { token })).json?.items ?? []) as Json[];
+    const lemons = items.filter((item) => /lemon/i.test(String(item.name)));
+    const cucumbers = items.filter((item) => /cucumber/i.test(String(item.name)));
+    expect(lemons).toHaveLength(1);
+    expect(lemons[0].quantityNote).toBe("3");
+    expect(cucumbers).toHaveLength(1);
+    expect(cucumbers[0].quantityNote).toBe("3");
+
+    const garlics = items.filter((item) => item.name === "Garlic");
+    expect(garlics).toHaveLength(2);
+    expect(garlics.find((item) => item.section === "produce")?.quantityNote).toBe("for 2 recipes");
+    expect(garlics.find((item) => item.section === "pantry")?.quantityNote).toBe("1 jar");
+    expect(garlics.map((item) => String(item.quantityNote ?? "")).join(" ")).not.toMatch(/\b(tsp|tbsp|cups?)\b/i);
+    const carrots = items.find((item) => item.name === "Carrots");
+    expect(carrots?.quantityNote).toBe("for 2 recipes");
+    expect(String(carrots?.quantityNote)).not.toMatch(/bag|cup/i);
+    const butter = items.find((item) => item.name === "Butter");
+    expect(butter?.quantityNote ?? null).toBeNull();
+    expect(butter?.section).toBe("dairy");
+    expect(String(butter?.quantityNote ?? "")).not.toMatch(/cube/i);
+  });
+
+  it("skips usually-on-hand names and rebuilds planned groceries without dropping typed items", async () => {
+    const token = env.API_TOKEN;
+    expect((await call("/api/on-hand")).status).toBe(401);
+    expect((await call("/api/groceries/rebuild", { method: "POST", body: {} })).status).toBe(401);
+
+    const empty = await call("/api/on-hand", { token });
+    expect(empty.json).toEqual({ items: [] });
+    const created = await call("/api/on-hand", { method: "POST", token, body: { name: "Lemons" } });
+    expect(created.status).toBe(201);
+    const again = await call("/api/on-hand", { method: "POST", token, body: { name: "Lemon" } });
+    expect(again.status).toBe(200);
+    expect((again.json?.item as Json).id).toBe((created.json?.item as Json).id);
+    expect((await call("/api/on-hand", { method: "POST", token, body: { name: "  " } })).status).toBe(400);
+
+    const typed = await call("/api/items", {
+      method: "POST",
+      token,
+      body: { name: "Lemons", store: "local", category: "produce", section: "produce" },
+    });
+    expect(typed.status).toBe(201);
+    const lemonRecipe = await call("/api/recipes", {
+      method: "POST",
+      token,
+      body: { name: "Lemon water", ingredients: ["1 lemon"], steps: ["Stir."] },
+    });
+    const lemonId = (lemonRecipe.json?.recipe as Json).id as string;
+    await call("/api/plan", {
+      method: "POST",
+      token,
+      body: { date: "2026-12-08", meal: "dinner", type: "recipe", recipeId: lemonId },
+    });
+    const skipped = ((await call("/api/items", { token })).json?.items ?? []) as Json[];
+    const lemons = skipped.filter((item) => /lemon/i.test(String(item.name)));
+    expect(lemons).toHaveLength(1);
+    expect(lemons[0].quantityNote ?? null).toBeNull();
+
+    await call(`/api/items/${lemons[0].id}`, { method: "DELETE", token });
+    await call(`/api/on-hand/${(created.json?.item as Json).id}`, { method: "DELETE", token });
+    expect((await call("/api/on-hand", { token })).json).toEqual({ items: [] });
+    const shopped = await call("/api/plan/groceries", {
+      method: "POST",
+      token,
+      body: { from: "2026-12-08", to: "2026-12-08" },
+    });
+    expect(shopped.json).toMatchObject({ added: 1 });
+    const bought = ((await call("/api/items", { token })).json?.items ?? []) as Json[];
+    expect(bought.find((item) => item.name === "Lemon")?.quantityNote).toBe("1");
+
+    const rice = await call("/api/on-hand", { method: "POST", token, body: { name: "Rice" } });
+    const removed = await call("/api/on-hand", { method: "DELETE", token, body: { name: "rice" } });
+    expect(removed.status).toBe(200);
+    expect((await call(`/api/on-hand/${(rice.json?.item as Json).id}`, { method: "DELETE", token })).status).toBe(404);
+
+    const soap = await call("/api/items", {
+      method: "POST",
+      token,
+      body: { name: "Dish soap", store: "local", category: "shelf" },
+    });
+    const dinner = await call("/api/recipes", {
+      method: "POST",
+      token,
+      body: { name: "Onion beef", ingredients: ["1 onion", "1 lb beef"], steps: ["Simmer."] },
+    });
+    const dinnerId = (dinner.json?.recipe as Json).id as string;
+    await call("/api/plan", {
+      method: "POST",
+      token,
+      body: { date: "2026-12-09", meal: "dinner", type: "recipe", recipeId: dinnerId },
+    });
+    const before = ((await call("/api/items", { token })).json?.items ?? []) as Json[];
+    const beef = before.find((item) => item.name === "Beef");
+    const onion = before.find((item) => item.name === "Onion");
+    await call(`/api/items/${beef?.id}`, { method: "PATCH", token, body: { checked: true } });
+    await call(`/api/items/${onion?.id}`, { method: "PATCH", token, body: { quantityNote: "8 ½ tsp" } });
+    const rebuilt = await call("/api/groceries/rebuild", { method: "POST", token, body: {} });
+    expect(rebuilt.status).toBe(200);
+    expect(rebuilt.json).toMatchObject({ removed: 2, added: 2, skipped: 1 });
+    const after = ((await call("/api/items", { token })).json?.items ?? []) as Json[];
+    expect(after.filter((item) => item.name === "Dish soap")).toHaveLength(1);
+    expect(after.filter((item) => item.name === "Onion")).toHaveLength(1);
+    expect(after.find((item) => item.name === "Onion")?.quantityNote).toBe("1");
+    expect(after.filter((item) => item.name === "Beef")).toHaveLength(1);
+    expect(after.find((item) => item.name === "Beef")?.checked).toBe(true);
+    expect(after.some((item) => item.name === "Lemon")).toBe(true);
+    expect((soap.json?.item as Json).name).toBe("Dish soap");
+
+    const manual = await call("/api/items", {
+      method: "POST",
+      token,
+      body: { name: "Garlic", quantityNote: "2 cartons", store: "local", category: "produce", section: "produce" },
+    });
+    const pounds = await call("/api/recipes", {
+      method: "POST",
+      token,
+      body: {
+        name: "Garlic roast",
+        ingredients: [{ text: "1 lb garlic", name: "garlic", qty: 1, unit: "lb", section: "produce", buy: true }],
+        steps: ["Roast."],
+      },
+    });
+    const roastId = (pounds.json?.recipe as Json).id as string;
+    const roast = await call("/api/plan", {
+      method: "POST",
+      token,
+      body: { date: "2026-12-10", meal: "dinner", type: "recipe", recipeId: roastId },
+    });
+    const merged = ((await call("/api/items", { token })).json?.items ?? []) as Json[];
+    const garlic = merged.find((item) => item.id === (manual.json?.item as Json).id);
+    expect(garlic?.quantityNote).toBe("1 lb");
+    await call(`/api/plan/${(roast.json?.entry as Json).id}`, { method: "DELETE", token });
+    const restored = ((await call("/api/items", { token })).json?.items ?? []) as Json[];
+    expect(restored.find((item) => item.id === (manual.json?.item as Json).id)?.quantityNote).toBe("2 cartons");
   });
 
   it("serves the phone page", async () => {

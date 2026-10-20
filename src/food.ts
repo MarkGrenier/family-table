@@ -1,13 +1,13 @@
-import { createItem, deleteItem, listItems, updateItem, type Item } from "./db";
+import { createItem, deleteItem, getItem, listItems, onHandKeys, updateItem, type Item } from "./db";
 import {
-  amountText,
   categoryForSection,
-  combineAmounts,
+  groceryKey,
   groceryName,
   normalizeStoredIngredient,
   scaleIngredient,
-  subtractAmount,
+  shoppingAmount,
   type Ingredient,
+  type ShoppingPart,
 } from "./ingredients";
 import { HttpError } from "./http";
 import { addDays, type CookStep, type EventInput, type PlanInput, type RecipeInput, type RecipePatch, type WeekInput } from "./food-validate";
@@ -631,26 +631,23 @@ export async function addRecipeToGroceries(db: D1Database, recipeId: string, ser
   const recipe = await getRecipe(db, recipeId);
   if (!recipe) throw new HttpError(404, "That recipe isn't here anymore.");
   const factor = servings == null ? 1 : servings / recipe.servings;
+  const onHand = await onHandKeys(db);
   const totals = { added: 0, updated: 0, skipped: 0 };
   for (let index = 0; index < recipe.ingredients.length; index += 1) {
-    const change = await addOneIngredient(
-      db,
-      scaleIngredient(recipe.ingredients[index], factor),
-      recipe.name,
-      `recipe:${recipe.id}:${index}`,
-    );
+    const change = await addOneIngredient(db, scaleIngredient(recipe.ingredients[index], factor), `recipe:${recipe.id}:${index}`, onHand);
     totals[change] += 1;
   }
   return totals;
 }
 
-async function addEntryGroceries(db: D1Database, entry: PlanEntry): Promise<GroceryChange> {
+async function addEntryGroceries(db: D1Database, entry: PlanEntry, onHand?: Set<string>): Promise<GroceryChange> {
   const totals = { added: 0, updated: 0, skipped: 0 };
   if (entry.type !== "recipe" || !entry.recipeId) return totals;
   const recipe = await getRecipe(db, entry.recipeId);
   if (!recipe) return totals;
+  const keys = onHand ?? (await onHandKeys(db));
   for (let index = 0; index < recipe.ingredients.length; index += 1) {
-    const change = await addOneIngredient(db, recipe.ingredients[index], recipe.name, `plan:${entry.id}:${index}`);
+    const change = await addOneIngredient(db, recipe.ingredients[index], `plan:${entry.id}:${index}`, keys);
     totals[change] += 1;
   }
   return totals;
@@ -659,9 +656,62 @@ async function addEntryGroceries(db: D1Database, entry: PlanEntry): Promise<Groc
 export async function addPlanGroceries(db: D1Database, from: string, to: string, planId: string | null): Promise<GroceryChange> {
   const planned = await listPlan(db, from, to);
   const entries = planId ? planned.filter((entry) => entry.id === planId) : planned;
+  const onHand = await onHandKeys(db);
   const totals = { added: 0, updated: 0, skipped: 0 };
   for (const entry of entries) {
-    const change = await addEntryGroceries(db, entry);
+    const change = await addEntryGroceries(db, entry, onHand);
+    totals.added += change.added;
+    totals.updated += change.updated;
+    totals.skipped += change.skipped;
+  }
+  return totals;
+}
+
+export async function rebuildPlanGroceries(
+  db: D1Database,
+  range: { from: string; to: string } | null,
+): Promise<GroceryChange & { removed: number }> {
+  const planned = range ? await listPlan(db, range.from, range.to) : await listAllPlan(db);
+  const entries = planned.filter((entry) => entry.type === "recipe" && entry.recipeId);
+  const touched = new Set<string>();
+  for (const entry of entries) {
+    const rows = await db
+      .prepare(
+        `SELECT grocery_sources.item_id AS item_id
+         FROM grocery_sources
+         JOIN items ON items.id = grocery_sources.item_id
+         WHERE grocery_sources.source_key GLOB ?
+           AND items.deleted_at IS NULL
+           AND items.checked = 0`,
+      )
+      .bind(`plan:${entry.id}:*`)
+      .all<{ item_id: string }>();
+    const ids = new Set((rows.results ?? []).map((row) => row.item_id));
+    for (const itemId of ids) {
+      await db
+        .prepare(`DELETE FROM grocery_sources WHERE item_id = ? AND source_key GLOB ?`)
+        .bind(itemId, `plan:${entry.id}:*`)
+        .run();
+      touched.add(itemId);
+    }
+  }
+  let removed = 0;
+  for (const itemId of touched) {
+    const left = await db
+      .prepare(`SELECT COUNT(*) AS n FROM grocery_sources WHERE item_id = ?`)
+      .bind(itemId)
+      .first<{ n: number }>();
+    if (Number(left?.n ?? 0) === 0) {
+      await deleteItem(db, itemId);
+      removed += 1;
+    } else {
+      await refreshItemQuantity(db, itemId);
+    }
+  }
+  const totals = { added: 0, updated: 0, skipped: 0, removed };
+  const onHand = await onHandKeys(db);
+  for (const entry of entries) {
+    const change = await addEntryGroceries(db, entry, onHand);
     totals.added += change.added;
     totals.updated += change.updated;
     totals.skipped += change.skipped;
@@ -761,59 +811,153 @@ export async function replaceWeek(db: D1Database, input: WeekInput): Promise<{ w
 }
 
 async function removePlanGroceries(db: D1Database, entry: PlanEntry): Promise<void> {
-  const recipe = entry.recipeId ? await getRecipe(db, entry.recipeId) : null;
   const rows = await db
     .prepare(`SELECT item_id, source_key FROM grocery_sources WHERE source_key GLOB ?`)
     .bind(`plan:${entry.id}:*`)
     .all<{ item_id: string; source_key: string }>();
   for (const row of rows.results ?? []) {
-    const index = Number(row.source_key.slice(row.source_key.lastIndexOf(":") + 1));
-    const ingredient = recipe && Number.isInteger(index) ? recipe.ingredients[index] : undefined;
-    await removeOneSource(db, row.item_id, row.source_key, ingredient ?? null, recipe?.name ?? entry.recipeName ?? "");
+    await removeOneSource(db, row.item_id, row.source_key);
   }
 }
 
-async function removeOneSource(
-  db: D1Database,
-  itemId: string,
-  sourceKey: string,
-  ingredient: Ingredient | null,
-  recipeName: string,
-): Promise<void> {
+async function removeOneSource(db: D1Database, itemId: string, sourceKey: string): Promise<void> {
   const items = await listItems(db);
   const item = items.find((entry) => entry.id === itemId);
   if (!item || item.checked) {
     await db.prepare(`DELETE FROM grocery_sources WHERE item_id = ? AND source_key = ?`).bind(itemId, sourceKey).run();
     return;
   }
+  await db.prepare(`DELETE FROM grocery_sources WHERE item_id = ? AND source_key = ?`).bind(itemId, sourceKey).run();
   const others = await db
-    .prepare(`SELECT source_key FROM grocery_sources WHERE item_id = ? AND source_key != ?`)
-    .bind(itemId, sourceKey)
-    .all<{ source_key: string }>();
-  if ((others.results ?? []).length === 0) {
+    .prepare(`SELECT COUNT(*) AS n FROM grocery_sources WHERE item_id = ?`)
+    .bind(itemId)
+    .first<{ n: number }>();
+  if (Number(others?.n ?? 0) === 0) {
     await deleteItem(db, itemId);
     return;
   }
-  if (ingredient) {
-    await updateItem(db, itemId, { quantityNote: subtractAmount(item.quantityNote, ingredient) });
+  await refreshItemQuantity(db, itemId);
+}
+
+function sectionsMatch(existing: Item["section"], incoming: Ingredient["section"]): boolean {
+  return existing == null || existing === incoming;
+}
+
+function handSourceKey(itemId: string, note: string | null): string {
+  return `user:${itemId}:${encodeURIComponent(note ?? "")}`;
+}
+
+function readHandSource(sourceKey: string): { known: boolean; note: string | null } | null {
+  if (!sourceKey.startsWith("user:")) return null;
+  const rest = sourceKey.slice("user:".length);
+  const split = rest.indexOf(":");
+  if (split === -1) return { known: false, note: null };
+  const encoded = rest.slice(split + 1);
+  if (!encoded) return { known: true, note: null };
+  try {
+    const note = decodeURIComponent(encoded);
+    return { known: true, note: note || null };
+  } catch {
+    return { known: true, note: null };
   }
-  await db.prepare(`DELETE FROM grocery_sources WHERE item_id = ? AND source_key = ?`).bind(itemId, sourceKey).run();
+}
+
+function recipeIdentity(sourceKey: string): string | null {
+  const parts = sourceKey.split(":");
+  if ((parts[0] === "plan" || parts[0] === "recipe") && parts[1]) return `${parts[0]}:${parts[1]}`;
+  return null;
+}
+
+function isDisposableNote(note: string | null): boolean {
+  if (!note) return true;
+  if (/^for \d+ recipes$/.test(note)) return true;
+  if (/\b(tsp|tbsp|teaspoons?|tablespoons?|cups?)\b/i.test(note)) return true;
+  if (note.includes("+")) return true;
+  if (/\bcubes?\b/i.test(note)) return true;
+  return false;
+}
+
+async function ingredientForSource(db: D1Database, sourceKey: string): Promise<Ingredient | null> {
+  const parts = sourceKey.split(":");
+  const index = Number(parts[2]);
+  if (!Number.isInteger(index) || index < 0) return null;
+  if (parts[0] === "plan" && parts[1]) {
+    const entry = await getPlan(db, parts[1]);
+    if (!entry?.recipeId) return null;
+    const recipe = await getRecipe(db, entry.recipeId);
+    return recipe?.ingredients[index] ?? null;
+  }
+  if (parts[0] === "recipe" && parts[1]) {
+    const recipe = await getRecipe(db, parts[1]);
+    return recipe?.ingredients[index] ?? null;
+  }
+  return null;
+}
+
+async function refreshItemQuantity(db: D1Database, itemId: string): Promise<void> {
+  const item = await getItem(db, itemId);
+  if (!item) return;
+  const rows = await db
+    .prepare(`SELECT source_key, quantity, unit FROM grocery_sources WHERE item_id = ?`)
+    .bind(itemId)
+    .all<{ source_key: string; quantity: number | null; unit: string | null }>();
+  const parts: ShoppingPart[] = [];
+  const identities = new Set<string>();
+  let hand: { known: boolean; note: string | null } | null = null;
+  for (const row of rows.results ?? []) {
+    const manual = readHandSource(row.source_key);
+    if (manual) {
+      hand = manual;
+      continue;
+    }
+    const identity = recipeIdentity(row.source_key);
+    if (!identity) continue;
+    identities.add(identity);
+    if (row.quantity == null && (row.unit == null || row.unit === "")) {
+      const ingredient = await ingredientForSource(db, row.source_key);
+      parts.push({ quantity: ingredient?.quantity ?? null, unit: ingredient?.unit ?? null });
+    } else {
+      parts.push({ quantity: row.quantity, unit: row.unit });
+    }
+  }
+  const shop = shoppingAmount(parts, identities.size);
+  const summed = shop != null && !/^for \d+ recipes$/.test(shop);
+  let next: string | null;
+  if (summed) next = shop;
+  else if (hand?.known && hand.note) next = hand.note;
+  else if (hand && !hand.known && item.quantityNote && !isDisposableNote(item.quantityNote)) next = item.quantityNote;
+  else next = shop;
+  if (next !== item.quantityNote) await updateItem(db, itemId, { quantityNote: next });
+}
+
+async function insertContribution(db: D1Database, itemId: string, sourceKey: string, ingredient: Ingredient): Promise<void> {
+  await db
+    .prepare(`INSERT INTO grocery_sources (item_id, source_key, quantity, unit) VALUES (?, ?, ?, ?)`)
+    .bind(itemId, sourceKey, ingredient.quantity ?? null, ingredient.unit ?? null)
+    .run();
 }
 
 async function addOneIngredient(
   db: D1Database,
   ingredient: Ingredient,
-  _recipeName: string,
   sourceKey: string,
+  onHand: Set<string>,
 ): Promise<keyof GroceryChange> {
   if (ingredient.buy === false || (ingredient.optional && ingredient.buy !== true)) return "skipped";
+  if (onHand.has(groceryKey(ingredient.name))) return "skipped";
+  const seen = await db
+    .prepare(`SELECT item_id FROM grocery_sources WHERE source_key = ?`)
+    .bind(sourceKey)
+    .first<{ item_id: string }>();
+  if (seen) return "skipped";
   const name = groceryName(ingredient.name);
+  const key = groceryKey(name);
   const items = await listItems(db);
-  const existing = items.find((item) => !item.checked && item.name.toLowerCase() === name.toLowerCase());
+  const existing = items.find((item) => !item.checked && groceryKey(item.name) === key && sectionsMatch(item.section, ingredient.section));
   if (!existing) {
     const item = await createItem(db, {
       name,
-      quantityNote: amountText(ingredient.quantity, ingredient.unit) || null,
+      quantityNote: null,
       store: "local",
       category: categoryForSection(ingredient.section),
       checked: false,
@@ -823,27 +967,23 @@ async function addOneIngredient(
       staple: false,
       section: ingredient.section,
     });
-    await db.prepare(`INSERT INTO grocery_sources (item_id, source_key) VALUES (?, ?)`).bind(item.id, sourceKey).run();
+    await insertContribution(db, item.id, sourceKey, ingredient);
+    await refreshItemQuantity(db, item.id);
     return "added";
   }
-  const seen = await db
-    .prepare(`SELECT 1 AS ok FROM grocery_sources WHERE item_id = ? AND source_key = ?`)
-    .bind(existing.id, sourceKey)
-    .first<{ ok: number }>();
-  if (seen) return "skipped";
   const sourceCount = await db
     .prepare(`SELECT COUNT(*) AS n FROM grocery_sources WHERE item_id = ?`)
     .bind(existing.id)
     .first<{ n: number }>();
   if (Number(sourceCount?.n ?? 0) === 0) {
-    await db.prepare(`INSERT INTO grocery_sources (item_id, source_key) VALUES (?, ?)`).bind(existing.id, `user:${existing.id}`).run();
+    await db
+      .prepare(`INSERT INTO grocery_sources (item_id, source_key) VALUES (?, ?)`)
+      .bind(existing.id, handSourceKey(existing.id, existing.quantityNote))
+      .run();
   }
-  const note = combineAmounts(existing.quantityNote, ingredient);
-  await updateItem(db, existing.id, {
-    quantityNote: note,
-    section: existing.section ?? ingredient.section,
-  });
-  await db.prepare(`INSERT INTO grocery_sources (item_id, source_key) VALUES (?, ?)`).bind(existing.id, sourceKey).run();
+  if (existing.section == null) await updateItem(db, existing.id, { section: ingredient.section });
+  await insertContribution(db, existing.id, sourceKey, ingredient);
+  await refreshItemQuantity(db, existing.id);
   return "updated";
 }
 
