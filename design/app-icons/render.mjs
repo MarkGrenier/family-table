@@ -25,6 +25,8 @@ const designs = [
   ["j", "j-cutout.svg"],
   ["k", "k-cream.svg"],
   ["l", "l-angle.svg"],
+  ["m", "m-table.svg"],
+  ["n", "n-bowl.svg"],
 ];
 
 for (const [letter, file] of designs) {

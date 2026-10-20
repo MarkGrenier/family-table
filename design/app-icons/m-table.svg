@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- M. Front view of a table with a plate of food, fork, and knife. Full-bleed 512. Wire sized/m over public/icons when chosen. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <rect width="512" height="512" fill="#5dbb24"/>
+  <g id="art" transform="translate(0.5 -23.5)">
+  <g fill="#ffffff" transform="translate(96 156)">
+  <path d="M0 14 C0 4 15 4 15 14 L15 76 L0 76 Z"/>
+  <path d="M27 10 C27 0 42 0 42 10 L42 84 L27 84 Z"/>
+  <path d="M54 14 C54 4 69 4 69 14 L69 76 L54 76 Z"/>
+  <path d="M0 62 C0 88 16 102 27 108 L27 156 C27 170 43 170 43 156 L43 108 C54 102 69 88 69 62 C60 80 50 86 34.5 86 C19 86 9 80 0 62 Z"/></g>
+  <g fill="#ffffff" transform="translate(400 160) scale(-1 1)">
+  <path d="M16 8 C24 10 28 20 30 34 C34 52 32 70 26 88 C22 102 18 112 18 122 L18 156 C18 170 2 170 2 156 L2 30 C2 16 7 8 16 8 Z"/></g>
+  <rect x="128" y="332" width="32" height="70" rx="14" fill="#f3eadc"/>
+  <rect x="352" y="332" width="32" height="70" rx="14" fill="#f3eadc"/>
+  <rect x="96" y="308" width="320" height="32" rx="8" fill="#e6d4b8"/>
+  <rect x="84" y="262" width="344" height="56" rx="16" fill="#f6f1e6"/>
+  <circle cx="256" cy="240" r="70" fill="#ffffff"/>
+  <circle cx="256" cy="240" r="48" fill="none" stroke="#e6dcc8" stroke-width="8"/>
+  <path fill="#4ea31c" d="M208 248 C208 214 304 214 304 248 C290 266 222 266 208 248 Z"/>
+</g>
+</svg>
