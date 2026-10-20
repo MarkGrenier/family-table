@@ -252,7 +252,8 @@ function leftoversNight(entry, recipe, options = {}) {
         <button class="float right" type="button" data-action="recipe-menu" data-date="${esc(entry.date)}" data-meal="${esc(entry.meal)}" aria-label="More">${dots()}</button>
       </div>
       <div class="pad">
-        <p class="night-label">Leftovers night</p>
+        ${options.back ? `<p class="kicker meal-kicker">${esc(mealLabel(entry.meal))}</p>` : ""}
+        <span class="lo-pill">Leftovers</span>
         <h1>${esc(dishName(entry, recipe))}</h1>
         <p class="night-line">Night off. Enjoy the leftovers.</p>
         ${remove}
@@ -299,8 +300,8 @@ function leftoversRow(entry, recipe) {
   const thumb = recipe ? recipeThumb(recipe) : `<span class="thumb-tile" aria-hidden="true">${plateIcon()}</span>`;
   return `<div class="leftover-row">${thumb}
       <button class="copy" type="button" data-action="open-day" data-date="${esc(entry.date)}">
-        <p class="kicker">Leftovers</p>
         <strong>${esc(dishName(entry, recipe))}</strong>
+        <span class="leftover-meta"><span class="meal-kind">${esc(mealLabel(entry.meal))}</span><span class="lo-pill">Leftovers</span></span>
       </button>
       <button class="icon-btn" type="button" data-action="recipe-menu" data-date="${esc(entry.date)}" data-meal="${esc(entry.meal)}" aria-label="More">${dots()}</button>
     </div>`;
@@ -581,7 +582,7 @@ function recipeView(recipe, mode) {
   const tag = embedded ? prepPhotoTag() : "";
   return `${hero(recipe, !embedded, tag)}
     <div class="pad">
-      ${mode === "leftovers" ? `<p class="leftover-flag">Leftovers</p>` : ""}
+      ${mode === "leftovers" ? `<span class="lo-pill">Leftovers</span>` : ""}
       <div class="title-row"><h1>${esc(recipe.name)}</h1>
         <button class="heart${recipe.favorite ? " is-on" : ""}" type="button" data-action="favorite" data-id="${esc(recipe.id)}" aria-label="Favorite">${heart(recipe.favorite)}</button>
       </div>

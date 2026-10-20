@@ -1409,7 +1409,8 @@ describe("grocery API", () => {
     expect(js).toContain("raised && cooked");
     expect(js).toContain("recipeThumb(recipe)");
     expect(js).toContain("Chef's picks");
-    expect(js).toContain("Leftovers night");
+    expect(js).toContain('class="lo-pill"');
+    expect(js).toContain("mealLabel(entry.meal)");
     expect(js).toContain("Night off. Enjoy the leftovers.");
     expect(js).toContain("/photos/leftovers-hero.jpg");
     expect(js).toContain("Tomorrow: leftovers");
