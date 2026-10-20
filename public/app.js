@@ -164,10 +164,9 @@ function render() {
 function loginHtml() {
   return `<main class="login">
     <h1>Family Table</h1>
-    <p class="lede">Dinners, the week, and the grocery list for Mark and Emma.</p>
     <form id="login-form">
       <div class="pass-box">
-        <input id="passcode" name="passcode" type="password" autocomplete="current-password" autocorrect="off" autocapitalize="off" spellcheck="false" inputmode="text" aria-label="Passcode">
+        <input id="passcode" name="passcode" type="password" autocomplete="current-password" autocorrect="off" autocapitalize="off" spellcheck="false" inputmode="text" placeholder="Enter family passcode" aria-label="Passcode">
         <button type="button" data-action="toggle-passcode">Show</button>
       </div>
       <p id="login-error" class="error" role="alert" ${state.loginError ? "" : "hidden"}>${esc(state.loginError || "")}</p>
