@@ -1669,7 +1669,8 @@ describe("grocery API", () => {
     expect(js).not.toContain("sourceUrl");
     expect(js).toContain("/photos/leftovers-hero.jpg");
     expect(js).toContain("Tomorrow: leftovers");
-    expect(js).toContain("Coming up");
+    expect(js).not.toContain("Coming up");
+    expect(js).not.toContain("coming-up");
     expect(js).toContain('aria-label="Search recipes"');
     const recipesPage = js.slice(js.indexOf("function recipesHtml"), js.indexOf("function sortButton"));
     expect(recipesPage).toContain('placeholder="Search recipes"');
