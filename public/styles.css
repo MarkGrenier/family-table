@@ -1003,6 +1003,19 @@ body:has(.night-screen),
 .month-panel h2 { margin: 0; font-size: 1.15rem; font-weight: 750; text-align: left; }
 .month-panel .meal-row { min-height: 56px; }
 .month-panel .muted { margin: 0.4rem 0; }
+
+.coming-up { margin-top: 1.15rem; text-align: left; }
+.coming-up h2 { margin: 0 0 0.15rem; font-size: 1.2rem; font-weight: 750; }
+.coming-row {
+  display: flex;
+  align-items: center;
+  gap: 0.15rem;
+  border-top: 1px solid var(--line);
+}
+.coming-row .meal-open { min-height: 72px; padding: 0.45rem 0; }
+.coming-date { font-size: 0.78rem; font-weight: 750; letter-spacing: 0.01em; }
+.coming-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 0.4rem; }
+.coming-meta .lo-pill { margin: 0; color: #7a4b08; background: #f6e2b5; }
 .dot { width: 6px; height: 6px; border-radius: 50%; background: transparent; }
 .dot.is-on { background: var(--green); }
 

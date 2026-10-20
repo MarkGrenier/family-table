@@ -452,7 +452,39 @@ function monthPanel(date) {
       </div>
       ${meals.length ? meals.map(mealRow).join("") : `<p class="muted">Nothing planned</p>`}
       ${events.map((event) => `<p class="event-line">${event.time ? `<time>${esc(event.time)}</time>` : ""}${esc(event.title)}</p>`).join("")}
+    </section>
+    ${comingUpHtml(date)}`;
+}
+
+function comingUpHtml(date) {
+  const days = Array.from({ length: 5 }, (_, index) => addDays(date, index + 1));
+  return `<section class="coming-up" aria-label="Coming up">
+      <h2>Coming up</h2>
+      ${days.map(comingRow).join("")}
     </section>`;
+}
+
+function comingRow(date) {
+  const entry = mealOn(date, "dinner");
+  const recipe = recipeForEntry(entry);
+  const when = formatUtc(date, { weekday: "short", month: "short", day: "numeric" });
+  const thumb = recipe ? recipeThumb(recipe) : `<span class="thumb-tile" aria-hidden="true">${plateIcon()}</span>`;
+  const name = entry ? dishName(entry, recipe) : "Nothing planned";
+  const pill = entry?.type === "leftovers" ? `<span class="lo-pill">Leftovers</span>` : "";
+  const open = entry?.type === "recipe" && recipe
+    ? `data-action="open-recipe" data-id="${esc(recipe.id)}" data-date="${esc(date)}" data-meal="dinner"`
+    : `data-action="open-day" data-date="${esc(date)}"`;
+  return `<div class="coming-row">
+      <button class="meal-open" type="button" ${open}>
+        ${thumb}
+        <span class="meal-copy">
+          <span class="coming-date">${esc(when)}</span>
+          <strong>${esc(name)}</strong>
+          <span class="coming-meta"><span>Dinner</span>${pill}</span>
+        </span>
+      </button>
+      ${entry ? mealMenu(entry) : ""}
+    </div>`;
 }
 
 function monthTitle(iso) {
@@ -560,8 +592,8 @@ function pickerHtml(date, meal, showRecipes = true) {
 
 function recipesHtml() {
   return `<div class="recipes-head"><h1>Recipes</h1></div>
-    <label class="search">Search
-      <input id="recipe-search" class="field-box" type="search" value="${esc(state.recipeQuery)}" placeholder="Search recipes" autocomplete="off">
+    <label class="search">
+      <input id="recipe-search" class="field-box" type="search" value="${esc(state.recipeQuery)}" placeholder="Search recipes" aria-label="Search recipes" autocomplete="off">
     </label>
     <div class="sort" role="group" aria-label="Sort recipes">
       ${sortButton("favorites", "Favorites")}${sortButton("recent", "Recent")}${sortButton("az", "A-Z")}

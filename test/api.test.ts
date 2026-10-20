@@ -1669,6 +1669,12 @@ describe("grocery API", () => {
     expect(js).not.toContain("sourceUrl");
     expect(js).toContain("/photos/leftovers-hero.jpg");
     expect(js).toContain("Tomorrow: leftovers");
+    expect(js).toContain("Coming up");
+    expect(js).toContain('aria-label="Search recipes"');
+    const recipesPage = js.slice(js.indexOf("function recipesHtml"), js.indexOf("function sortButton"));
+    expect(recipesPage).toContain('placeholder="Search recipes"');
+    expect(recipesPage).not.toContain(">Search<");
+    expect(recipesPage).not.toContain(">Search\n");
     const hero = await exports.default.fetch("https://grocery.test/photos/leftovers-hero.jpg");
     expect(hero.status).toBe(200);
     expect(hero.headers.get("Content-Type") ?? "").toContain("image/");
