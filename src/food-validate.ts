@@ -4,7 +4,12 @@ import { isFoodSection, normalizeIngredient, parseIngredientLines, type FoodSect
 export type Meal = "breakfast" | "lunch" | "dinner";
 export type PlanType = "recipe" | "leftovers" | "note";
 
-export type CookStep = { text: string; minutes: number | null; ingredients: Array<number | string> };
+export type CookStep = {
+  text: string;
+  minutes: number | string | null;
+  seconds?: number;
+  ingredients: Array<number | string>;
+};
 
 export type RecipeInput = {
   name: string;
@@ -235,19 +240,55 @@ export function cleanCookSteps(value: unknown): CookStep[] {
     const text = (entry as { text: string }).text.trim().replace(/\s+/g, " ");
     if (!text) continue;
     if (text.length > 1000) throw new HttpError(400, "One of those steps is too long.");
-    const rawMinutes = (entry as { minutes?: unknown }).minutes;
-    let minutes: number | null = null;
-    if (rawMinutes != null && rawMinutes !== "") {
-      const number = typeof rawMinutes === "number" ? rawMinutes : Number(rawMinutes);
-      if (!Number.isInteger(number) || number < 1 || number > 600) {
-        throw new HttpError(400, "A timer should be a whole number of minutes, up to 600.");
-      }
-      minutes = number;
-    }
+    const timer = cleanTimer(entry as { minutes?: unknown; seconds?: unknown });
     const ingredients = cleanStepIngredients((entry as { ingredients?: unknown }).ingredients);
-    steps.push({ text, minutes, ingredients });
+    steps.push({ text, ...timer, ingredients });
   }
   return steps;
+}
+
+function cleanTimer(entry: { minutes?: unknown; seconds?: unknown }): { minutes: number | string | null; seconds?: number } {
+  let seconds: number | undefined;
+  if (entry.seconds != null && entry.seconds !== "") {
+    const number = typeof entry.seconds === "number" ? entry.seconds : Number(entry.seconds);
+    if (!Number.isInteger(number) || number < 1 || number > 36000) {
+      throw new HttpError(400, "A timer in seconds should be a whole number, up to 36000.");
+    }
+    seconds = number;
+  }
+  let minutes: number | string | null = null;
+  if (entry.minutes != null && entry.minutes !== "") {
+    if (typeof entry.minutes === "number") {
+      if (!Number.isInteger(entry.minutes) || entry.minutes < 1 || entry.minutes > 600) {
+        throw new HttpError(400, "A timer should be a whole number of minutes, up to 600.");
+      }
+      minutes = entry.minutes;
+    } else if (typeof entry.minutes === "string") {
+      const text = entry.minutes.trim().toLowerCase().replace(/[–—]/g, "-");
+      const asSeconds = /^(\d+)\s*(?:sec|seconds)$/.exec(text);
+      const range = /^(\d+)\s*-\s*(\d+)\s*(?:min|minutes)?$/.exec(text);
+      const single = /^(\d+)\s*(?:min|minutes)?$/.exec(text);
+      if (asSeconds) {
+        const number = Number(asSeconds[1]);
+        if (number < 1 || number > 36000) throw new HttpError(400, "A timer in seconds should be a whole number, up to 36000.");
+        seconds = seconds ?? number;
+      } else if (range) {
+        const low = Number(range[1]);
+        const high = Number(range[2]);
+        if (low < 1 || high > 600 || low > high) throw new HttpError(400, "A timer range should look like 4-5.");
+        minutes = `${low}-${high}`;
+      } else if (single) {
+        const number = Number(single[1]);
+        if (number < 1 || number > 600) throw new HttpError(400, "A timer should be a whole number of minutes, up to 600.");
+        minutes = number;
+      } else {
+        throw new HttpError(400, "A timer should be minutes, a range like 4-5, or seconds.");
+      }
+    } else {
+      throw new HttpError(400, "A timer should be minutes, a range like 4-5, or seconds.");
+    }
+  }
+  return seconds ? { minutes, seconds } : { minutes };
 }
 
 function cleanStepIngredients(value: unknown): Array<number | string> {
@@ -341,7 +382,7 @@ export function parsePlan(body: Record<string, unknown>): PlanInput {
     date: cleanDate(body.date),
     meal: meal as Meal,
     type: type as PlanType,
-    recipeId: type === "recipe" ? recipeId : null,
+    recipeId: type === "note" ? null : recipeId,
     note: type === "recipe" ? null : note,
   };
 }
@@ -431,6 +472,8 @@ export function parseWeek(body: Record<string, unknown>): WeekInput {
         recipeId = optionalText(day.recipeId, "The recipe", 80);
         if (!recipeId) throw new HttpError(400, "Each recipe day needs a recipe or a recipeId.");
       }
+    } else if (type === "leftovers") {
+      recipeId = optionalText(day.recipeId, "The recipe", 80);
     }
     return {
       date,

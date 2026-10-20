@@ -677,6 +677,8 @@ describe("grocery API", () => {
     expect(first.status).toBe(200);
     const firstDays = (first.json?.days ?? []) as Json[];
     expect(firstDays).toHaveLength(3);
+    expect(firstDays[1].type).toBe("leftovers");
+    expect((firstDays[1].recipe as Json).name).toBe("Chicken chili");
     const savedRecipe = firstDays[0].recipe as Json;
     expect(savedRecipe.externalId).toBe("home-chef-chicken-chili");
     expect(savedRecipe.coversNights).toBe(2);
@@ -870,6 +872,55 @@ describe("grocery API", () => {
     expect(Number(cleared.json?.deleted)).toBeGreaterThan(0);
     const left = ((await call("/api/items", { token })).json?.items ?? []) as Json[];
     expect(left.some((item) => item.name === "Chicken thighs")).toBe(false);
+  });
+
+  it("keeps an explicit buy on an optional ingredient and accepts timer ranges", async () => {
+    const token = env.API_TOKEN;
+    const created = await call("/api/recipes", {
+      method: "POST",
+      token,
+      body: {
+        name: "Shrimp tacos",
+        servings: 4,
+        ingredients: [
+          { text: "1 lb shrimp", name: "shrimp", qty: 1, unit: "lb", section: "meat", buy: true },
+          { text: "1/2 cup rice", name: "rice", qty: 0.5, unit: "cup", section: "pantry", optional: true, buy: true },
+          { text: "1 avocado", name: "avocado", qty: 1, section: "produce", optional: true },
+        ],
+        nightBefore: ["Thaw the shrimp"],
+        prepSteps: ["Chop the cabbage"],
+        cookSteps: [
+          { text: "Sear the shrimp.", minutes: "4-5", ingredients: [0] },
+          { text: "Rest.", seconds: 30, ingredients: [] },
+        ],
+        kidsPlates: "Plain tortillas.",
+        reheating: "Warm gently.",
+      },
+    });
+    expect(created.status).toBe(201);
+    const recipe = created.json?.recipe as Json;
+    const lines = recipe.ingredients as Json[];
+    expect(lines.find((line) => line.name === "rice")).toMatchObject({ optional: true, buy: true, qty: 0.5 });
+    expect(lines.find((line) => line.name === "avocado")).toMatchObject({ optional: true, buy: false });
+    expect(recipe.cookSteps).toEqual([
+      { text: "Sear the shrimp.", minutes: "4-5", ingredients: [0] },
+      { text: "Rest.", minutes: null, seconds: 30, ingredients: [] },
+    ]);
+    const id = recipe.id as string;
+    await call("/api/plan", { method: "POST", token, body: { date: "2026-11-02", meal: "dinner", type: "recipe", recipeId: id } });
+    const items = ((await call("/api/items", { token })).json?.items ?? []) as Json[];
+    expect(items.find((item) => item.name === "Rice")?.quantityNote).toBe("½ cup");
+    expect(items.some((item) => item.name === "Shrimp")).toBe(true);
+    expect(items.some((item) => item.name === "Avocado")).toBe(false);
+    const leftover = await call("/api/plan", {
+      method: "POST",
+      token,
+      body: { date: "2026-11-03", meal: "dinner", type: "leftovers", recipeId: id },
+    });
+    expect(leftover.status).toBe(200);
+    expect((leftover.json?.entry as Json).recipeId).toBe(id);
+    const linked = ((await call("/api/plan?from=2026-11-03&to=2026-11-03", { token })).json?.plan ?? []) as Json[];
+    expect(linked[0]).toMatchObject({ type: "leftovers", recipeId: id, recipeName: "Shrimp tacos" });
   });
 
   it("serves the phone page", async () => {

@@ -23,6 +23,13 @@ const state = {
   timerHandle: null,
   stars: 0,
   comment: "",
+  calMode: "week",
+  calStart: null,
+  undo: null,
+  todayPanel: "ingredients",
+  todayServings: null,
+  todayServingsOpen: false,
+  todayId: null,
 };
 
 const SECTIONS = [
@@ -41,9 +48,6 @@ const SECTIONS = [
 ];
 
 const app = document.getElementById("app");
-app.addEventListener("focusin", (event) => {
-  if (event.target.id === "passcode") event.target.removeAttribute("readonly");
-});
 app.addEventListener("click", onClick);
 app.addEventListener("submit", onSubmit);
 app.addEventListener("input", onInput);
@@ -55,6 +59,10 @@ document.addEventListener("visibilitychange", () => {
 });
 
 let gesture = null;
+let wakeLock = null;
+let undoTimer = null;
+let checkGeneration = 0;
+let swallowClick = false;
 
 boot();
 setInterval(() => refresh(false), 5000);
@@ -145,7 +153,8 @@ function render() {
     return;
   }
   const bare = ["recipe", "feedback", "item", "add-item"].includes(state.page?.kind);
-  app.innerHTML = `<main class="${bare ? "bare" : "screen"}">${bodyHtml()}</main>${bare ? "" : tabsHtml()}${sheetHtml()}`;
+  const todayCook = state.tab === "today" && !state.page && Boolean(tonightRecipe());
+  app.innerHTML = `<main class="${bare ? "bare" : todayCook ? "screen today-screen" : "screen"}">${bodyHtml()}</main>${bare ? "" : tabsHtml()}${sheetHtml()}${toastHtml()}`;
   const focus = document.getElementById("add-search");
   if (focus && state.page?.kind === "add-item") focus.focus();
 }
@@ -156,7 +165,7 @@ function loginHtml() {
     <p class="lede">Dinners, the week, and the grocery list for Mark and Emma.</p>
     <form id="login-form">
       <div class="pass-box">
-        <input id="passcode" name="passcode" type="password" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" inputmode="text" readonly aria-label="Passcode">
+        <input id="passcode" name="passcode" type="password" autocomplete="current-password" autocorrect="off" autocapitalize="off" spellcheck="false" inputmode="text" aria-label="Passcode">
         <button type="button" data-action="toggle-passcode">Show</button>
       </div>
       <p id="login-error" class="error" role="alert" ${state.loginError ? "" : "hidden"}>${esc(state.loginError || "")}</p>
@@ -172,7 +181,7 @@ function bodyHtml() {
   if (state.page?.kind === "item") return itemHtml(state.page.id);
   if (state.page?.kind === "add-item") return addHtml();
   if (state.page?.kind === "new-recipe") return newRecipeHtml();
-  if (state.tab === "week") return weekHtml();
+  if (state.tab === "calendar") return calendarHtml();
   if (state.tab === "recipes") return recipesHtml();
   if (state.tab === "groceries") return groceriesHtml();
   return todayHtml();
@@ -180,7 +189,7 @@ function bodyHtml() {
 
 function tabsHtml() {
   const count = state.items.filter((item) => !item.checked && item.id !== state.checking).length;
-  return `<nav class="tabs">${tabBtn("today", "Today", sun())}${tabBtn("week", "Week", cal())}${tabBtn("recipes", "Recipes", book())}${tabBtn("groceries", "Groceries", cart(), count)}</nav>`;
+  return `<nav class="tabs">${tabBtn("today", "Today", sun())}${tabBtn("calendar", "Calendar", cal())}${tabBtn("recipes", "Recipes", book())}${tabBtn("groceries", "Groceries", cart(), count)}</nav>`;
 }
 
 function tabBtn(id, label, icon, count) {
@@ -190,47 +199,151 @@ function tabBtn(id, label, icon, count) {
 function todayHtml() {
   const today = nyToday();
   const dinner = mealOn(today, "dinner");
+  const recipe = recipeForEntry(dinner);
   const events = eventsOn(today);
-  return `<p class="kicker">Today</p>
-    <h1>${esc(longDate(today))}</h1>
-    ${dinner ? dinnerCard(dinner) : `<p>Nothing planned tonight.</p><button class="primary" type="button" data-action="plan-dinner">Plan dinner</button>`}
-    ${events.length ? `<h2 class="kicker">On the calendar</h2><ul>${events.map((event) => `<li>${esc(event.title)}</li>`).join("")}</ul>` : ""}`;
+  if (recipe && dinner) {
+    if (state.todayId !== recipe.id) {
+      state.todayId = recipe.id;
+      state.todayServings = recipe.servings || 4;
+      state.todayPanel = "ingredients";
+      state.todayServingsOpen = false;
+    }
+  }
+  return `${prepBanner(today)}
+    ${recipe && dinner ? recipeView(recipe, dinner.type === "leftovers" ? "leftovers" : "today") : emptyTonight()}
+    ${eventsHtml(events)}
+    ${recipe ? cookDock(recipe, true) : ""}`;
 }
 
-function dinnerCard(entry) {
-  if (entry.type !== "recipe") return `<h2 class="title">${esc(entry.type === "leftovers" ? "Leftovers" : entry.note || "Dinner")}</h2>`;
-  const recipe = recipeById(entry.recipeId);
-  return `<p class="kicker">Dinner</p>
-    ${photo(entry.imageUrl || recipe?.imageUrl)}
-    <h2 class="title">${esc(entry.recipeName || "Dinner")}</h2>
-    <button class="primary" type="button" data-action="cook" data-id="${esc(entry.recipeId)}">Start cooking</button>`;
+function emptyTonight() {
+  return `<div class="empty-night">
+      ${emptyPlate()}
+      <h1>Nothing planned tonight.</h1>
+      <p class="muted">Pick a recipe when you know what's for dinner.</p>
+      <button class="primary" type="button" data-action="plan-dinner">Plan dinner</button>
+    </div>`;
 }
 
-function weekHtml() {
-  const start = mondayOf(nyToday());
-  return `<h1>Week</h1>${weekBlock("This week", start)}${weekBlock("Next week", addDays(start, 7))}`;
+function emptyPlate() {
+  return `<svg class="empty-art" viewBox="0 0 280 180" aria-hidden="true">
+      <rect width="280" height="180" rx="24" fill="#f3f1ea"/>
+      <ellipse cx="140" cy="96" rx="78" ry="46" fill="#fff"/>
+      <ellipse cx="118" cy="92" rx="28" ry="18" fill="#8fbf55"/>
+      <ellipse cx="162" cy="90" rx="34" ry="20" fill="#e7c27a"/>
+      <circle cx="104" cy="78" r="6" fill="#d4533c"/>
+      <circle cx="126" cy="72" r="5" fill="#e07a3d"/>
+    </svg>`;
 }
 
-function weekBlock(title, monday) {
-  const days = Array.from({ length: 7 }, (_, index) => addDays(monday, index));
-  return `<h2 class="kicker">${esc(title)}</h2>${days.map(dayRow).join("")}`;
+function prepBanner(today) {
+  const lines = [];
+  const tonight = recipeForEntry(mealOn(today, "dinner"));
+  for (const step of tonight?.prepSteps || []) lines.push(step);
+  const tomorrow = recipeForEntry(mealOn(addDays(today, 1), "dinner"));
+  for (const step of tomorrow?.nightBefore || []) {
+    const text = String(step);
+    lines.push(/^tonight:/i.test(text) ? text : `Tonight: ${text} for tomorrow`);
+  }
+  if (!lines.length) return "";
+  return `<div class="prep-banner">${lines.map((line) => `<p>${esc(line)}</p>`).join("")}</div>`;
 }
 
-function dayRow(date) {
+function eventsHtml(events) {
+  if (!events.length) return "";
+  return `<section class="today-events"><h2 class="kicker">Family</h2><ul>${events.map((event) => `<li>${event.time ? `<span class="muted">${esc(event.time)}</span> ` : ""}${esc(event.title)}</li>`).join("")}</ul></section>`;
+}
+
+function calendarHtml() {
+  const mode = state.calMode === "month" ? "month" : "week";
+  const anchor = state.calStart || mondayOf(nyToday());
+  const title = mode === "month" ? monthTitle(anchor) : weekTitle(anchor);
+  return `<div class="cal-head">
+      <button type="button" data-action="cal-shift" data-delta="-1" aria-label="Previous">${chevLeft()}</button>
+      <h1>${esc(title)}</h1>
+      <button type="button" data-action="cal-shift" data-delta="1" aria-label="Next">${chevRight()}</button>
+      <button type="button" class="text-green" data-action="cal-mode">${mode === "month" ? "Week" : "Month"}</button>
+    </div>
+    <div class="cal-board">${mode === "month" ? monthGrid(anchor) : weekColumn(anchor)}</div>`;
+}
+
+function weekTitle(monday) {
+  const end = addDays(monday, 6);
+  return `${shortMonth(monday)} ${Number(monday.slice(8))} – ${shortMonth(end)} ${Number(end.slice(8))}`;
+}
+
+function monthTitle(iso) {
+  return formatUtc(iso, { month: "long", year: "numeric" });
+}
+
+function shortMonth(iso) {
+  return formatUtc(iso, { month: "short" });
+}
+
+function weekColumn(monday) {
+  return Array.from({ length: 7 }, (_, index) => dayCard(addDays(monday, index))).join("");
+}
+
+function monthGrid(iso) {
+  const [year, month] = iso.split("-").map(Number);
+  const first = `${iso.slice(0, 7)}-01`;
+  const start = mondayOf(first);
+  const cells = [];
+  for (let index = 0; index < 42; index += 1) {
+    const date = addDays(start, index);
+    if (index >= 35 && Number(date.slice(5, 7)) !== month) break;
+    cells.push(date);
+  }
+  const names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+  return `<div class="month-names">${names.map((name) => `<span>${name}</span>`).join("")}</div>
+    <div class="month-grid">${cells.map((date) => monthCell(date, Number(date.slice(5, 7)) === month, year)).join("")}</div>`;
+}
+
+function dayCard(date) {
   const today = date === nyToday();
-  const plans = ["dinner", "breakfast", "lunch"].map((meal) => mealOn(date, meal)).filter(Boolean);
-  return `<button class="day-row${today ? " is-today" : ""}" type="button" data-action="open-day" data-date="${esc(date)}">
-    <span><span class="day-date">${esc(today ? "Today" : shortDate(date))}</span>
-    ${plans.map((entry) => `<p class="day-plan">${esc(planTitle(entry))}</p>`).join("") || `<p class="day-plan muted">Nothing planned</p>`}</span>
-  </button>`;
+  const meals = mealsOn(date);
+  const events = eventsOn(date);
+  return `<article class="cal-day${today ? " is-today" : ""}">
+      <button class="cal-main" type="button" data-action="open-day" data-date="${esc(date)}">
+        <span class="day-date">${esc(today ? "Today" : shortDate(date))}</span>
+        ${meals.length ? "" : `<span class="muted">Nothing planned</span>`}
+      </button>
+      ${meals.map(mealChip).join("")}
+      ${events.map((event) => `<p class="cal-event">${esc(event.title)}</p>`).join("")}
+    </article>`;
+}
+
+function monthCell(date, inMonth) {
+  const today = date === nyToday();
+  const meals = mealsOn(date);
+  const events = eventsOn(date);
+  return `<div class="month-cell${inMonth ? "" : " is-out"}${today ? " is-today" : ""}">
+      <button type="button" data-action="open-day" data-date="${esc(date)}">${Number(date.slice(8))}</button>
+      ${meals.slice(0, 2).map(mealChip).join("")}
+      ${events.length ? `<p class="cal-event">${esc(events[0].title)}</p>` : ""}
+    </div>`;
+}
+
+function mealChip(entry) {
+  const recipe = recipeForEntry(entry);
+  const title = planTitle(entry);
+  if (!recipe) return `<p class="cal-note">${esc(title)}</p>`;
+  const thumb = recipe.imageUrl
+    ? `<img class="mini" src="${esc(safeSrc(recipe.imageUrl))}" alt="">`
+    : `<span class="mini mini-letter">${esc(recipe.name.slice(0, 1))}</span>`;
+  return `<button class="cal-meal" type="button" data-action="open-recipe" data-id="${esc(recipe.id)}">${thumb}<span>${esc(entry.type === "leftovers" ? `Leftovers · ${recipe.name}` : title)}</span></button>`;
+}
+
+function mealsOn(date) {
+  return ["dinner", "breakfast", "lunch"].map((meal) => mealOn(date, meal)).filter(Boolean);
 }
 
 function dayHtml(date) {
   const dinner = mealOn(date, "dinner");
-  return `<button class="text-green" type="button" data-action="back">Week</button>
+  const recipe = recipeForEntry(dinner);
+  return `<button class="text-green" type="button" data-action="back">Calendar</button>
     <h1>${esc(longDate(date))}</h1>
     <section><p class="kicker">Dinner</p>
-      ${dinner ? `<p class="title" style="font-size:1.4rem">${esc(planTitle(dinner))}</p><button class="text-green" type="button" data-action="clear-meal" data-id="${esc(dinner.id)}">Remove</button>` : ""}
+      ${dinner ? `<p class="title" style="font-size:1.4rem">${recipe ? `<button type="button" class="text-link" data-action="open-recipe" data-id="${esc(recipe.id)}">${esc(planTitle(dinner))}</button>` : esc(planTitle(dinner))}</p><button class="text-green" type="button" data-action="clear-meal" data-id="${esc(dinner.id)}">Remove</button>` : ""}
       ${pickerHtml(date, "dinner")}
     </section>`;
 }
@@ -285,7 +398,7 @@ function recipeList(recipes) {
   if (!recipes.length) return `<p class="empty">${state.recipeQuery ? "Nothing matches that." : "No recipes yet."}</p>`;
   return recipes.map((recipe) => `<div class="recipe-row">
       <button type="button" data-action="open-recipe" data-id="${esc(recipe.id)}" class="recipe-open">
-        ${recipe.imageUrl ? `<img class="thumb" src="${esc(safeSrc(recipe.imageUrl))}" alt="">` : `<span class="thumb"></span>`}
+        ${recipe.imageUrl ? `<img class="thumb" src="${esc(safeSrc(recipe.imageUrl))}" alt="">` : ""}
         <span class="recipe-copy"><span>${esc(recipe.name)}</span>${lastMadeText(recipe) ? `<span class="small">${esc(lastMadeText(recipe))}</span>` : ""}</span>
       </button>
       <button class="heart${recipe.favorite ? " is-on" : ""}" type="button" data-action="favorite" data-id="${esc(recipe.id)}" aria-label="${recipe.favorite ? "Unfavorite" : "Favorite"}">${heart(recipe.favorite)}</button>
@@ -295,17 +408,24 @@ function recipeList(recipes) {
 function recipeHtml(id) {
   const recipe = recipeById(id);
   if (!recipe) return `<div class="pad"><button class="text-green" type="button" data-action="back">Recipes</button><p>That recipe isn't here anymore.</p></div>`;
-  const servings = state.page.servings || recipe.servings || 4;
+  return `${recipeView(recipe, "page")}${cookDock(recipe, false)}`;
+}
+
+function recipeView(recipe, mode) {
+  const embedded = mode !== "page";
+  const servings = embedded ? state.todayServings || recipe.servings || 4 : state.page.servings || recipe.servings || 4;
   const factor = servings / (recipe.servings || 1);
-  const panel = state.page.panel || "ingredients";
-  const cooked = Boolean(recipe.cookedToday);
-  return `${hero(recipe)}
+  const panel = embedded ? state.todayPanel || "ingredients" : state.page.panel || "ingredients";
+  const open = embedded ? state.todayServingsOpen : state.page.servingsOpen;
+  return `${hero(recipe, !embedded)}
     <div class="pad">
+      ${mode === "leftovers" ? `<p class="leftover-flag">Leftovers</p>` : ""}
       <div class="title-row"><h1>${esc(recipe.name)}</h1>
         <button class="heart${recipe.favorite ? " is-on" : ""}" type="button" data-action="favorite" data-id="${esc(recipe.id)}" aria-label="Favorite">${heart(recipe.favorite)}</button>
       </div>
-      <p class="meta">${recipe.totalTime ? `${esc(recipe.totalTime)} • ` : ""}<button type="button" data-action="servings-toggle">${servings} ${servings === 1 ? "serving" : "servings"} ▾</button></p>
-      ${state.page.servingsOpen ? `<div class="seg"><button type="button" data-action="servings" data-delta="-1">−</button><button type="button" class="is-on">${servings}</button><button type="button" data-action="servings" data-delta="1">+</button></div>` : ""}
+      <p class="meta">${recipe.totalTime ? `${esc(unicodeFractions(recipe.totalTime))} • ` : ""}<button type="button" data-action="servings-toggle">${servings} ${servings === 1 ? "serving" : "servings"} ▾</button></p>
+      ${open ? `<div class="seg"><button type="button" data-action="servings" data-delta="-1">−</button><button type="button" class="is-on">${servings}</button><button type="button" data-action="servings" data-delta="1">+</button></div>` : ""}
+      ${mode === "leftovers" && recipe.reheating ? `<p class="reheat"><span class="kicker">Reheating</span><br>${esc(recipe.reheating)}</p>` : ""}
       ${lastMadeText(recipe) ? `<p class="small">${esc(lastMadeText(recipe))}</p>` : ""}
       <div class="seg" role="tablist">
         ${panelBtn("cookware", "Cookware", panel)}${panelBtn("ingredients", "Ingredients", panel)}${panelBtn("instructions", "Instructions", panel)}
@@ -313,16 +433,24 @@ function recipeHtml(id) {
       ${panel === "cookware" ? cookwareHtml(recipe) : ""}
       ${panel === "ingredients" ? ingredientsHtml(recipe, factor) : ""}
       ${panel === "instructions" ? instructionsHtml(recipe, factor) : ""}
-    </div>
-    <div class="dock">
-      ${cooked ? `<div class="cooked-pill">✓ Cooked</div><button class="gray-btn" type="button" data-action="feedback" data-id="${esc(recipe.id)}">Give Feedback</button>` : `<button class="gray-btn" type="button" data-action="mark-cooked" data-id="${esc(recipe.id)}">Cooked?</button><button class="green-btn" type="button" data-action="cook" data-id="${esc(recipe.id)}">Start cooking</button>`}
     </div>`;
 }
 
-function hero(recipe) {
-  return `<div class="hero">${recipe.imageUrl ? `<img src="${esc(safeSrc(recipe.imageUrl))}" alt="">` : ""}
-      <button class="float left" type="button" data-action="back" aria-label="Back">${chevLeft()}</button>
-      <button class="float right" type="button" data-action="recipe-menu" aria-label="More">${dots()}</button>
+function cookDock(recipe, raised) {
+  const cooked = Boolean(recipe.cookedToday);
+  return `<div class="dock${raised ? " dock-raised" : ""}">
+      ${cooked ? `<div class="cooked-pill">✓ Cooked</div><button class="gray-btn" type="button" data-action="feedback" data-id="${esc(recipe.id)}">Give Feedback</button>` : `<button class="outline-btn" type="button" data-action="mark-cooked" data-id="${esc(recipe.id)}">${checkOutline()} Mark cooked</button><button class="green-btn" type="button" data-action="cook" data-id="${esc(recipe.id)}">Start cooking</button>`}
+    </div>`;
+}
+
+function hero(recipe, showBack) {
+  const menu = `<button class="float right" type="button" data-action="recipe-menu" aria-label="More">${dots()}</button>`;
+  if (!recipe.imageUrl) {
+    return `<div class="topbar">${showBack ? `<button class="back" type="button" data-action="back" aria-label="Back">${chevLeft()}</button>` : "<span></span>"}<span></span>${menu.replace("float right", "text-btn")}</div>`;
+  }
+  return `<div class="hero"><img src="${esc(safeSrc(recipe.imageUrl))}" alt="">
+      ${showBack ? `<button class="float left" type="button" data-action="back" aria-label="Back">${chevLeft()}</button>` : ""}
+      ${menu}
     </div>`;
 }
 
@@ -345,7 +473,7 @@ function ingredientsHtml(recipe, factor) {
 function instructionsHtml(recipe, factor) {
   const steps = instructionSteps(recipe);
   if (!steps.length) return `<p class="empty">No instructions yet.</p>`;
-  return steps.map((step, index) => `<div class="step-block"><p><span class="step-no">${index + 1}</span> ${esc(step.text)}</p>
+  return steps.map((step, index) => `<div class="step-block">${step.label ? `<p class="kicker">${esc(step.label)}</p>` : ""}<p><span class="step-no">${index + 1}</span> ${esc(step.text)}</p>
       ${stepBits(recipe, step, factor)}</div>`).join("") + notesHtml(recipe);
 }
 
@@ -380,17 +508,18 @@ function cookHtml() {
   const index = Math.min(state.page.step || 0, Math.max(0, steps.length - 1));
   const step = steps[index];
   const factor = (state.page.servings || recipe?.servings || 1) / (recipe?.servings || 1);
-  if (!recipe || !step) return `<main class="cook"><button class="cook-x" type="button" data-action="close-cook">✕</button><p>There aren't any steps yet.</p></main>`;
+  if (!recipe || !step) return `<main class="cook"><button class="cook-x" type="button" data-action="close-cook" aria-label="Close">✕</button><p>There aren't any steps yet.</p></main>`;
   const lines = (step.ingredients || []).map((ref) => resolveIngredient(recipe, ref, factor)).filter(Boolean);
   return `<main class="cook">
       <button class="cook-x" type="button" data-action="close-cook" aria-label="Close">✕</button>
+      ${step.label ? `<p class="kicker cook-label">${esc(step.label)}</p>` : ""}
       <p class="step-num">${index + 1}</p>
       <p class="cook-step">${esc(step.text)}</p>
-      ${lines.length ? `<ul>${lines.map((line) => `<li>${esc(line)}</li>`).join("")}</ul>` : ""}
+      ${lines.length ? `<ul>${lines.map((line) => `<li>${esc(unicodeFractions(line))}</li>`).join("")}</ul>` : ""}
       ${timerHtml(step, index)}
       <div class="cook-dock">
         <div class="cook-actions">
-          <button class="list-btn" type="button" data-action="cook-list" aria-label="All steps">${listIcon()}</button>
+          <button class="list-btn" type="button" data-action="cook-list" aria-label="Ingredients">${listIcon()}<span>Ingredients</span></button>
           <button class="green-btn" type="button" data-action="cook-step" data-delta="1">${index === steps.length - 1 ? "Done" : "Next"}</button>
         </div>
         <div class="dashes">${steps.map((_, i) => `<i class="${i <= index ? "is-on" : ""}"></i>`).join("")}</div>
@@ -432,7 +561,7 @@ function itemHtml(id) {
     <div class="pad">
       ${item.substitute ? `<h2>Need a substitute?</h2><p>${esc(item.substitute)}</p>` : ""}
       ${item.notes ? `<h2>Notes</h2><p>${esc(item.notes)}</p>` : ""}
-      ${recipes.length ? `<h2>You'll use this in...</h2>${recipes.map((recipe) => `<button class="link-row" type="button" data-action="open-recipe" data-id="${esc(recipe.id)}">${recipe.imageUrl ? `<img class="round-thumb" src="${esc(safeSrc(recipe.imageUrl))}" alt="">` : `<span class="round-thumb"></span>`}<span style="flex:1;text-align:left">${esc(recipe.name)}</span><span class="chev">›</span></button>`).join("")}` : ""}
+      ${recipes.length ? `<h2>You'll use this in...</h2>${recipes.map((recipe) => `<button class="link-row" type="button" data-action="open-recipe" data-id="${esc(recipe.id)}">${recipe.imageUrl ? `<img class="round-thumb" src="${esc(safeSrc(recipe.imageUrl))}" alt="">` : ""}<span style="flex:1;text-align:left">${esc(recipe.name)}</span><span class="chev">›</span></button>`).join("")}` : ""}
     </div>`;
 }
 
@@ -488,9 +617,14 @@ function sheetHtml() {
       </div></div>`;
   }
   if (state.sheet?.kind === "cook-list") {
-    const steps = cookSequence(recipeById(state.page?.id));
+    const recipe = recipeById(state.page?.id);
+    const factor = (state.page?.servings || recipe?.servings || 1) / (recipe?.servings || 1);
+    const steps = cookSequence(recipe);
+    const lines = (recipe?.ingredients || []).map((item) => scaledLine(item, factor)).filter(Boolean);
     return `<div class="sheet"><div class="sheet-card" role="dialog">
-        <div class="sheet-head"><strong>Steps</strong><button type="button" data-action="close-sheet" aria-label="Close">✕</button></div>
+        <div class="sheet-head"><strong>Ingredients</strong><button type="button" data-action="close-sheet" aria-label="Close">✕</button></div>
+        ${lines.map((line) => `<p class="menu-row">${esc(unicodeFractions(line))}</p>`).join("") || `<p class="muted">No ingredients yet.</p>`}
+        <div class="sheet-head"><strong>Steps</strong></div>
         ${steps.map((step, index) => `<button class="menu-row" type="button" data-action="jump-step" data-step="${index}">${index + 1}. ${esc(step.text)}</button>`).join("")}
       </div></div>`;
   }
@@ -498,6 +632,11 @@ function sheetHtml() {
 }
 
 function onPointerDown(event) {
+  const board = event.target.closest(".cal-board");
+  if (board) {
+    gesture = { kind: "cal", x: event.clientX, y: event.clientY };
+    return;
+  }
   const row = event.target.closest(".g-row");
   if (!row || event.target.closest(".g-check")) return;
   clearGesture();
@@ -514,6 +653,14 @@ function onPointerUp(event) {
   if (!gesture) return;
   const dx = event.clientX - gesture.x;
   const dy = event.clientY - gesture.y;
+  if (gesture.kind === "cal") {
+    clearGesture();
+    if (Math.abs(dx) > 56 && Math.abs(dx) > Math.abs(dy)) {
+      swallowClick = true;
+      shiftCalendar(dx < 0 ? 1 : -1);
+    }
+    return;
+  }
   const id = gesture.id;
   const long = gesture.long;
   clearGesture();
@@ -531,6 +678,10 @@ function clearGesture() {
 }
 
 async function onClick(event) {
+  if (swallowClick) {
+    swallowClick = false;
+    return;
+  }
   const button = event.target.closest("[data-action]");
   if (!button) return;
   const action = button.dataset.action;
@@ -561,7 +712,7 @@ async function onClick(event) {
       state.tab = "groceries";
     } else if (kind === "day") {
       state.page = null;
-      state.tab = "week";
+      state.tab = "calendar";
     } else {
       state.page = null;
       if (kind === "recipe" || kind === "new-recipe") state.tab = "recipes";
@@ -570,18 +721,46 @@ async function onClick(event) {
     return;
   }
   if (action === "plan-dinner" || action === "open-day") {
-    state.tab = "week";
+    state.tab = "calendar";
     state.page = { kind: "day", date: button.dataset.date || nyToday() };
     state.dayQuery = "";
     render();
     return;
   }
+  if (action === "cal-shift") return shiftCalendar(Number(button.dataset.delta));
+  if (action === "cal-mode") {
+    if (state.calMode === "month") {
+      state.calMode = "week";
+      state.calStart = mondayOf(state.calStart || nyToday());
+    } else {
+      state.calMode = "month";
+      const base = state.calStart || nyToday();
+      state.calStart = `${base.slice(0, 7)}-01`;
+    }
+    render();
+    refresh(true);
+    return;
+  }
+  if (action === "undo-check") return undoCheck();
   if (action === "pick-recipe") return planRecipe(button.dataset.date, button.dataset.meal, button.dataset.id);
-  if (action === "leftovers") return savePlanEntry({ date: button.dataset.date, meal: button.dataset.meal, type: "leftovers" });
+  if (action === "leftovers") {
+    const source = leftoverSource(button.dataset.date, button.dataset.meal);
+    return savePlanEntry({
+      date: button.dataset.date,
+      meal: button.dataset.meal,
+      type: "leftovers",
+      recipeId: source?.id,
+      note: source?.name,
+    });
+  }
   if (action === "clear-meal") return removePlan(button.dataset.id);
   if (action === "open-recipe") {
     const recipe = recipeById(button.dataset.id);
-    state.recipeBack = state.page?.kind === "item" ? { tab: "groceries", page: state.page } : { tab: "recipes", page: null };
+    state.recipeBack = state.page?.kind === "item"
+      ? { tab: "groceries", page: state.page }
+      : state.tab === "calendar"
+        ? { tab: "calendar", page: state.page?.kind === "day" ? state.page : null }
+        : { tab: "recipes", page: null };
     state.tab = state.recipeBack.tab === "groceries" ? "groceries" : "recipes";
     state.page = { kind: "recipe", id: button.dataset.id, servings: recipe?.servings || 4, panel: "ingredients" };
     state.sheet = null;
@@ -597,18 +776,26 @@ async function onClick(event) {
   }
   if (action === "favorite") return toggleFavorite(button.dataset.id);
   if (action === "panel") {
-    state.page.panel = button.dataset.panel;
+    if (state.page?.kind === "recipe") state.page.panel = button.dataset.panel;
+    else state.todayPanel = button.dataset.panel;
     render();
     return;
   }
   if (action === "servings-toggle") {
-    state.page.servingsOpen = !state.page.servingsOpen;
+    if (state.page?.kind === "recipe") state.page.servingsOpen = !state.page.servingsOpen;
+    else state.todayServingsOpen = !state.todayServingsOpen;
     render();
     return;
   }
   if (action === "servings") {
-    const recipe = recipeById(state.page?.id);
-    state.page.servings = Math.min(99, Math.max(1, (state.page.servings || recipe.servings) + Number(button.dataset.delta)));
+    const delta = Number(button.dataset.delta);
+    if (state.page?.kind === "recipe") {
+      const recipe = recipeById(state.page.id);
+      state.page.servings = Math.min(99, Math.max(1, (state.page.servings || recipe.servings) + delta));
+    } else {
+      const recipe = tonightRecipe();
+      state.todayServings = Math.min(99, Math.max(1, (state.todayServings || recipe?.servings || 4) + delta));
+    }
     render();
     return;
   }
@@ -632,17 +819,20 @@ async function onClick(event) {
     render();
     return;
   }
-  if (action === "timer-start") return startTimer(Number(button.dataset.minutes));
+  if (action === "timer-start") return startTimer(Number(button.dataset.seconds));
   if (action === "timer-cancel") return stopTimer(true);
   if (action === "mark-cooked") return markCooked(button.dataset.id);
   if (action === "feedback") {
+    state.feedbackFrom = state.page?.kind === "recipe" ? "recipe" : "today";
     state.page = { kind: "feedback", id: button.dataset.id };
     state.error = "";
     render();
     return;
   }
   if (action === "close-feedback") {
-    state.page = { kind: "recipe", id: state.page.id, servings: recipeById(state.page.id)?.servings, panel: "ingredients" };
+    state.page = state.feedbackFrom === "recipe"
+      ? { kind: "recipe", id: state.page.id, servings: recipeById(state.page.id)?.servings, panel: "ingredients" }
+      : null;
     render();
     return;
   }
@@ -802,8 +992,9 @@ function openCook(id) {
   const recipe = recipeById(id);
   if (!cookSequence(recipe).length) return;
   stopTimer(false);
-  state.cookReturn = { page: state.page ? { ...state.page } : null };
-  state.page = { kind: "cook", id, step: 0, servings: state.page?.servings || recipe.servings };
+  const servings = state.page?.kind === "recipe" ? state.page.servings : state.todayServings;
+  state.cookReturn = { page: state.page ? { ...state.page } : null, tab: state.tab };
+  state.page = { kind: "cook", id, step: 0, servings: servings || recipe.servings };
   lockScreen();
   render();
 }
@@ -822,6 +1013,7 @@ function closeCook() {
   stopTimer(false);
   unlockScreen();
   state.page = back?.page || null;
+  if (back?.tab) state.tab = back.tab;
   state.sheet = null;
   render();
 }
@@ -848,7 +1040,7 @@ async function sendFeedback(id) {
   try {
     const data = await api(`/api/recipes/${id}/feedback`, { method: "POST", body: { stars: state.stars, comment: state.comment } });
     replaceRecipe(data.recipe);
-    state.page = { kind: "recipe", id, servings: data.recipe.servings, panel: "ingredients" };
+    state.page = state.feedbackFrom === "recipe" ? { kind: "recipe", id, servings: data.recipe.servings, panel: "ingredients" } : null;
     state.error = "";
     render();
   } catch (error) {
@@ -860,23 +1052,67 @@ async function sendFeedback(id) {
 async function toggleItem(id) {
   const item = state.items.find((entry) => entry.id === id);
   if (!item) return;
-  if (!item.checked) {
-    state.checking = id;
-    render();
-    await wait(700);
-    const row = document.querySelector(`.g-row[data-id="${cssEscape(id)}"]`);
-    row?.classList.add("is-leaving");
-    await wait(220);
+  if (item.checked) {
+    if (state.undo?.id === id) clearUndo();
+    try {
+      await api(`/api/items/${id}`, { method: "PATCH", body: { checked: false } });
+      await refresh(true);
+    } catch (error) {
+      state.error = error.message;
+      render();
+    }
+    return;
   }
+  const generation = ++checkGeneration;
+  state.checking = id;
+  render();
+  await wait(700);
+  if (generation !== checkGeneration) return;
+  document.querySelector(`.g-row[data-id="${cssEscape(id)}"]`)?.classList.add("is-leaving");
+  await wait(220);
+  if (generation !== checkGeneration) return;
   try {
-    await api(`/api/items/${id}`, { method: "PATCH", body: { checked: !item.checked } });
+    await api(`/api/items/${id}`, { method: "PATCH", body: { checked: true } });
     state.checking = null;
+    state.undo = { id, name: item.name };
+    if (undoTimer) clearTimeout(undoTimer);
+    undoTimer = setTimeout(() => {
+      state.undo = null;
+      undoTimer = null;
+      render();
+    }, 5000);
     await refresh(true);
   } catch (error) {
     state.checking = null;
     state.error = error.message;
     render();
   }
+}
+
+async function undoCheck() {
+  const undo = state.undo;
+  if (!undo) return;
+  checkGeneration += 1;
+  clearUndo();
+  state.checking = null;
+  try {
+    await api(`/api/items/${undo.id}`, { method: "PATCH", body: { checked: false } });
+    await refresh(true);
+  } catch (error) {
+    state.error = error.message;
+    render();
+  }
+}
+
+function clearUndo() {
+  if (undoTimer) clearTimeout(undoTimer);
+  undoTimer = null;
+  state.undo = null;
+}
+
+function toastHtml() {
+  if (!state.undo) return "";
+  return `<div class="toast" role="status"><span>${esc(state.undo.name)} checked off</span><button type="button" data-action="undo-check">Undo</button></div>`;
 }
 
 async function markAll() {
@@ -962,19 +1198,29 @@ function recipeById(id) {
 
 function instructionSteps(recipe) {
   if (!recipe) return [];
-  const night = (recipe.nightBefore || []).map((text) => ({ text, ingredients: [] }));
-  const prep = (recipe.prepSteps || []).map((text) => ({ text, ingredients: [] }));
-  const cook = (recipe.cookSteps || []).filter((step) => step && step.text);
+  const night = (recipe.nightBefore || []).filter(Boolean).map((text) => ({ text, label: "Night before", ingredients: [] }));
+  const prep = (recipe.prepSteps || []).filter(Boolean).map((text) => ({ text, label: "Prep", ingredients: [] }));
+  const cook = (recipe.cookSteps || []).filter((step) => step && step.text).map((step) => ({ ...step, label: night.length || prep.length ? "Cook" : "" }));
   if (night.length || prep.length || cook.length) return [...night, ...prep, ...cook];
   return (recipe.steps || []).filter(Boolean).map((text) => ({ text, ingredients: [] }));
 }
 
 function cookSequence(recipe) {
   if (!recipe) return [];
-  const prep = (recipe.prepSteps || []).filter(Boolean).map((text) => ({ text, minutes: null, ingredients: [] }));
-  const cook = (recipe.cookSteps || []).filter((step) => step && step.text).map((step) => ({ text: step.text, minutes: step.minutes || null, ingredients: step.ingredients || [] }));
-  if (prep.length || cook.length) return [...prep, ...cook];
-  return (recipe.steps || []).filter(Boolean).map((text) => ({ text, minutes: null, ingredients: [] }));
+  const night = (recipe.nightBefore || []).filter(Boolean).map((text) => ({ text, label: "Night before", minutes: null, seconds: null, ingredients: [] }));
+  const prep = (recipe.prepSteps || []).filter(Boolean).map((text) => ({ text, label: "Prep", minutes: null, seconds: null, ingredients: [] }));
+  const cook = (recipe.cookSteps || []).filter((step) => step && step.text).map((step) => ({
+    text: step.text,
+    label: night.length || prep.length ? "Cook" : "",
+    minutes: step.minutes ?? null,
+    seconds: step.seconds ?? null,
+    ingredients: step.ingredients || [],
+  }));
+  const steps = [...night, ...prep, ...cook];
+  if (recipe.kidsPlates) steps.push({ text: recipe.kidsPlates, label: "Kids' plates", minutes: null, seconds: null, ingredients: [] });
+  if (recipe.reheating) steps.push({ text: recipe.reheating, label: "Reheating", minutes: null, seconds: null, ingredients: [] });
+  if (steps.length) return steps;
+  return (recipe.steps || []).filter(Boolean).map((text) => ({ text, label: "", minutes: null, seconds: null, ingredients: [] }));
 }
 
 function resolveIngredient(recipe, ref, factor) {
@@ -997,7 +1243,7 @@ function scaledLine(item, factor) {
 function qtyOf(item) {
   const note = item.quantityNote || "";
   const split = note.split(" · ")[0];
-  return split.trim();
+  return unicodeFractions(split.trim());
 }
 
 function sectionLabel(id) {
@@ -1031,12 +1277,23 @@ function formatQty(value) {
   const rounded = Math.round(value * 1000) / 1000;
   const whole = Math.floor(rounded + 1e-8);
   const fraction = rounded - whole;
-  const fractions = [[1, 2], [1, 3], [2, 3], [1, 4], [3, 4], [1, 8], [3, 8]];
+  const fractions = [[1, 2, "½"], [1, 3, "⅓"], [2, 3, "⅔"], [1, 4, "¼"], [3, 4, "¾"], [1, 8, "⅛"], [3, 8, "⅜"]];
   if (fraction < 0.02) return String(whole);
-  for (const [numerator, denominator] of fractions) {
-    if (Math.abs(fraction - numerator / denominator) < 0.03) return whole ? `${whole} ${numerator}/${denominator}` : `${numerator}/${denominator}`;
+  for (const [numerator, denominator, glyph] of fractions) {
+    if (Math.abs(fraction - numerator / denominator) < 0.03) return whole ? `${whole} ${glyph}` : glyph;
   }
   return String(Math.round(rounded * 100) / 100);
+}
+
+function unicodeFractions(text) {
+  return String(text ?? "")
+    .replace(/\b1\/2\b/g, "½")
+    .replace(/\b1\/3\b/g, "⅓")
+    .replace(/\b2\/3\b/g, "⅔")
+    .replace(/\b1\/4\b/g, "¼")
+    .replace(/\b3\/4\b/g, "¾")
+    .replace(/\b1\/8\b/g, "⅛")
+    .replace(/\b3\/8\b/g, "⅜");
 }
 
 function unitWord(unit, qty) {
@@ -1051,9 +1308,58 @@ function eventsOn(date) {
   return state.events.filter((event) => event.date === date);
 }
 function planTitle(entry) {
-  if (entry.type === "leftovers") return entry.note ? `Leftovers · ${entry.note}` : "Leftovers";
+  const recipe = recipeForEntry(entry);
+  if (entry.type === "leftovers") return recipe ? `Leftovers · ${recipe.name}` : entry.note ? `Leftovers · ${entry.note}` : "Leftovers";
   if (entry.type === "note") return entry.note || "Note";
-  return entry.recipeName || "Recipe";
+  return entry.recipeName || recipe?.name || "Recipe";
+}
+
+function recipeForEntry(entry) {
+  if (!entry) return null;
+  if (entry.recipeId) return recipeById(entry.recipeId) || { id: entry.recipeId, name: entry.recipeName || "Recipe", imageUrl: entry.imageUrl, servings: 4, ingredients: [], cookSteps: [], prepSteps: [], nightBefore: [] };
+  if (entry.type !== "leftovers") return null;
+  const note = (entry.note || "").trim().toLowerCase();
+  if (note) {
+    const named = state.recipes.find((recipe) => recipe.name.toLowerCase() === note);
+    if (named) return named;
+  }
+  const earlier = state.plan
+    .filter((other) => other.type === "recipe" && other.recipeId && other.meal === entry.meal && other.date < entry.date)
+    .sort((a, b) => (a.date < b.date ? 1 : -1));
+  const previous = earlier[0];
+  if (!previous) return null;
+  const recipe = recipeById(previous.recipeId);
+  const gap = daysBetween(previous.date, entry.date);
+  const cover = recipe?.coversNights > 1 ? recipe.coversNights - 1 : 6;
+  return gap >= 1 && gap <= cover ? recipe : null;
+}
+
+function tonightRecipe() {
+  return recipeForEntry(mealOn(nyToday(), "dinner"));
+}
+
+function leftoverSource(date, meal) {
+  const earlier = state.plan
+    .filter((entry) => entry.type === "recipe" && entry.recipeId && entry.meal === meal && entry.date < date)
+    .sort((a, b) => (a.date < b.date ? 1 : -1));
+  return earlier[0] ? recipeById(earlier[0].recipeId) : null;
+}
+
+function shiftCalendar(delta) {
+  if (state.calMode === "month") {
+    const current = state.calStart || `${nyToday().slice(0, 7)}-01`;
+    const [year, month] = current.split("-").map(Number);
+    const next = new Date(Date.UTC(year, month - 1 + delta, 1));
+    state.calStart = next.toISOString().slice(0, 10);
+  } else {
+    state.calStart = addDays(state.calStart || mondayOf(nyToday()), delta * 7);
+  }
+  render();
+  refresh(true);
+}
+
+function daysBetween(from, to) {
+  return Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86400000);
 }
 function nyToday() {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
@@ -1070,8 +1376,8 @@ function mondayOf(iso) {
   return addDays(iso, weekday === 0 ? -6 : 1 - weekday);
 }
 function visibleRange() {
-  const start = mondayOf(nyToday());
-  return { from: addDays(start, -14), to: addDays(start, 13) };
+  const anchor = state.calStart || nyToday();
+  return { from: addDays(anchor, -14), to: addDays(anchor, 46) };
 }
 function formatUtc(iso, options) {
   const [year, month, day] = iso.split("-").map(Number);
@@ -1086,21 +1392,45 @@ function shortDate(iso) {
 function photo(url) {
   return url ? `<img src="${esc(safeSrc(url))}" alt="" style="width:100%;border-radius:16px;max-height:220px;object-fit:cover">` : "";
 }
+function timerSpec(step) {
+  if (step.seconds) return { seconds: Number(step.seconds), label: `${step.seconds} sec` };
+  if (typeof step.minutes === "string") {
+    const text = step.minutes.trim().toLowerCase().replace(/[–—]/g, "-");
+    const range = /^(\d+)\s*-\s*(\d+)/.exec(text);
+    if (range) return { seconds: Number(range[2]) * 60, label: `${range[1]}–${range[2]} min` };
+    const secs = /^(\d+)\s*sec/.exec(text);
+    if (secs) return { seconds: Number(secs[1]), label: `${secs[1]} sec` };
+    const mins = /^(\d+)/.exec(text);
+    if (mins) return { seconds: Number(mins[1]) * 60, label: `${mins[1]} min` };
+  }
+  if (typeof step.minutes === "number" && step.minutes > 0) return { seconds: step.minutes * 60, label: `${step.minutes} min` };
+  const text = step.text || "";
+  const range = /(\d+)\s*[-–—]\s*(\d+)\s*(?:min|minutes)\b/i.exec(text);
+  if (range) return { seconds: Number(range[2]) * 60, label: `${range[1]}–${range[2]} min` };
+  const secs = /(\d+)\s*(?:sec|seconds)\b/i.exec(text);
+  if (secs) return { seconds: Number(secs[1]), label: `${secs[1]} sec` };
+  const mins = /(\d+)\s*(?:min|minutes)\b/i.exec(text);
+  if (mins) return { seconds: Number(mins[1]) * 60, label: `${mins[1]} min` };
+  return null;
+}
+
 function timerHtml(step, index) {
-  if (!step.minutes) return "";
+  const spec = timerSpec(step);
+  if (!spec) return "";
   const timer = state.timer;
   if (timer && timer.step === index && timer.done) return `<p class="timer">Time's up</p>`;
   if (timer && timer.step === index) return `<p class="timer">${formatClock(timer.remaining)}</p><button class="gray-btn" type="button" data-action="timer-cancel">Cancel timer</button>`;
-  return `<button class="gray-btn" type="button" data-action="timer-start" data-minutes="${step.minutes}">Start ${step.minutes} min timer</button>`;
+  return `<button class="gray-btn" type="button" data-action="timer-start" data-seconds="${spec.seconds}">Start ${esc(spec.label)} timer</button>`;
 }
 function formatClock(totalSeconds) {
   const seconds = Math.max(0, totalSeconds);
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
 }
-function startTimer(minutes) {
+function startTimer(seconds) {
   stopTimer(false);
   const step = state.page?.step || 0;
-  state.timer = { step, remaining: minutes * 60, endsAt: Date.now() + minutes * 60 * 1000, done: false };
+  const total = Math.max(1, Number(seconds) || 0);
+  state.timer = { step, remaining: total, endsAt: Date.now() + total * 1000, done: false };
   state.timerHandle = setInterval(() => {
     if (!state.timer) return;
     state.timer.remaining = Math.max(0, Math.round((state.timer.endsAt - Date.now()) / 1000));
@@ -1122,9 +1452,18 @@ function stopTimer(shouldRender) {
   if (shouldRender) render();
 }
 async function lockScreen() {
-  try { await navigator.wakeLock?.request("screen"); } catch { /* optional */ }
+  try {
+    if (wakeLock && !wakeLock.released) return;
+    wakeLock = await navigator.wakeLock?.request("screen");
+  } catch {
+    /* The browser can refuse the lock. Cooking still works. */
+  }
 }
-function unlockScreen() {}
+function unlockScreen() {
+  const current = wakeLock;
+  wakeLock = null;
+  current?.release?.().catch(() => {});
+}
 function wait(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
 function cssEscape(value) { return window.CSS?.escape ? CSS.escape(value) : value.replace(/"/g, ""); }
 function esc(value) {
@@ -1138,7 +1477,8 @@ function safeSrc(value) {
 function heart(on) {
   return `<svg viewBox="0 0 24 24" width="28" height="28" fill="${on ? "currentColor" : "none"}" stroke="currentColor" stroke-width="1.8"><path d="M12 20s-7-4.4-7-9a4 4 0 0 1 7-2 4 4 0 0 1 7 2c0 4.6-7 9-7 9z"/></svg>`;
 }
-function chevLeft() { return `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="#222" stroke-width="2.4"><path d="M15 5 8 12l7 7"/></svg>`; }
+function chevLeft() { return `<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="#222" stroke-width="2.4"><path d="M15 5 8 12l7 7"/></svg>`; }
+function chevRight() { return `<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="#222" stroke-width="2.4"><path d="m9 5 7 7-7 7"/></svg>`; }
 function dots() { return `<svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><circle cx="6" cy="12" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="18" cy="12" r="1.7"/></svg>`; }
 function checkIcon() { return `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="white" stroke-width="3"><path d="m5 12 5 5 9-10"/></svg>`; }
 function listIcon() { return `<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="#444" stroke-width="2"><path d="M8 7h11M8 12h11M8 17h11M4 7h.01M4 12h.01M4 17h.01"/></svg>`; }

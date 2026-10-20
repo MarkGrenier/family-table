@@ -133,10 +133,10 @@ Open the app on both phones. When one of you changes dinner, a recipe, or the gr
 
 ## Using the app
 
-Four tabs sit at the bottom: Today, Week, Recipes, and Groceries. The Groceries tab shows how many things are still to buy.
+Four tabs sit at the bottom: Today, Calendar, Recipes, and Groceries. The Groceries tab shows how many things are still to buy.
 
-- **Today** is tonight's dinner. If a recipe is planned, tap **Start cooking**.
-- **Week** is this week and next, Monday through Sunday, in Eastern time. Tap a day to pick a recipe, leftovers, or a short note such as eating out. Choosing a recipe puts the things you need to buy on the grocery list. Salt, pepper, oil, water, and spices stay off the list. Taking that recipe off the day takes those unchecked items back off. Leftovers and notes don't add anything.
+- **Today** is tonight's recipe: the photo, the title, cookware, ingredients, and instructions, with **Mark cooked** and **Start cooking** at the bottom. A green banner at the top lists prep that is due now, including tomorrow's night-before steps. Leftovers open that recipe with a Leftovers label and the reheating note. Family events for today are listed under the recipe. If nothing is planned, you get a short note and a button to plan dinner.
+- **Calendar** shows the week, with arrows or a sideways swipe for other weeks, and a Month view. Each day shows its meals and family events. A leftover night links back to the recipe it came from. Tap a day to pick a recipe, leftovers, or a short note such as eating out. Choosing a recipe puts the things you need to buy on the grocery list. Salt, pepper, oil, water, and spices stay off the list. An optional ingredient is skipped unless you set `buy` to true. Taking that recipe off the day takes those unchecked items back off. Leftovers and notes don't add anything. Checking an item off offers Undo for a few seconds. In Show completed items, tap the filled circle to put it back.
 - **Recipes** is the cookbook. **Favorites**, **Recently made**, and **A-Z** sort the list. A recipe shows **Last made Oct 12** when it has been planned before. Open one for the photo, a heart, **Cookware**, **Ingredients**, and **Instructions**. Tap the servings to scale the amounts. **Cooked?** records that you made it. **Start cooking** walks through the steps. Sending a new week does not remove recipes.
 - **Groceries** is grouped by food type, not by store. Tap the circle to mark something bought. Tap the row, or swipe it right, for details. Hold the row to edit the name, amount, and section. The green **+** adds something. The green dots share the list, show completed items, or mark them all complete.
 
@@ -272,7 +272,7 @@ Each recipe includes `favorite`, `lastMade`, and `timesMade`. `lastMade` is the 
 
 `POST /api/recipes`
 
-A recipe's ingredients can be plain lines, or objects. Old lines still work. Water, salt, pepper, oil, and common spices are marked `buy: false` so planning the recipe does not put them on the grocery list. `optional: true` is skipped too.
+A recipe's ingredients can be plain lines, or objects. Old lines still work. Water, salt, pepper, oil, and common spices are marked `buy: false` so planning the recipe does not put them on the grocery list. `optional` and `buy` are separate. An optional ingredient is left off the list unless you send `buy: true` for it, which is how a backup the kids will actually eat still gets bought. Amounts use fractions like ½ and ¼.
 
 ```json
 {
@@ -415,7 +415,11 @@ Planning and removing meals here follows the same grocery rules as `POST /api/pl
 }
 ```
 
-`coversNights` is how many nights the recipe feeds, including a leftovers night. `nightBefore`, `prepSteps`, and `cookSteps` show on the recipe page in that order, after the ingredients. Cook mode walks through prep, then cook. A cook step with `minutes` gets a timer. `kidsPlates` and `reheating` are short notes at the end. Leave a section out when it doesn't apply.
+`coversNights` is how many nights the recipe feeds, including a leftovers night. A leftovers day can send `recipeId` for the original recipe. If it doesn't, a note that matches the recipe name, or the previous dinner that still covers that night, is used. `nightBefore`, `prepSteps`, and `cookSteps` show on the recipe page in that order. Cook mode walks night-before, then prep, then cook, and ends with kids' plates and reheating when those notes exist. The Ingredients button in cook mode lists every ingredient at the current serving size. The screen stays awake while you cook.
+
+A cook step timer is `minutes` as a number (`8`), a range (`"4-5"`), or `seconds` (`30`). The words "4-5 min" or "30 sec" inside the step also start a timer. `kidsPlates` and `reheating` are short notes. Leave a section out when it doesn't apply.
+
+`GET /api/week` is unchanged: one Monday-to-Sunday menu. The calendar on the phone loads `/api/plan` and `/api/events` for the days on screen.
 
 The same fields can be sent on `POST /api/recipes` and `PATCH /api/recipes/ID`. Older recipes that only have `steps` still cook from those steps.
 

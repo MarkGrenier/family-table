@@ -134,18 +134,18 @@ const PLURAL: Record<string, string> = {
   pinch: "pinches",
 };
 
-const NICE_FRACTIONS: Array<[number, number]> = [
-  [1, 2],
-  [1, 3],
-  [2, 3],
-  [1, 4],
-  [3, 4],
-  [1, 8],
-  [3, 8],
-  [5, 8],
-  [7, 8],
-  [1, 6],
-  [5, 6],
+const NICE_FRACTIONS: Array<[number, number, string]> = [
+  [1, 2, "½"],
+  [1, 3, "⅓"],
+  [2, 3, "⅔"],
+  [1, 4, "¼"],
+  [3, 4, "¾"],
+  [1, 8, "⅛"],
+  [3, 8, "⅜"],
+  [5, 8, "⅝"],
+  [7, 8, "⅞"],
+  [1, 6, "⅙"],
+  [5, 6, "⅚"],
 ];
 
 const PANTRY_BASICS = new Set([
@@ -377,7 +377,7 @@ export function normalizeIngredient(raw: unknown): Ingredient | null {
   const unit = typeof body.unit === "string" && body.unit.trim() ? normalizeUnit(body.unit) : body.unit === null ? null : parsed?.unit ?? null;
   const section = typeof body.section === "string" && isFoodSection(body.section) ? body.section : parsed?.section ?? sectionForName(nameSource);
   const optional = typeof body.optional === "boolean" ? body.optional : parsed?.optional ?? false;
-  const buy = typeof body.buy === "boolean" ? body.buy : parsed?.buy ?? !isPantryBasic(nameSource);
+  const buy = typeof body.buy === "boolean" ? body.buy : optional ? false : parsed?.buy ?? !isPantryBasic(nameSource);
   const note = typeof body.note === "string" ? body.note.trim() || null : body.note === null ? null : parsed?.note ?? null;
   const name = nameSource.replace(/\s+/g, " ");
   const display = text || [formatQuantity(qty ?? 0), unit, name].filter(Boolean).join(" ");
@@ -388,7 +388,7 @@ export function normalizeIngredient(raw: unknown): Ingredient | null {
     unit,
     name,
     section,
-    buy: optional ? false : buy,
+    buy,
     optional,
     note,
   };
@@ -419,10 +419,10 @@ export function formatQuantity(value: number): string {
   const fraction = rounded - whole;
   if (fraction < 0.02) return String(whole);
   let best: { text: string; diff: number } | null = null;
-  for (const [numerator, denominator] of NICE_FRACTIONS) {
+  for (const [numerator, denominator, glyph] of NICE_FRACTIONS) {
     const diff = Math.abs(fraction - numerator / denominator);
     if (diff < 0.03 && (!best || diff < best.diff)) {
-      best = { text: `${numerator}/${denominator}`, diff };
+      best = { text: glyph, diff };
     }
   }
   if (best) return whole > 0 ? `${whole} ${best.text}` : best.text;

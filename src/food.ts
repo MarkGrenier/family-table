@@ -103,6 +103,18 @@ function parseJson<T>(value: string, fallback: T): T {
   }
 }
 
+function cookStepFromStored(step: unknown): CookStep {
+  if (typeof step === "string") return { text: step, minutes: null, ingredients: [] };
+  const body = (step ?? {}) as { text?: string; minutes?: number | string | null; seconds?: unknown; ingredients?: Array<number | string> };
+  const cooked: CookStep = {
+    text: body.text ?? "",
+    minutes: body.minutes ?? null,
+    ingredients: Array.isArray(body.ingredients) ? body.ingredients : [],
+  };
+  if (typeof body.seconds === "number" && Number.isInteger(body.seconds) && body.seconds > 0) cooked.seconds = body.seconds;
+  return cooked;
+}
+
 function recipeFromRow(row: RecipeRow): Recipe {
   return {
     id: row.id,
@@ -120,15 +132,7 @@ function recipeFromRow(row: RecipeRow): Recipe {
     coversNights: row.covers_nights == null ? null : Number(row.covers_nights),
     nightBefore: parseJson<string[]>(row.night_before_json, []),
     prepSteps: parseJson<string[]>(row.prep_steps_json, []),
-    cookSteps: parseJson<unknown[]>(row.cook_steps_json, []).map((step) => {
-      if (typeof step === "string") return { text: step, minutes: null, ingredients: [] };
-      const body = (step ?? {}) as { text?: string; minutes?: number | null; ingredients?: Array<number | string> };
-      return {
-        text: body.text ?? "",
-        minutes: body.minutes ?? null,
-        ingredients: Array.isArray(body.ingredients) ? body.ingredients : [],
-      };
-    }),
+    cookSteps: parseJson<unknown[]>(row.cook_steps_json, []).map((step) => cookStepFromStored(step)),
     kidsPlates: row.kids_plates,
     reheating: row.reheating,
     cookware: parseJson<string[]>(row.cookware_json, []),
@@ -366,6 +370,43 @@ type PlanRow = {
   image_url: string | null;
 };
 
+function daysBetween(from: string, to: string): number {
+  return Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86400000);
+}
+
+async function linkLeftovers(db: D1Database, entries: PlanEntry[]): Promise<PlanEntry[]> {
+  const pending = entries.filter((entry) => entry.type === "leftovers" && !entry.recipeId);
+  if (!pending.length) return entries;
+  const recipes = await db
+    .prepare(`SELECT id, name, image_url, covers_nights FROM recipes`)
+    .all<{ id: string; name: string; image_url: string | null; covers_nights: number | null }>();
+  const library = recipes.results ?? [];
+  const byName = new Map(library.map((recipe) => [recipe.name.trim().toLowerCase(), recipe]));
+  const earliest = pending.map((entry) => entry.date).sort()[0];
+  const prior = await db
+    .prepare(
+      `${PLAN_SELECT}
+       WHERE p.plan_date >= ? AND p.plan_date < ? AND p.entry_type = 'recipe' AND p.recipe_id IS NOT NULL`,
+    )
+    .bind(addDays(earliest, -14), earliest)
+    .all<PlanRow>();
+  const sources = [...(prior.results ?? []).map(planFromRow), ...entries.filter((entry) => entry.type === "recipe" && entry.recipeId)];
+  return entries.map((entry) => {
+    if (entry.type !== "leftovers" || entry.recipeId) return entry;
+    const named = entry.note ? byName.get(entry.note.trim().toLowerCase()) : undefined;
+    const earlier = sources
+      .filter((source) => source.meal === entry.meal && source.date < entry.date)
+      .sort((a, b) => (a.date < b.date ? 1 : -1));
+    const previous = earlier[0];
+    const previousRecipe = previous ? library.find((recipe) => recipe.id === previous.recipeId) : undefined;
+    const gap = previous ? daysBetween(previous.date, entry.date) : 99;
+    const cover = previousRecipe?.covers_nights && previousRecipe.covers_nights > 1 ? previousRecipe.covers_nights - 1 : 6;
+    const picked = named ?? (previousRecipe && gap >= 1 && gap <= cover ? previousRecipe : undefined);
+    if (!picked) return entry;
+    return { ...entry, recipeId: picked.id, recipeName: picked.name, imageUrl: picked.image_url };
+  });
+}
+
 function planFromRow(row: PlanRow): PlanEntry {
   return {
     id: row.id,
@@ -394,7 +435,7 @@ export async function listPlan(db: D1Database, from: string, to: string): Promis
     )
     .bind(from, to)
     .all<PlanRow>();
-  return (rows.results ?? []).map(planFromRow);
+  return linkLeftovers(db, (rows.results ?? []).map(planFromRow));
 }
 
 async function getPlan(db: D1Database, id: string): Promise<PlanEntry | null> {
@@ -408,7 +449,7 @@ async function planOn(db: D1Database, date: string, meal: string): Promise<PlanE
 }
 
 export async function savePlan(db: D1Database, input: PlanInput): Promise<PlanEntry> {
-  if (input.type === "recipe" && input.recipeId) {
+  if (input.recipeId && input.type !== "note") {
     const recipe = await getRecipe(db, input.recipeId);
     if (!recipe) throw new HttpError(400, "That recipe isn't here anymore.");
   }
@@ -445,7 +486,7 @@ export async function listAllPlan(db: D1Database): Promise<PlanEntry[]> {
        ORDER BY p.plan_date, CASE p.meal WHEN 'breakfast' THEN 0 WHEN 'lunch' THEN 1 ELSE 2 END`,
     )
     .all<PlanRow>();
-  return (rows.results ?? []).map(planFromRow);
+  return linkLeftovers(db, (rows.results ?? []).map(planFromRow));
 }
 
 export async function deletePlan(db: D1Database, id: string): Promise<void> {
@@ -648,7 +689,7 @@ export async function replaceWeek(db: D1Database, input: WeekInput): Promise<{ w
   for (const day of input.days) {
     let recipeId = day.recipeId;
     if (day.type === "recipe" && day.recipe) recipeId = (await upsertRecipe(db, day.recipe)).id;
-    if (day.type === "recipe" && recipeId) {
+    if (recipeId && day.type !== "note") {
       const recipe = await getRecipe(db, recipeId);
       if (!recipe) throw new HttpError(400, "That recipe isn't here anymore.");
     }
@@ -657,7 +698,7 @@ export async function replaceWeek(db: D1Database, input: WeekInput): Promise<{ w
         `INSERT INTO plan_entries (id, plan_date, meal, entry_type, recipe_id, note, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       )
-      .bind(crypto.randomUUID(), day.date, day.meal, day.type, day.type === "recipe" ? recipeId : null, day.note, now, now)
+      .bind(crypto.randomUUID(), day.date, day.meal, day.type, day.type === "note" ? null : recipeId, day.note, now, now)
       .run();
   }
   const saved = await listPlan(db, input.weekStart, end);
@@ -713,7 +754,7 @@ async function addOneIngredient(
   _recipeName: string,
   sourceKey: string,
 ): Promise<keyof GroceryChange> {
-  if (ingredient.buy === false || ingredient.optional) return "skipped";
+  if (ingredient.buy === false || (ingredient.optional && ingredient.buy !== true)) return "skipped";
   const name = groceryName(ingredient.name);
   const items = await listItems(db);
   const existing = items.find((item) => !item.checked && item.name.toLowerCase() === name.toLowerCase());
