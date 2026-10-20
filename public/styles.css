@@ -705,6 +705,18 @@ select.box { appearance: none; padding-right: 2.2rem; }
 }
 
 .outline-btn svg { width: 22px; height: 22px; }
+.add-date { width: 100%; margin: 0.85rem 0 0.15rem; }
+
+.date-sheet .sheet-card { max-height: none; }
+.date-sheet .month-bar h2 {
+  flex: 1;
+  margin: 0;
+  text-align: center;
+  font-size: 1.25rem;
+  font-weight: 750;
+}
+.date-sheet .month-grid { grid-auto-rows: 46px; flex: none; }
+.plan-choice p { margin: 0.2rem 0 0.4rem; font-size: 1.05rem; line-height: 1.35; }
 
 .dock-raised {
   padding-bottom: calc(var(--tab-bar) + var(--dock-pad));
@@ -888,7 +900,7 @@ body:has(.night-screen),
     radial-gradient(ellipse 55% 70% at 18% 50%, rgba(231, 246, 216, 0.9) 0%, rgba(231, 246, 216, 0) 70%),
     radial-gradient(ellipse 90% 80% at 50% 50%, transparent 40%, rgba(220, 218, 210, 0.45) 100%),
     #f7f7f5;
-  transition: opacity 320ms ease;
+  transition: opacity 300ms ease;
 }
 .splash.is-done { opacity: 0; pointer-events: none; }
 .splash-grain {
@@ -1140,6 +1152,8 @@ body:has(.month-screen),
 
 .month-panel { margin-top: 0.15rem; padding-top: 0.15rem; border-top: 1px solid var(--line); text-align: left; }
 .month-panel-head { display: flex; align-items: center; justify-content: space-between; gap: 0.6rem; }
+.month-panel-head .week-date { min-height: 0; padding: 0.15rem 0 0.2rem; }
+.month-panel-head.is-today .week-date { color: var(--green-dark); }
 .month-panel h2 { margin: 0; font-size: 1rem; font-weight: 750; text-align: left; line-height: 1.2; }
 .month-panel .text-green { min-height: 2rem; }
 .month-panel .meal-row,

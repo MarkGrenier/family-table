@@ -80,7 +80,7 @@ function swallowNextClick() {
 boot();
 setInterval(() => refresh(false), 5000);
 
-const SPLASH_MS = 600;
+const SPLASH_MS = 1500;
 
 async function boot() {
   const started = performance.now();
@@ -120,7 +120,7 @@ function dismissSplash() {
   splash.classList.add("is-done");
   const remove = () => splash.remove();
   splash.addEventListener("transitionend", remove, { once: true });
-  setTimeout(remove, 400);
+  setTimeout(remove, 360);
 }
 
 async function refresh(force) {
@@ -235,7 +235,9 @@ function render() {
   const dinnerTonight = state.tab === "today" && !state.page ? mealOn(nyToday(), "dinner") : null;
   const dayDinner = state.page?.kind === "day" ? mealOn(state.page.date, "dinner") : null;
   const todayCook = dinnerTonight?.type === "recipe" && Boolean(recipeForEntry(dinnerTonight));
-  const leftoversNightOn = dinnerTonight?.type === "leftovers" || dayDinner?.type === "leftovers";
+  const leftoversNightOn =
+    (dinnerTonight?.type === "leftovers" && !(dinnerTonight.also || []).length) ||
+    (dayDinner?.type === "leftovers" && !(dayDinner.also || []).length);
   const monthOn = state.tab === "calendar" && state.calMode === "month" && !state.page;
   const mainClass = bare ? "bare" : todayCook ? "screen today-screen" : leftoversNightOn ? "screen today-screen no-dock night-screen" : monthOn ? "screen month-screen" : "screen";
   app.innerHTML = `<main class="${mainClass}">${bodyHtml()}</main>${bare ? "" : tabsHtml()}${sheetHtml()}${toastHtml()}`;
@@ -286,7 +288,7 @@ function todayHtml() {
   const dinner = mealOn(today, "dinner");
   const recipe = recipeForEntry(dinner);
   const events = eventsOn(today);
-  if (dinner?.type === "leftovers") return leftoversNight(dinner, recipe);
+  if (dinner?.type === "leftovers" && !(dinner.also || []).length) return leftoversNight(dinner, recipe);
   if (recipe && dinner) {
     if (state.todayId !== recipe.id) {
       state.todayId = recipe.id;
@@ -363,7 +365,7 @@ function leftoversRow(entry, recipe) {
         <strong>${esc(dishName(entry, recipe))}</strong>
         <span class="leftover-meta"><span class="meal-kind">${esc(mealLabel(entry.meal))}</span><span class="lo-pill">Leftovers</span></span>
       </button>
-      <button class="icon-btn" type="button" data-action="recipe-menu" data-date="${esc(entry.date)}" data-meal="${esc(entry.meal)}" aria-label="More">${dots()}</button>
+      ${mealMenu(entry)}
     </div>`;
 }
 
@@ -473,9 +475,10 @@ function monthSelection(anchor) {
 function monthPanel(date) {
   const meals = mealsOn(date);
   const events = eventsOn(date);
-  const heading = date === nyToday() ? `Today · ${longDate(date)}` : longDate(date);
+  const today = date === nyToday();
+  const label = today ? `Today · ${shortDate(date)}` : shortDate(date);
   return `<section class="month-panel">
-      <div class="month-panel-head"><h2>${esc(heading)}</h2></div>
+      <div class="month-panel-head${today ? " is-today" : ""}"><p class="week-date">${esc(label)}</p></div>
       ${meals.length ? meals.map(mealRow).join("") : `<button class="week-empty" type="button" data-action="add-meal" data-date="${esc(date)}" data-meal="dinner">Nothing planned</button>`}
       ${events.map((event) => `<p class="event-line">${event.time ? `<time>${esc(event.time)}</time>` : ""}${esc(event.title)}</p>`).join("")}
     </section>`;
@@ -502,7 +505,7 @@ function weekDay(date) {
 }
 
 function mealMenu(entry) {
-  return `<button class="icon-btn" type="button" data-action="recipe-menu" data-date="${esc(entry.date)}" data-meal="${esc(entry.meal)}" aria-label="More">${dots()}</button>`;
+  return `<button class="icon-btn" type="button" data-action="recipe-menu" data-id="${esc(entry.id)}" data-date="${esc(entry.date)}" data-meal="${esc(entry.meal)}" aria-label="More">${dots()}</button>`;
 }
 
 function mealRow(entry) {
@@ -522,7 +525,7 @@ function mealLabel(meal) {
   return "Dinner";
 }
 
-function monthGrid(iso, selected) {
+function monthGrid(iso, selected, action = "select-day") {
   const [year, month] = iso.split("-").map(Number);
   const first = `${iso.slice(0, 7)}-01`;
   const start = mondayOf(first);
@@ -534,28 +537,61 @@ function monthGrid(iso, selected) {
   }
   const names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
   return `<div class="month-names">${names.map((name) => `<span>${name}</span>`).join("")}</div>
-    <div class="month-grid">${cells.map((date) => monthCell(date, Number(date.slice(5, 7)) === month, selected)).join("")}</div>`;
+    <div class="month-grid">${cells.map((date) => monthCell(date, Number(date.slice(5, 7)) === month, selected, action)).join("")}</div>`;
 }
 
-function monthCell(date, inMonth, selected) {
+function monthCell(date, inMonth, selected, action = "select-day") {
   const today = date === nyToday();
   const past = date < nyToday();
   const planned = inMonth && !past && (mealsOn(date).length > 0 || eventsOn(date).length > 0);
   const open = inMonth && !past;
   const picked = open && date === selected;
   return `<div class="month-cell${inMonth ? "" : " is-out"}${today ? " is-today" : ""}${past ? " is-past" : ""}${picked ? " is-picked" : ""}">
-      <button type="button" ${open ? `data-action="select-day" data-date="${esc(date)}" aria-pressed="${picked ? "true" : "false"}"` : "disabled"}>${Number(date.slice(8))}<span class="dot${planned ? " is-on" : ""}"></span></button>
+      <button type="button" ${open ? `data-action="${action}" data-date="${esc(date)}" aria-pressed="${picked ? "true" : "false"}"` : "disabled"}>${Number(date.slice(8))}<span class="dot${planned ? " is-on" : ""}"></span></button>
     </div>`;
 }
 
 
 function mealsOn(date) {
-  return ["breakfast", "lunch", "dinner"].map((meal) => mealOn(date, meal)).filter(Boolean);
+  const rows = [];
+  for (const meal of ["breakfast", "lunch", "dinner"]) {
+    const entry = mealOn(date, meal);
+    if (!entry) continue;
+    rows.push(entry);
+    for (const recipeId of entry.also || []) {
+      if (!recipeId || recipeId === entry.recipeId) continue;
+      const extra = entryById(`${entry.id}:also:${recipeId}`);
+      if (extra) rows.push(extra);
+    }
+  }
+  return rows;
+}
+
+function entryById(id) {
+  if (!id) return null;
+  const match = /^(.*):also:(.+)$/.exec(id);
+  if (!match) return state.plan.find((entry) => entry.id === id) || null;
+  const parent = state.plan.find((entry) => entry.id === match[1]);
+  if (!parent) return null;
+  const recipe = recipeById(match[2]);
+  return {
+    id,
+    parentId: parent.id,
+    date: parent.date,
+    meal: parent.meal,
+    type: "recipe",
+    recipeId: match[2],
+    recipeName: recipe?.name || "Recipe",
+    imageUrl: recipe?.imageUrl || null,
+    note: null,
+    alternates: [],
+    also: [],
+  };
 }
 
 function dayHtml(date) {
   const dinner = mealOn(date, "dinner");
-  if (dinner?.type === "leftovers") return leftoversNight(dinner, recipeForEntry(dinner), { back: true, remove: true });
+  if (dinner?.type === "leftovers" && !(dinner.also || []).length) return leftoversNight(dinner, recipeForEntry(dinner), { back: true, remove: true });
   const meals = mealsOn(date);
   const body = meals.length
     ? meals.map(mealRow).join("")
@@ -632,11 +668,12 @@ function recipeList(recipes) {
 function recipeRows(recipes, options = {}) {
   const action = options.pick ? "pick-recipe" : "open-recipe";
   const when = options.pick ? ` data-date="${esc(options.date)}" data-meal="${esc(options.meal)}"` : "";
-  return recipes.map((recipe) => `<div class="recipe-row">
+  return recipes.map((recipe) => `<div class="recipe-row" data-id="${esc(recipe.id)}">
       <button type="button" data-action="${action}" data-id="${esc(recipe.id)}"${when} class="recipe-open">
         ${recipeThumb(recipe)}
         <span class="recipe-copy"><span>${esc(recipe.name)}</span>${recipe.needsReview ? `<span class="review-pill">Needs a look</span>` : ""}${lastMadeText(recipe) ? `<span class="small">${esc(lastMadeText(recipe))}</span>` : ""}</span>
       </button>
+      ${options.pick ? "" : `<button class="icon-btn" type="button" data-action="recipe-row-menu" data-id="${esc(recipe.id)}" aria-label="More">${dots()}</button>`}
       <button class="heart${recipe.favorite ? " is-on" : ""}" type="button" data-action="favorite" data-id="${esc(recipe.id)}" aria-label="${recipe.favorite ? "Unfavorite" : "Favorite"}">${heart(recipe.favorite)}</button>
     </div>`).join("");
 }
@@ -662,6 +699,7 @@ function recipeView(recipe, mode) {
       <div class="title-row"><h1>${esc(recipe.name)}</h1>
         <button class="heart${recipe.favorite ? " is-on" : ""}" type="button" data-action="favorite" data-id="${esc(recipe.id)}" aria-label="Favorite">${heart(recipe.favorite)}</button>
       </div>
+      ${mode === "page" ? `<button class="outline-btn add-date" type="button" data-action="add-to-date" data-id="${esc(recipe.id)}">Add to date</button>` : ""}
       <p class="meta">${recipe.totalTime ? `${esc(unicodeFractions(recipe.totalTime))} • ` : ""}<button type="button" data-action="servings-toggle">${servings} ${servings === 1 ? "serving" : "servings"} ▾</button></p>
       ${open ? `<div class="seg"><button type="button" data-action="servings" data-delta="-1">−</button><button type="button" class="is-on">${servings}</button><button type="button" data-action="servings" data-delta="1">+</button></div>` : ""}
       ${mode === "page" && lastMadeText(recipe) ? `<p class="small">${esc(lastMadeText(recipe))}</p>` : ""}
@@ -876,6 +914,10 @@ function mealContext() {
 }
 
 function activeRecipe() {
+  if (state.sheet?.entryId) {
+    const planned = recipeForEntry(entryById(state.sheet.entryId));
+    if (planned) return recipeById(planned.id) || planned;
+  }
   if (state.page?.kind === "recipe") return recipeById(state.page.id) || null;
   const context = mealContext();
   if (context) {
@@ -1138,13 +1180,31 @@ function sheetHtml() {
   }
   if (state.sheet?.kind === "recipe-menu") {
     const context = mealContext();
-    const planned = context ? mealOn(context.date, context.meal) : null;
+    const planned = state.sheet.entryId ? entryById(state.sheet.entryId) : context ? mealOn(context.date, context.meal) : null;
     const recipe = activeRecipe();
     return `<div class="sheet"><div class="sheet-card" role="dialog" aria-label="Recipe">
         <div class="sheet-head"><span></span><button type="button" data-action="close-sheet" aria-label="Close">✕</button></div>
         ${planned ? `<button class="menu-row" type="button" data-action="add-meal" data-date="${esc(planned.date)}" data-meal="${esc(planned.meal)}">Add</button>` : ""}
         ${planned ? `<button class="menu-row" type="button" data-action="remove-meal" data-id="${esc(planned.id)}">Remove</button>` : ""}
         ${recipe ? `<button class="menu-row" type="button" data-action="edit-recipe">Edit recipe</button>` : ""}
+        ${recipe ? `<button class="menu-row" type="button" data-action="add-to-date" data-id="${esc(recipe.id)}">Add to date</button>` : ""}
+      </div></div>`;
+  }
+  if (state.sheet?.kind === "recipe-row-menu") {
+    return `<div class="sheet"><div class="sheet-card" role="dialog" aria-label="Recipe options">
+        <div class="sheet-head"><span></span><button type="button" data-action="close-sheet" aria-label="Close">✕</button></div>
+        <button class="menu-row" type="button" data-action="add-to-date" data-id="${esc(state.sheet.recipeId)}">Add to date</button>
+      </div></div>`;
+  }
+  if (state.sheet?.kind === "pick-date") return dateSheetHtml();
+  if (state.sheet?.kind === "plan-choice") {
+    return `<div class="sheet"><div class="sheet-card plan-choice" role="dialog" aria-label="This day already has a dinner">
+        <div class="sheet-head"><span></span><button type="button" data-action="plan-cancel" aria-label="Close">✕</button></div>
+        <p>${esc(state.sheet.when)} already has ${esc(state.sheet.name)}. Replace it or add both?</p>
+        ${state.error ? `<p class="error">${esc(state.error)}</p>` : ""}
+        <button class="menu-row" type="button" data-action="plan-replace">Replace</button>
+        <button class="menu-row" type="button" data-action="plan-keep">Add both</button>
+        <button class="menu-row" type="button" data-action="plan-cancel">Cancel</button>
       </div></div>`;
   }
   if (state.sheet?.kind === "edit-recipe") return editRecipeHtml();
@@ -1166,7 +1226,21 @@ function sheetHtml() {
 function onPointerDown(event) {
   const board = event.target.closest(".cal-board");
   if (board) {
+    if (state.sheet?.kind === "pick-date") return;
     gesture = { kind: "cal", x: event.clientX, y: event.clientY };
+    return;
+  }
+  const recipeRow = event.target.closest(".recipe-row[data-id]");
+  if (recipeRow && state.page?.kind !== "pick" && !event.target.closest(".heart") && !event.target.closest(".icon-btn")) {
+    clearGesture();
+    const id = recipeRow.dataset.id;
+    gesture = { kind: "recipe", id, x: event.clientX, y: event.clientY, long: false, pointerId: event.pointerId };
+    gesture.timer = setTimeout(() => {
+      if (!gesture || gesture.kind !== "recipe") return;
+      gesture.long = true;
+      state.sheet = { kind: "recipe-row-menu", recipeId: id };
+      render();
+    }, 520);
     return;
   }
   const row = event.target.closest(".g-row");
@@ -1183,7 +1257,18 @@ function onPointerDown(event) {
 }
 
 function onPointerMove(event) {
-  if (!gesture || gesture.kind === "cal" || gesture.pointerId !== event.pointerId) return;
+  if (!gesture || gesture.pointerId !== event.pointerId) return;
+  if (gesture.kind === "cal") return;
+  if (gesture.kind === "recipe") {
+    const dx = event.clientX - gesture.x;
+    const dy = event.clientY - gesture.y;
+    if (Math.abs(dx) > 10 || Math.abs(dy) > 10) {
+      if (gesture.timer) clearTimeout(gesture.timer);
+      gesture.timer = null;
+      gesture.scroll = true;
+    }
+    return;
+  }
   const dx = event.clientX - gesture.x;
   const dy = event.clientY - gesture.y;
   if (!gesture.dragging) {
@@ -1214,6 +1299,12 @@ function onPointerUp(event) {
   if (!gesture) return;
   const dx = event.clientX - gesture.x;
   const dy = event.clientY - gesture.y;
+  if (gesture.kind === "recipe") {
+    const long = gesture.long;
+    clearGesture();
+    if (long) swallowNextClick();
+    return;
+  }
   if (gesture.kind === "cal") {
     clearGesture();
     if (Math.abs(dx) > 56 && Math.abs(dx) > Math.abs(dy)) {
@@ -1250,6 +1341,10 @@ function onPointerUp(event) {
 
 function onPointerCancel() {
   if (!gesture) return;
+  if (gesture.kind === "cal" || gesture.kind === "recipe") {
+    clearGesture();
+    return;
+  }
   if (gesture.dragging) {
     const id = gesture.id;
     const offset = gesture.offset ?? 0;
@@ -1357,7 +1452,26 @@ async function onClick(event) {
     return;
   }
   if (action === "undo-check") return undoCheck();
-  if (action === "pick-recipe") return planRecipe(button.dataset.date, button.dataset.meal, button.dataset.id);
+  if (action === "pick-recipe") return askPlan(button.dataset.date, button.dataset.meal, button.dataset.id);
+  if (action === "pick-date-day") return askPlan(button.dataset.date, "dinner", state.sheet?.recipeId);
+  if (action === "date-shift") return shiftDateMonth(Number(button.dataset.delta));
+  if (action === "add-to-date") return openDatePicker(button.dataset.id || state.page?.id);
+  if (action === "recipe-row-menu") {
+    state.sheet = { kind: "recipe-row-menu", recipeId: button.dataset.id };
+    render();
+    return;
+  }
+  if (action === "plan-replace" || action === "plan-keep") {
+    const sheet = state.sheet;
+    if (sheet?.kind !== "plan-choice") return;
+    return planRecipe(sheet.date, sheet.meal, sheet.recipeId, action === "plan-keep");
+  }
+  if (action === "plan-cancel") {
+    state.error = "";
+    state.sheet = state.sheet?.back || null;
+    render();
+    return;
+  }
   if (action === "clear-meal" || action === "remove-meal") return removeMeal(button.dataset.id);
   if (action === "open-recipe") {
     const recipe = recipeById(button.dataset.id);
@@ -1415,7 +1529,7 @@ async function onClick(event) {
     return;
   }
   if (action === "recipe-menu") {
-    state.sheet = { kind: "recipe-menu", date: button.dataset.date || null, meal: button.dataset.meal || null };
+    state.sheet = { kind: "recipe-menu", date: button.dataset.date || null, meal: button.dataset.meal || null, entryId: button.dataset.id || null };
     render();
     return;
   }
@@ -1494,7 +1608,9 @@ async function onClick(event) {
     return;
   }
   if (action === "close-sheet") {
-    state.sheet = null;
+    if (state.sheet?.kind === "plan-choice" && state.sheet.back) state.sheet = state.sheet.back;
+    else state.sheet = null;
+    state.error = "";
     render();
     return;
   }
@@ -1608,22 +1724,88 @@ function closePick() {
   render();
 }
 
-async function planRecipe(date, meal, recipeId) {
+function openDatePicker(recipeId) {
+  if (!recipeId) return;
+  state.error = "";
+  state.sheet = { kind: "pick-date", recipeId, month: `${nyToday().slice(0, 7)}-01` };
+  render();
+  refresh(true);
+}
+
+function shiftDateMonth(delta) {
+  if (state.sheet?.kind !== "pick-date" || !canShiftDateMonth(delta)) return;
+  const [year, month] = String(state.sheet.month).split("-").map(Number);
+  const next = new Date(Date.UTC(year, month - 1 + delta, 1));
+  state.sheet = { ...state.sheet, month: next.toISOString().slice(0, 10) };
+  render();
+  refresh(true);
+}
+
+function canShiftDateMonth(delta) {
+  if (delta > 0) return true;
+  const current = state.sheet?.month || `${nyToday().slice(0, 7)}-01`;
+  const [year, month] = String(current).split("-").map(Number);
+  const previousLast = new Date(Date.UTC(year, month - 1, 0)).toISOString().slice(0, 10);
+  return previousLast >= nyToday();
+}
+
+function dateSheetHtml() {
+  const month = state.sheet?.month || `${nyToday().slice(0, 7)}-01`;
+  const prev = canShiftDateMonth(-1);
+  return `<div class="sheet date-sheet"><div class="sheet-card" role="dialog" aria-label="Add to date">
+      <div class="sheet-head"><strong>Add to date</strong><button type="button" data-action="close-sheet" aria-label="Close">✕</button></div>
+      <div class="month-bar">
+        <button type="button" data-action="date-shift" data-delta="-1" aria-label="Previous month" ${prev ? "" : "disabled"}>${chevLeft()}</button>
+        <h2>${esc(monthTitle(month))}</h2>
+        <button type="button" data-action="date-shift" data-delta="1" aria-label="Next month">${chevRight()}</button>
+      </div>
+      ${monthGrid(month, "", "pick-date-day")}
+    </div></div>`;
+}
+
+function askPlan(date, meal, recipeId) {
   const slot = meal || "dinner";
+  if (!date || !recipeId || date < nyToday()) return;
+  const existing = mealOn(date, slot);
+  if (!existing) return planRecipe(date, slot, recipeId, false);
+  if (existing.recipeId === recipeId || (existing.also || []).includes(recipeId)) return showPlannedDay(date);
+  const back = state.sheet?.kind === "pick-date" ? { kind: "pick-date", recipeId: state.sheet.recipeId, month: state.sheet.month } : null;
+  state.error = "";
+  state.sheet = {
+    kind: "plan-choice",
+    date,
+    meal: slot,
+    recipeId,
+    when: formatUtc(date, { weekday: "short", month: "short", day: "numeric" }),
+    name: planTitle(existing),
+    back,
+  };
+  render();
+}
+
+function showPlannedDay(date) {
+  state.recipeQuery = "";
+  state.error = "";
+  state.pickBack = null;
+  state.sheet = null;
+  if (date === nyToday()) {
+    state.tab = "today";
+    state.page = null;
+  } else {
+    state.tab = "calendar";
+    state.monthPick = date;
+    state.page = { kind: "day", date };
+  }
+  render();
+}
+
+async function planRecipe(date, meal, recipeId, keep = false) {
+  const slot = meal || "dinner";
+  const body = { date, meal: slot, type: "recipe", recipeId };
+  if (keep) body.keep = true;
   try {
-    await api("/api/plan", { method: "POST", body: { date, meal: slot, type: "recipe", recipeId } });
-    state.recipeQuery = "";
-    state.error = "";
-    state.pickBack = null;
-    state.sheet = null;
-    if (date === nyToday()) {
-      state.tab = "today";
-      state.page = null;
-    } else {
-      state.tab = "calendar";
-      state.monthPick = date;
-      state.page = { kind: "day", date };
-    }
+    await api("/api/plan", { method: "POST", body });
+    showPlannedDay(date);
     await refresh(true);
   } catch (error) {
     state.error = error.message;
@@ -1632,6 +1814,21 @@ async function planRecipe(date, meal, recipeId) {
 }
 
 async function removeMeal(id) {
+  const also = /^(.*):also:(.+)$/.exec(id || "");
+  if (also) {
+    const parent = state.plan.find((item) => item.id === also[1]);
+    const name = recipeById(also[2])?.name || "Meal";
+    state.sheet = null;
+    try {
+      await api(`/api/plan/${also[1]}/also/${also[2]}`, { method: "DELETE" });
+      if (parent) showUndo({ id, name, kind: "plan-also", snapshot: { date: parent.date, meal: parent.meal, recipeId: also[2] } });
+      await refresh(true);
+    } catch (error) {
+      state.error = error.message;
+      render();
+    }
+    return;
+  }
   const entry = state.plan.find((item) => item.id === id);
   const snapshot = entry
     ? {
@@ -1641,6 +1838,7 @@ async function removeMeal(id) {
         recipeId: entry.recipeId || null,
         note: entry.note || null,
         alternates: entry.alternates || [],
+        also: entry.also || [],
       }
     : null;
   const name = entry ? planTitle(entry) : "Meal";
@@ -1789,7 +1987,17 @@ async function undoCheck() {
   clearUndo();
   state.checking = null;
   try {
-    if (undo.kind === "plan") await api("/api/plan", { method: "POST", body: planRestoreBody(undo.snapshot) });
+    if (undo.kind === "plan") {
+      await api("/api/plan", { method: "POST", body: planRestoreBody(undo.snapshot) });
+      for (const recipeId of undo.snapshot.also || []) {
+        await api("/api/plan", { method: "POST", body: { date: undo.snapshot.date, meal: undo.snapshot.meal, type: "recipe", recipeId, keep: true } });
+      }
+    } else if (undo.kind === "plan-also") {
+      await api("/api/plan", {
+        method: "POST",
+        body: { date: undo.snapshot.date, meal: undo.snapshot.meal, type: "recipe", recipeId: undo.snapshot.recipeId, keep: true },
+      });
+    }
     else {
       const body = undo.kind === "delete" ? { deleted: false } : { checked: false };
       await api(`/api/items/${undo.id}`, { method: "PATCH", body });
@@ -1839,7 +2047,7 @@ async function deleteGrocery(id) {
 
 function toastHtml() {
   if (!state.undo) return "";
-  const verb = state.undo.kind === "delete" ? "deleted" : state.undo.kind === "plan" ? "removed" : "checked off";
+  const verb = state.undo.kind === "delete" ? "deleted" : state.undo.kind === "plan" || state.undo.kind === "plan-also" ? "removed" : "checked off";
   return `<div class="toast" role="status"><span>${esc(state.undo.name)} ${verb}</span><button type="button" data-action="undo-check">Undo</button></div>`;
 }
 
@@ -2120,17 +2328,33 @@ function mondayOf(iso) {
 }
 function visibleRange() {
   const today = nyToday();
+  let from;
+  let to;
   if (state.calMode === "month") {
     const start = state.calStart || `${today.slice(0, 7)}-01`;
     const gridStart = mondayOf(`${start.slice(0, 7)}-01`);
     const gridEnd = addDays(gridStart, 41);
-    let from = gridStart;
-    if (daysBetween(from, gridEnd) > 60) from = addDays(gridEnd, -60);
-    return { from, to: gridEnd };
+    from = gridStart;
+    to = gridEnd;
+    if (daysBetween(from, to) > 60) from = addDays(to, -60);
+  } else {
+    const focus = state.page?.kind === "day" || state.page?.kind === "pick" ? state.page.date : "";
+    const end = focus > addDays(today, 6) ? focus : addDays(today, 6);
+    from = today;
+    to = addDays(end, 1);
   }
-  const focus = state.page?.kind === "day" || state.page?.kind === "pick" ? state.page.date : "";
-  const end = focus > addDays(today, 6) ? focus : addDays(today, 6);
-  return { from: today, to: addDays(end, 1) };
+  if (state.sheet?.kind === "pick-date" && state.sheet.month) {
+    const gridStart = mondayOf(`${String(state.sheet.month).slice(0, 7)}-01`);
+    const gridEnd = addDays(gridStart, 41);
+    if (gridStart < from) from = gridStart;
+    if (gridEnd > to) to = gridEnd;
+    if (daysBetween(from, to) > 60) {
+      from = gridStart < today ? today : gridStart;
+      to = gridEnd;
+      if (daysBetween(from, to) > 60) from = addDays(to, -60);
+    }
+  }
+  return { from, to };
 }
 function formatUtc(iso, options) {
   const [year, month, day] = iso.split("-").map(Number);

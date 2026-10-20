@@ -60,6 +60,7 @@ export type PlanEntry = {
   imageUrl: string | null;
   note: string | null;
   alternates: string[];
+  also: string[];
 };
 
 export type FamilyEvent = {
@@ -394,6 +395,7 @@ type PlanRow = {
   recipe_id: string | null;
   note: string | null;
   alternates_json: string | null;
+  also_json: string | null;
   recipe_name: string | null;
   image_url: string | null;
 };
@@ -446,7 +448,17 @@ function planFromRow(row: PlanRow): PlanEntry {
     imageUrl: row.image_url,
     note: row.note,
     alternates: parseAlternateIds(row.alternates_json),
+    also: parseAlsoIds(row.also_json),
   };
+}
+
+function parseAlsoIds(value: string | null): string[] {
+  try {
+    const parsed = JSON.parse(value || "[]") as unknown;
+    return Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === "string" && id.length > 0) : [];
+  } catch {
+    return [];
+  }
 }
 
 function parseAlternateIds(value: string | null): string[] {
@@ -471,7 +483,7 @@ async function resolveAlternateIds(db: D1Database, raw: string[], chosenId: stri
 }
 
 const PLAN_SELECT = `
-  SELECT p.id, p.plan_date, p.meal, p.entry_type, p.recipe_id, p.note, p.alternates_json, r.name AS recipe_name, r.image_url
+  SELECT p.id, p.plan_date, p.meal, p.entry_type, p.recipe_id, p.note, p.alternates_json, p.also_json, r.name AS recipe_name, r.image_url
   FROM plan_entries p
   LEFT JOIN recipes r ON r.id = p.recipe_id
 `;
@@ -503,6 +515,10 @@ export async function savePlan(db: D1Database, input: PlanInput): Promise<PlanEn
     const recipe = await getRecipe(db, input.recipeId);
     if (!recipe) throw new HttpError(400, "That recipe isn't here anymore.");
   }
+  if (input.keep && input.recipeId) {
+    const kept = await addPlanAlso(db, input.date, input.meal, input.recipeId);
+    if (kept) return kept;
+  }
   const previous = await planOn(db, input.date, input.meal);
   const now = nowIso();
   const id = crypto.randomUUID();
@@ -518,13 +534,14 @@ export async function savePlan(db: D1Database, input: PlanInput): Promise<PlanEn
       : (previous?.alternates ?? []).filter((alternateId) => alternateId !== recipeId);
   await db
     .prepare(
-      `INSERT INTO plan_entries (id, plan_date, meal, entry_type, recipe_id, note, alternates_json, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO plan_entries (id, plan_date, meal, entry_type, recipe_id, note, alternates_json, also_json, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, '[]', ?, ?)
        ON CONFLICT (plan_date, meal) DO UPDATE SET
          entry_type = excluded.entry_type,
          recipe_id = excluded.recipe_id,
          note = excluded.note,
          alternates_json = excluded.alternates_json,
+         also_json = '[]',
          updated_at = excluded.updated_at`,
     )
     .bind(id, input.date, input.meal, input.type, recipeId, note, JSON.stringify(alternates), now, now)
@@ -533,6 +550,11 @@ export async function savePlan(db: D1Database, input: PlanInput): Promise<PlanEn
   if (!saved) throw new HttpError(500, "Something went wrong. Try again.");
   const sameRecipe =
     previous?.type === "recipe" && saved.type === "recipe" && previous.recipeId === saved.recipeId && Boolean(saved.recipeId);
+  if (previous) {
+    for (const extraId of previous.also) {
+      await removePlanGroceries(db, { ...previous, id: alsoPlanId(previous.id, extraId) });
+    }
+  }
   if (!sameRecipe) {
     if (previous?.type === "recipe") await removePlanGroceries(db, previous);
     if (saved.type === "recipe" && saved.recipeId) await addEntryGroceries(db, saved);
@@ -561,6 +583,37 @@ export async function setPlanAlternates(db: D1Database, id: string, raw: string[
   const saved = await getPlan(db, id);
   if (!saved) throw new HttpError(500, "Something went wrong. Try again.");
   return saved;
+}
+
+async function addPlanAlso(db: D1Database, date: string, meal: string, recipeId: string): Promise<PlanEntry | null> {
+  const previous = await planOn(db, date, meal);
+  if (!previous) return null;
+  if (previous.recipeId === recipeId || previous.also.includes(recipeId)) return previous;
+  if (previous.also.length >= 6) throw new HttpError(400, "That day already has several dinners.");
+  const also = [...previous.also, recipeId];
+  await db
+    .prepare(`UPDATE plan_entries SET also_json = ?, updated_at = ? WHERE id = ?`)
+    .bind(JSON.stringify(also), nowIso(), previous.id)
+    .run();
+  const saved = await planOn(db, date, meal);
+  if (!saved) throw new HttpError(500, "Something went wrong. Try again.");
+  await addEntryGroceries(db, { ...saved, id: alsoPlanId(saved.id, recipeId), type: "recipe", recipeId });
+  return saved;
+}
+
+export async function removePlanAlso(db: D1Database, id: string, recipeId: string): Promise<void> {
+  const existing = await getPlan(db, id);
+  if (!existing) throw new HttpError(404, "That meal isn't planned anymore.");
+  const also = existing.also.filter((entryId) => entryId !== recipeId);
+  await db
+    .prepare(`UPDATE plan_entries SET also_json = ?, updated_at = ? WHERE id = ?`)
+    .bind(JSON.stringify(also), nowIso(), id)
+    .run();
+  await removePlanGroceries(db, { ...existing, id: alsoPlanId(id, recipeId) });
+}
+
+function alsoPlanId(planId: string, recipeId: string): string {
+  return `${planId}:also:${recipeId}`;
 }
 
 export async function deletePlan(db: D1Database, id: string): Promise<void> {
@@ -688,6 +741,12 @@ export async function addPlanGroceries(db: D1Database, from: string, to: string,
     totals.added += change.added;
     totals.updated += change.updated;
     totals.skipped += change.skipped;
+    for (const recipeId of entry.also) {
+      const extra = await addEntryGroceries(db, { ...entry, id: alsoPlanId(entry.id, recipeId), type: "recipe", recipeId }, onHand);
+      totals.added += extra.added;
+      totals.updated += extra.updated;
+      totals.skipped += extra.skipped;
+    }
   }
   return totals;
 }
@@ -700,6 +759,7 @@ type RebuildPlanRow = {
   meal: string;
   entry_type: string;
   recipe_id: string | null;
+  also_json: string | null;
 };
 
 type RebuildItemRow = {
@@ -740,7 +800,7 @@ export async function rebuildPlanGroceries(
   // A year of meals used to issue a query per ingredient and hit D1's per-request cap.
   const loaded = await db.batch([
     db.prepare(
-      `SELECT id, plan_date, meal, entry_type, recipe_id
+      `SELECT id, plan_date, meal, entry_type, recipe_id, also_json
        FROM plan_entries
        ORDER BY plan_date, CASE meal WHEN 'breakfast' THEN 0 WHEN 'lunch' THEN 1 ELSE 2 END`,
     ),
@@ -772,7 +832,9 @@ export async function rebuildPlanGroceries(
     if (row.recipe_id) planRecipe.set(row.id, row.recipe_id);
   }
   const entries = planRows.filter((row) => {
-    if (row.entry_type !== "recipe" || !row.recipe_id) return false;
+    const isRecipe = row.entry_type === "recipe" && Boolean(row.recipe_id);
+    const hasAlso = parseAlsoIds(row.also_json).length > 0;
+    if (!isRecipe && !hasAlso) return false;
     if (!range) return true;
     return row.plan_date >= range.from && row.plan_date <= range.to;
   });
@@ -809,6 +871,11 @@ export async function rebuildPlanGroceries(
 
   function ingredientForKey(sourceKey: string): Ingredient | null {
     const parts = sourceKey.split(":");
+    if (parts[0] === "plan" && parts[2] === "also") {
+      const index = Number(parts[4]);
+      if (!Number.isInteger(index) || index < 0) return null;
+      return recipeIngredients.get(parts[3] ?? "")?.[index] ?? null;
+    }
     const index = Number(parts[2]);
     if (!Number.isInteger(index) || index < 0) return null;
     const recipeId = parts[0] === "plan" ? (planRecipe.get(parts[1] ?? "") ?? null) : parts[0] === "recipe" ? (parts[1] ?? null) : null;
@@ -919,9 +986,17 @@ export async function rebuildPlanGroceries(
   }
 
   for (const entry of entries) {
-    const ingredients = recipeIngredients.get(entry.recipe_id ?? "") ?? [];
-    for (let index = 0; index < ingredients.length; index += 1) {
-      totals[placeIngredient(ingredients[index], `plan:${entry.id}:${index}`)] += 1;
+    if (entry.entry_type === "recipe" && entry.recipe_id) {
+      const ingredients = recipeIngredients.get(entry.recipe_id) ?? [];
+      for (let index = 0; index < ingredients.length; index += 1) {
+        totals[placeIngredient(ingredients[index], `plan:${entry.id}:${index}`)] += 1;
+      }
+    }
+    for (const recipeId of parseAlsoIds(entry.also_json)) {
+      const ingredients = recipeIngredients.get(recipeId) ?? [];
+      for (let index = 0; index < ingredients.length; index += 1) {
+        totals[placeIngredient(ingredients[index], `plan:${entry.id}:also:${recipeId}:${index}`)] += 1;
+      }
     }
   }
 
@@ -1064,8 +1139,8 @@ export async function replaceWeek(db: D1Database, input: WeekInput): Promise<{ w
 
 async function removePlanGroceries(db: D1Database, entry: PlanEntry): Promise<void> {
   const rows = await db
-    .prepare(`SELECT item_id, source_key FROM grocery_sources WHERE source_key GLOB ?`)
-    .bind(`plan:${entry.id}:*`)
+    .prepare(`SELECT item_id, source_key FROM grocery_sources WHERE instr(source_key, ?) = 1`)
+    .bind(`plan:${entry.id}:`)
     .all<{ item_id: string; source_key: string }>();
   for (const row of rows.results ?? []) {
     await removeOneSource(db, row.item_id, row.source_key);
@@ -1116,6 +1191,7 @@ function readHandSource(sourceKey: string): { known: boolean; note: string | nul
 
 function recipeIdentity(sourceKey: string): string | null {
   const parts = sourceKey.split(":");
+  if (parts[0] === "plan" && parts[2] === "also" && parts[1] && parts[3]) return `plan:${parts[1]}:also:${parts[3]}`;
   if ((parts[0] === "plan" || parts[0] === "recipe") && parts[1]) return `${parts[0]}:${parts[1]}`;
   return null;
 }
@@ -1131,6 +1207,12 @@ function isDisposableNote(note: string | null): boolean {
 
 async function ingredientForSource(db: D1Database, sourceKey: string): Promise<Ingredient | null> {
   const parts = sourceKey.split(":");
+  if (parts[0] === "plan" && parts[2] === "also" && parts[3]) {
+    const index = Number(parts[4]);
+    if (!Number.isInteger(index) || index < 0) return null;
+    const recipe = await getRecipe(db, parts[3]);
+    return recipe?.ingredients[index] ?? null;
+  }
   const index = Number(parts[2]);
   if (!Number.isInteger(index) || index < 0) return null;
   if (parts[0] === "plan" && parts[1]) {

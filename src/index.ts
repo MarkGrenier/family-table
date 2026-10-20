@@ -8,6 +8,7 @@ import {
   createRecipe,
   deleteEvent,
   deletePlan,
+  removePlanAlso,
   deleteRecipe,
   listAllEvents,
   listAllPlan,
@@ -379,6 +380,12 @@ async function handleFood(request: Request, env: Env, path: string, method: stri
   if (path === "/api/plan" && method === "POST") {
     const entry = await savePlan(env.DB, parsePlan(await readJson(request)));
     return json({ entry });
+  }
+  const alsoMatch = /^\/api\/plan\/([A-Za-z0-9-]{1,80})\/also\/([A-Za-z0-9-]{1,80})$/.exec(path);
+  if (alsoMatch) {
+    if (method !== "DELETE") throw new HttpError(405, "That action isn't available.");
+    await removePlanAlso(env.DB, alsoMatch[1], alsoMatch[2]);
+    return json({ ok: true });
   }
   const planMatch = /^\/api\/plan\/([A-Za-z0-9-]{1,80})$/.exec(path);
   if (planMatch) {

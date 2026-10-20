@@ -1686,6 +1686,68 @@ describe("grocery API", () => {
     expect(shopped.map((item) => item.name).sort()).toEqual(["Lemon", "Spaghetti"]);
   });
 
+  it("keeps a second dinner beside the first and drops it on replace", async () => {
+    const token = env.API_TOKEN;
+    const barley = await call("/api/recipes", {
+      method: "POST",
+      token,
+      body: { name: "Zzalso barley bowl", servings: 2, ingredients: ["1 cup zzalso barley"], steps: ["Simmer."] },
+    });
+    const pear = await call("/api/recipes", {
+      method: "POST",
+      token,
+      body: { name: "Zzalso pear salad", servings: 2, ingredients: ["2 zzalso pears"], steps: ["Toss."] },
+    });
+    const lentil = await call("/api/recipes", {
+      method: "POST",
+      token,
+      body: { name: "Zzalso lentil stew", servings: 2, ingredients: ["1 cup zzalso lentils"], steps: ["Stew."] },
+    });
+    const barleyId = (barley.json?.recipe as Json).id as string;
+    const pearId = (pear.json?.recipe as Json).id as string;
+    const lentilId = (lentil.json?.recipe as Json).id as string;
+    const first = await call("/api/plan", {
+      method: "POST",
+      token,
+      body: { date: "2027-04-08", meal: "dinner", type: "recipe", recipeId: barleyId },
+    });
+    expect(first.status).toBe(200);
+    const planId = (first.json?.entry as Json).id as string;
+    const second = await call("/api/plan", {
+      method: "POST",
+      token,
+      body: { date: "2027-04-08", meal: "dinner", type: "recipe", recipeId: pearId, keep: true },
+    });
+    expect(second.status).toBe(200);
+    expect((second.json?.entry as Json).recipeId).toBe(barleyId);
+    expect((second.json?.entry as Json).also).toEqual([pearId]);
+    const names = async () => ((await call("/api/items", { token })).json?.items ?? []) as Json[];
+    expect((await names()).map((item) => item.name).sort()).toEqual(["Zzalso barley", "Zzalso pears"]);
+    const rebuilt = await call("/api/groceries/rebuild", { method: "POST", token, body: { from: "2027-04-01", to: "2027-04-30" } });
+    expect(rebuilt.status).toBe(200);
+    expect((await names()).map((item) => item.name).sort()).toEqual(["Zzalso barley", "Zzalso pears"]);
+    expect((await call(`/api/plan/${planId}/also/${pearId}`, { method: "DELETE", token })).status).toBe(200);
+    const afterDrop = ((await call("/api/plan?from=2027-04-08&to=2027-04-08", { token })).json?.plan ?? []) as Json[];
+    expect(afterDrop).toHaveLength(1);
+    expect(afterDrop[0]?.also).toEqual([]);
+    expect((await names()).map((item) => item.name)).toEqual(["Zzalso barley"]);
+    const again = await call("/api/plan", {
+      method: "POST",
+      token,
+      body: { date: "2027-04-08", meal: "dinner", type: "recipe", recipeId: pearId, keep: true },
+    });
+    expect((again.json?.entry as Json).also).toEqual([pearId]);
+    const replaced = await call("/api/plan", {
+      method: "POST",
+      token,
+      body: { date: "2027-04-08", meal: "dinner", type: "recipe", recipeId: lentilId },
+    });
+    expect(replaced.status).toBe(200);
+    expect((replaced.json?.entry as Json).recipeId).toBe(lentilId);
+    expect((replaced.json?.entry as Json).also).toEqual([]);
+    expect((await names()).map((item) => item.name)).toEqual(["Zzalso lentils"]);
+  });
+
   it("serves the phone page", async () => {
     const response = await exports.default.fetch("https://grocery.test/");
     expect(response.status).toBe(200);
@@ -1716,6 +1778,9 @@ describe("grocery API", () => {
     expect(menu.indexOf(">Remove</button>")).toBeLessThan(menu.indexOf(">Edit recipe</button>"));
     const panel = js.slice(js.indexOf("function monthPanel"), js.indexOf("function monthTitle"));
     expect(panel).not.toContain(">Edit</button>");
+    expect(panel).toContain('class="week-date"');
+    expect(panel).toContain("shortDate(date)");
+    expect(panel).not.toContain("longDate");
     expect(js).toContain("Edit recipe");
     expect(js).toContain("Delete item");
     expect(js).toContain('data-action="delete-item"');
@@ -1773,7 +1838,22 @@ describe("grocery API", () => {
     expect(js).toContain("markImg(88)");
     expect(js).not.toContain('class="splash"');
     expect(js).not.toContain("splashHtml");
-    expect(js).toContain("const SPLASH_MS = 600");
+    expect(js).toContain("const SPLASH_MS = 1500");
+    expect(js).toContain("Add to date");
+    expect(js).toContain('data-action="add-to-date"');
+    expect(js).toContain('kind: "pick-date"');
+    expect(js).toContain('"pick-date-day"');
+    expect(js).toContain("Replace it or add both?");
+    expect(js).toContain(">Replace</button>");
+    expect(js).toContain(">Add both</button>");
+    expect(js).toContain(">Cancel</button>");
+    const css = await (await exports.default.fetch("https://grocery.test/styles.css")).text();
+    expect(css).toContain("opacity 300ms");
+    expect(css).toContain(".month-panel-head.is-today .week-date");
+    const shell = await (await exports.default.fetch("https://grocery.test/sw.js")).text();
+    expect(shell).toContain("grocery-shell-v46");
+    expect(shell).toContain("/styles.css?v=44");
+    expect(shell).toContain("/app.js?v=44");
     expect(js).toContain('getElementById("splash")');
     expect(js).not.toContain("Loading…");
     const html = await (await exports.default.fetch("https://grocery.test/")).text();

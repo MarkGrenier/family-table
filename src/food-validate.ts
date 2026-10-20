@@ -55,6 +55,7 @@ export type PlanInput = {
   recipeId: string | null;
   note: string | null;
   alternates?: string[];
+  keep?: boolean;
 };
 
 export type EventInput = {
@@ -389,6 +390,7 @@ export function parsePlan(body: Record<string, unknown>): PlanInput {
     note: type === "recipe" ? null : note,
   };
   if ("alternates" in body) plan.alternates = cleanAlternateIds(body.alternates);
+  if (body.keep === true) plan.keep = true;
   return plan;
 }
 
