@@ -1401,6 +1401,46 @@ describe("grocery API", () => {
     expect(restored.find((item) => item.id === (manual.json?.item as Json).id)?.quantityNote).toBe("2 cartons");
   });
 
+  it("rebuilds many planned days at once and keeps a repeated ingredient on one line", async () => {
+    const token = env.API_TOKEN;
+    const created = await call("/api/recipes", {
+      method: "POST",
+      token,
+      body: {
+        name: "Cornstarch chicken",
+        ingredients: ["1 tbsp cornstarch", "2 tbsp cornstarch", "1 lb chicken thighs"],
+        steps: ["Toss."],
+      },
+    });
+    const id = (created.json?.recipe as Json).id as string;
+    expect((created.json?.recipe as Json).ingredients).toHaveLength(3);
+    for (let day = 1; day <= 10; day += 1) {
+      const date = `2027-03-${String(day).padStart(2, "0")}`;
+      const planned = await call("/api/plan", {
+        method: "POST",
+        token,
+        body: { date, meal: "dinner", type: "recipe", recipeId: id },
+      });
+      expect(planned.status).toBe(200);
+    }
+    expect((await call("/api/items", { method: "POST", token, body: { name: "Dish soap", store: "local", category: "shelf" } })).status).toBe(201);
+    const rebuilt = await call("/api/groceries/rebuild", { method: "POST", token, body: {} });
+    expect(rebuilt.status).toBe(200);
+    expect(rebuilt.json).toMatchObject({ removed: 2, added: 2, skipped: 0 });
+    const items = ((await call("/api/items", { token })).json?.items ?? []) as Json[];
+    const starch = items.filter((item) => /cornstarch/i.test(String(item.name)));
+    expect(starch).toHaveLength(1);
+    expect(starch[0]?.quantityNote).toBe("for 10 recipes");
+    expect(items.filter((item) => /chicken thigh/i.test(String(item.name)))).toHaveLength(1);
+    expect(items.filter((item) => item.name === "Dish soap")).toHaveLength(1);
+    const plan = ((await call("/api/plan?from=2027-03-01&to=2027-03-01", { token })).json?.plan ?? []) as Json[];
+    expect((await call(`/api/plan/${plan[0]?.id}`, { method: "DELETE", token })).status).toBe(200);
+    const still = await call(`/api/recipes/${id}`, { token });
+    expect(still.status).toBe(200);
+    expect((still.json?.recipe as Json).name).toBe("Cornstarch chicken");
+    expect(((still.json?.recipe as Json).ingredients as unknown[]) ?? []).toHaveLength(3);
+  });
+
   it("keeps the main photo from the recipe, then the page card", async () => {
     const token = env.API_TOKEN;
     const pages: Record<string, string> = {
@@ -1607,7 +1647,13 @@ describe("grocery API", () => {
     const night = js.slice(js.indexOf("function leftoversNight"), js.indexOf("function foodPhoto"));
     expect(night.indexOf('class="lo-pill"')).toBeGreaterThan(-1);
     expect(night.indexOf('class="lo-pill"')).toBeLessThan(night.indexOf("<h1>"));
+    expect(night).toContain('class="night-gap"');
     expect(js).toContain("leftoversNight(dinner, recipe);");
+    expect(js).toContain('data-action="remove-meal"');
+    expect(js).toContain(">Remove</button>");
+    expect(js).toContain('kind: "plan"');
+    expect(js).toContain("scrollToTop");
+    expect(js).toContain("ing-detail");
     expect(js).toContain("mealLabel(entry.meal)");
     expect(js).toContain("Night off. Enjoy the leftovers.");
     expect(js).toContain("fallback-photo");

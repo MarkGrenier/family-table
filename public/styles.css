@@ -294,6 +294,7 @@ h1, .title {
 }
 
 .ing-row span:first-child, .g-name, .link-name { flex: 1; text-align: left; }
+.ing-detail { display: block; margin-top: 0.12rem; color: var(--muted); font-size: 0.82rem; font-weight: 500; }
 .icon-green { color: var(--green); }
 .day-title { font-size: 1.4rem; }
 .day-note { margin-top: 0.8rem; }
@@ -753,8 +754,10 @@ select.box { appearance: none; padding-right: 2.2rem; }
 .leftover-night .meal-kicker { margin: 0 0 0.45rem; }
 .leftover-night .lo-pill { margin: 0 0 0.45rem; font-size: 0.84rem; padding: 0.22rem 0.7rem; }
 .leftover-night h1 { margin-top: 0; }
-.night-line { margin: 0.65rem 0 0; color: #6f6f74; font-size: 1.05rem; }
+.night-line { margin: 0.85rem 0 0; color: #6f6f74; font-size: 1.05rem; }
 .night-remove { margin-top: 0.35rem; }
+.night-gap { flex: 1 1 auto; min-height: 3.5rem; }
+.leftover-night .tomorrow { margin-top: 0; }
 .tomorrow {
   display: flex;
   align-items: center;
@@ -889,6 +892,17 @@ select.box { appearance: none; padding-right: 2.2rem; }
   width: 100%;
   min-height: 60px;
   padding: 0.2rem 0;
+  text-align: left;
+}
+
+.meal-line { gap: 0.15rem; }
+.meal-open {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  flex: 1;
+  min-width: 0;
+  min-height: 60px;
   text-align: left;
 }
 

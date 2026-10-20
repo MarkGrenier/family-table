@@ -69,6 +69,7 @@ let wakeLock = null;
 let undoTimer = null;
 let checkGeneration = 0;
 let swallowClick = false;
+let viewKeySeen = "";
 
 function swallowNextClick() {
   swallowClick = true;
@@ -149,7 +150,37 @@ async function api(path, options = {}) {
   return data;
 }
 
+function viewKey() {
+  if (!state.authed) return "login";
+  if (state.loading) return "loading";
+  const page = state.page;
+  if (!page) {
+    if (state.tab !== "today") return `tab:${state.tab}`;
+    const dinner = mealOn(nyToday(), "dinner");
+    return `tab:today:${dinner?.id || ""}:${dinner?.type || ""}:${dinner?.recipeId || ""}`;
+  }
+  if (page.kind === "cook") return `cook:${page.id}:${page.step || 0}`;
+  if (page.kind === "recipe") return `recipe:${page.id}:${page.planDate || ""}:${page.planMeal || ""}`;
+  if (page.kind === "day") return `day:${page.date}`;
+  if (page.kind === "feedback") return `feedback:${page.id}`;
+  if (page.kind === "item") return `item:${page.id}`;
+  return page.kind;
+}
+
+function scrollToTop() {
+  window.scrollTo(0, 0);
+  document.documentElement.scrollTop = 0;
+  document.body.scrollTop = 0;
+}
+
 function render() {
+  const key = viewKey();
+  const moved = key !== viewKeySeen;
+  if (moved && key.startsWith("tab:today")) state.todayPanel = "ingredients";
+  viewKeySeen = key;
+  const finish = () => {
+    if (moved) scrollToTop();
+  };
   if (!state.authed) {
     const input = document.getElementById("passcode");
     const error = document.getElementById("login-error");
@@ -157,19 +188,23 @@ function render() {
       error.hidden = !state.loginError;
       error.textContent = state.loginError || "";
       if (!input.value && state.passcode) input.value = state.passcode;
+      finish();
       return;
     }
     app.innerHTML = loginHtml();
     const fresh = document.getElementById("passcode");
     if (fresh && state.passcode) fresh.value = state.passcode;
+    finish();
     return;
   }
   if (state.loading) {
     app.innerHTML = `<main class="screen"><p class="muted">Loading…</p></main>`;
+    finish();
     return;
   }
   if (state.page?.kind === "cook") {
     app.innerHTML = cookHtml() + sheetHtml();
+    finish();
     return;
   }
   const bare = ["recipe", "feedback", "item", "add-item"].includes(state.page?.kind);
@@ -181,6 +216,7 @@ function render() {
   app.innerHTML = `<main class="${mainClass}">${bodyHtml()}</main>${bare ? "" : tabsHtml()}${sheetHtml()}${toastHtml()}`;
   const focus = document.getElementById("add-search");
   if (focus && state.page?.kind === "add-item") focus.focus();
+  finish();
 }
 
 function splashHtml() {
@@ -259,6 +295,7 @@ function leftoversNight(entry, recipe, options = {}) {
         <p class="night-line">Night off. Enjoy the leftovers.</p>
         ${remove}
       </div>
+      <div class="night-gap"></div>
       ${tomorrowCard(entry.date)}
     </article>`;
 }
@@ -444,15 +481,19 @@ function weekDay(date) {
     </section>`;
 }
 
+function mealMenu(entry) {
+  return `<button class="icon-btn" type="button" data-action="recipe-menu" data-date="${esc(entry.date)}" data-meal="${esc(entry.meal)}" aria-label="More">${dots()}</button>`;
+}
+
 function mealRow(entry) {
   const recipe = recipeForEntry(entry);
   if (entry.type === "leftovers") return leftoversRow(entry, recipe);
   const title = planTitle(entry);
   const meal = mealLabel(entry.meal);
   if (!recipe) {
-    return `<button class="meal-row" type="button" data-action="open-day" data-date="${esc(entry.date)}"><span class="meal-copy"><strong>${esc(title)}</strong><span>${esc(meal)}</span></span></button>`;
+    return `<div class="meal-row meal-line"><button class="meal-open" type="button" data-action="open-day" data-date="${esc(entry.date)}"><span class="meal-copy"><strong>${esc(title)}</strong><span>${esc(meal)}</span></span></button>${mealMenu(entry)}</div>`;
   }
-  return `<button class="meal-row" type="button" data-action="open-recipe" data-id="${esc(recipe.id)}" data-date="${esc(entry.date)}" data-meal="${esc(entry.meal)}">${recipeThumb(recipe)}<span class="meal-copy"><strong>${esc(title)}</strong><span>${esc(meal)}</span></span></button>`;
+  return `<div class="meal-row meal-line"><button class="meal-open" type="button" data-action="open-recipe" data-id="${esc(recipe.id)}" data-date="${esc(entry.date)}" data-meal="${esc(entry.meal)}">${recipeThumb(recipe)}<span class="meal-copy"><strong>${esc(title)}</strong><span>${esc(meal)}</span></span></button>${mealMenu(entry)}</div>`;
 }
 
 function mealLabel(meal) {
@@ -636,7 +677,29 @@ function cookwareHtml(recipe) {
 function ingredientsHtml(recipe, factor) {
   const items = recipe.ingredients || [];
   if (!items.length) return `<p class="empty">No ingredients yet.</p>`;
-  return items.map((item) => `<div class="ing-row"><span>${esc(item.name)}</span><span class="qty">${esc(amountOf(item, factor))}${item.optional ? " optional" : ""}</span></div>`).join("");
+  const counts = new Map();
+  for (const item of items) {
+    const key = ingredientNameKey(item);
+    counts.set(key, (counts.get(key) || 0) + 1);
+  }
+  return items.map((item) => ingredientRow(item, factor, (counts.get(ingredientNameKey(item)) || 0) > 1)).join("");
+}
+
+function ingredientNameKey(item) {
+  return String(item?.name || item?.text || "").trim().toLowerCase();
+}
+
+function ingredientRow(item, factor, repeated) {
+  const amount = amountOf(item, factor);
+  const name = item.name || item.text || "Ingredient";
+  const text = String(item.text || "").trim();
+  const scaled = scaledLine(item, factor);
+  const sameAsName = text.toLowerCase() === String(name).trim().toLowerCase();
+  const sameAsScaled = text.toLowerCase() === scaled.toLowerCase();
+  const detail = repeated && text && !sameAsName && !sameAsScaled ? unicodeFractions(text) : "";
+  const label = repeated && !amount && text ? unicodeFractions(text) : name;
+  const qty = repeated && !amount && text ? "" : amount;
+  return `<div class="ing-row"><span>${esc(label)}${detail ? `<span class="ing-detail">${esc(detail)}</span>` : ""}</span><span class="qty">${esc(qty)}${item.optional ? " optional" : ""}</span></div>`;
 }
 
 function instructionsHtml(recipe, factor) {
@@ -1088,10 +1151,13 @@ function sheetHtml() {
   }
   if (state.sheet?.kind === "recipe-menu") {
     const context = mealContext();
+    const planned = context ? mealOn(context.date, context.meal) : null;
+    const recipe = activeRecipe();
     return `<div class="sheet"><div class="sheet-card" role="dialog" aria-label="Recipe">
         <div class="sheet-head"><span></span><button type="button" data-action="close-sheet" aria-label="Close">✕</button></div>
-        ${context ? `<button class="menu-row" type="button" data-action="change-meal">Swap meal</button>` : ""}
-        <button class="menu-row" type="button" data-action="edit-recipe">Edit recipe</button>
+        ${planned ? `<button class="menu-row" type="button" data-action="change-meal">Swap meal</button>` : ""}
+        ${planned ? `<button class="menu-row" type="button" data-action="remove-meal" data-id="${esc(planned.id)}">Remove</button>` : ""}
+        ${recipe ? `<button class="menu-row" type="button" data-action="edit-recipe">Edit recipe</button>` : ""}
       </div></div>`;
   }
   if (state.sheet?.kind === "change-meal") return changeMealHtml();
@@ -1233,6 +1299,7 @@ async function onClick(event) {
   }
   if (action === "tab") {
     state.tab = button.dataset.tab;
+    if (state.tab === "today") state.todayPanel = "ingredients";
     state.page = null;
     state.sheet = null;
     state.swipeId = null;
@@ -1301,7 +1368,7 @@ async function onClick(event) {
   if (action === "undo-check") return undoCheck();
   if (action === "pick-recipe") return planRecipe(button.dataset.date, button.dataset.meal, button.dataset.id);
   if (action === "leftovers") return savePlanEntry(leftoversPlan(button.dataset.date, button.dataset.meal));
-  if (action === "clear-meal") return removePlan(button.dataset.id);
+  if (action === "clear-meal" || action === "remove-meal") return removeMeal(button.dataset.id);
   if (action === "open-recipe") {
     const recipe = recipeById(button.dataset.id);
     const fromToday = !state.page && state.tab === "today";
@@ -1585,9 +1652,40 @@ async function planRecipe(date, meal, recipeId) {
   await savePlanEntry({ date, meal, type: "recipe", recipeId });
 }
 
-async function removePlan(id) {
-  await api(`/api/plan/${id}`, { method: "DELETE" });
-  await refresh(true);
+async function removeMeal(id) {
+  const entry = state.plan.find((item) => item.id === id);
+  const snapshot = entry
+    ? {
+        date: entry.date,
+        meal: entry.meal,
+        type: entry.type,
+        recipeId: entry.recipeId || null,
+        note: entry.note || null,
+        alternates: entry.alternates || [],
+      }
+    : null;
+  const name = entry ? planTitle(entry) : "Meal";
+  state.sheet = null;
+  try {
+    await api(`/api/plan/${id}`, { method: "DELETE" });
+    if (snapshot) showUndo({ id, name, kind: "plan", snapshot });
+    await refresh(true);
+  } catch (error) {
+    state.error = error.message;
+    render();
+  }
+}
+
+function planRestoreBody(snapshot) {
+  const body = {
+    date: snapshot.date,
+    meal: snapshot.meal,
+    type: snapshot.type,
+    alternates: snapshot.alternates || [],
+  };
+  if (snapshot.recipeId) body.recipeId = snapshot.recipeId;
+  if (snapshot.note) body.note = snapshot.note;
+  return body;
 }
 
 async function toggleFavorite(id) {
@@ -1710,8 +1808,11 @@ async function undoCheck() {
   clearUndo();
   state.checking = null;
   try {
-    const body = undo.kind === "delete" ? { deleted: false } : { checked: false };
-    await api(`/api/items/${undo.id}`, { method: "PATCH", body });
+    if (undo.kind === "plan") await api("/api/plan", { method: "POST", body: planRestoreBody(undo.snapshot) });
+    else {
+      const body = undo.kind === "delete" ? { deleted: false } : { checked: false };
+      await api(`/api/items/${undo.id}`, { method: "PATCH", body });
+    }
     await refresh(true);
   } catch (error) {
     state.error = error.message;
@@ -1757,7 +1858,7 @@ async function deleteGrocery(id) {
 
 function toastHtml() {
   if (!state.undo) return "";
-  const verb = state.undo.kind === "delete" ? "deleted" : "checked off";
+  const verb = state.undo.kind === "delete" ? "deleted" : state.undo.kind === "plan" ? "removed" : "checked off";
   return `<div class="toast" role="status"><span>${esc(state.undo.name)} ${verb}</span><button type="button" data-action="undo-check">Undo</button></div>`;
 }
 

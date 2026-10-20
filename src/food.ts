@@ -692,54 +692,281 @@ export async function addPlanGroceries(db: D1Database, from: string, to: string,
   return totals;
 }
 
+const REBUILD_BATCH = 400;
+
+type RebuildPlanRow = {
+  id: string;
+  plan_date: string;
+  meal: string;
+  entry_type: string;
+  recipe_id: string | null;
+};
+
+type RebuildItemRow = {
+  id: string;
+  name: string;
+  quantity_note: string | null;
+  section: string | null;
+  checked: number;
+  created_at: string;
+};
+
+type RebuildSourceRow = {
+  item_id: string;
+  source_key: string;
+  quantity: number | null;
+  unit: string | null;
+};
+
+type MemSource = { sourceKey: string; quantity: number | null; unit: string | null };
+
+type MemItem = {
+  id: string;
+  name: string;
+  quantityNote: string | null;
+  section: Ingredient["section"] | null;
+  checked: boolean;
+  createdAt: string;
+  removed: boolean;
+  fresh: boolean;
+  sources: MemSource[];
+};
+
 export async function rebuildPlanGroceries(
   db: D1Database,
   range: { from: string; to: string } | null,
 ): Promise<GroceryChange & { removed: number }> {
-  const planned = range ? await listPlan(db, range.from, range.to) : await listAllPlan(db);
-  const entries = planned.filter((entry) => entry.type === "recipe" && entry.recipeId);
-  const touched = new Set<string>();
-  for (const entry of entries) {
-    const rows = await db
-      .prepare(
-        `SELECT grocery_sources.item_id AS item_id
-         FROM grocery_sources
-         JOIN items ON items.id = grocery_sources.item_id
-         WHERE grocery_sources.source_key GLOB ?
-           AND items.deleted_at IS NULL
-           AND items.checked = 0`,
-      )
-      .bind(`plan:${entry.id}:*`)
-      .all<{ item_id: string }>();
-    const ids = new Set((rows.results ?? []).map((row) => row.item_id));
-    for (const itemId of ids) {
-      await db
-        .prepare(`DELETE FROM grocery_sources WHERE item_id = ? AND source_key GLOB ?`)
-        .bind(itemId, `plan:${entry.id}:*`)
-        .run();
-      touched.add(itemId);
-    }
+  // One read batch, then the whole menu is applied in memory and written in chunks.
+  // A year of meals used to issue a query per ingredient and hit D1's per-request cap.
+  const loaded = await db.batch([
+    db.prepare(
+      `SELECT id, plan_date, meal, entry_type, recipe_id
+       FROM plan_entries
+       ORDER BY plan_date, CASE meal WHEN 'breakfast' THEN 0 WHEN 'lunch' THEN 1 ELSE 2 END`,
+    ),
+    db.prepare(`SELECT id, ingredients_json FROM recipes`),
+    db.prepare(
+      `SELECT id, name, quantity_note, section, checked, created_at
+       FROM items WHERE deleted_at IS NULL ORDER BY created_at ASC`,
+    ),
+    db.prepare(`SELECT item_id, source_key, quantity, unit FROM grocery_sources`),
+    db.prepare(`SELECT name_key FROM on_hand`),
+  ]);
+  const planRows = (loaded[0]?.results ?? []) as RebuildPlanRow[];
+  const recipeRows = (loaded[1]?.results ?? []) as { id: string; ingredients_json: string }[];
+  const itemRows = (loaded[2]?.results ?? []) as RebuildItemRow[];
+  const sourceRows = (loaded[3]?.results ?? []) as RebuildSourceRow[];
+  const handRows = (loaded[4]?.results ?? []) as { name_key: string }[];
+
+  const recipeIngredients = new Map<string, Ingredient[]>();
+  for (const row of recipeRows) {
+    recipeIngredients.set(
+      row.id,
+      parseJson<unknown[]>(row.ingredients_json, [])
+        .map((entry) => normalizeStoredIngredient(entry))
+        .filter((entry): entry is Ingredient => Boolean(entry)),
+    );
   }
+  const planRecipe = new Map<string, string>();
+  for (const row of planRows) {
+    if (row.recipe_id) planRecipe.set(row.id, row.recipe_id);
+  }
+  const entries = planRows.filter((row) => {
+    if (row.entry_type !== "recipe" || !row.recipe_id) return false;
+    if (!range) return true;
+    return row.plan_date >= range.from && row.plan_date <= range.to;
+  });
+  const rebuilding = new Set(entries.map((row) => row.id));
+
+  const items: MemItem[] = itemRows.map((row) => ({
+    id: row.id,
+    name: row.name,
+    quantityNote: row.quantity_note,
+    section: (row.section as Ingredient["section"] | null) ?? null,
+    checked: Number(row.checked) === 1,
+    createdAt: row.created_at,
+    removed: false,
+    fresh: false,
+    sources: [],
+  }));
+  const itemById = new Map(items.map((item) => [item.id, item]));
+  const original = new Map<string, { quantityNote: string | null; section: MemItem["section"]; keys: Set<string> }>();
+  for (const item of items) original.set(item.id, { quantityNote: item.quantityNote, section: item.section, keys: new Set() });
+
+  const liveKeys = new Set<string>();
+  const orphanKeys = new Set<string>();
+  for (const row of sourceRows) {
+    const item = itemById.get(row.item_id);
+    if (!item) {
+      orphanKeys.add(row.source_key);
+      continue;
+    }
+    item.sources.push({ sourceKey: row.source_key, quantity: row.quantity, unit: row.unit });
+    liveKeys.add(row.source_key);
+    original.get(item.id)?.keys.add(row.source_key);
+  }
+  const onHand = new Set(handRows.map((row) => row.name_key));
+
+  function ingredientForKey(sourceKey: string): Ingredient | null {
+    const parts = sourceKey.split(":");
+    const index = Number(parts[2]);
+    if (!Number.isInteger(index) || index < 0) return null;
+    const recipeId = parts[0] === "plan" ? (planRecipe.get(parts[1] ?? "") ?? null) : parts[0] === "recipe" ? (parts[1] ?? null) : null;
+    if (!recipeId) return null;
+    return recipeIngredients.get(recipeId)?.[index] ?? null;
+  }
+
+  function noteFor(item: MemItem): string | null {
+    const parts: ShoppingPart[] = [];
+    const identities = new Set<string>();
+    let hand: { known: boolean; note: string | null } | null = null;
+    for (const row of item.sources) {
+      const manual = readHandSource(row.sourceKey);
+      if (manual) {
+        hand = manual;
+        continue;
+      }
+      const identity = recipeIdentity(row.sourceKey);
+      if (!identity) continue;
+      identities.add(identity);
+      if (row.quantity == null && (row.unit == null || row.unit === "")) {
+        const ingredient = ingredientForKey(row.sourceKey);
+        parts.push({ quantity: ingredient?.quantity ?? null, unit: ingredient?.unit ?? null });
+      } else {
+        parts.push({ quantity: row.quantity, unit: row.unit });
+      }
+    }
+    const shop = shoppingAmount(parts, identities.size);
+    const summed = shop != null && !/^for \d+ recipes$/.test(shop);
+    if (summed) return shop;
+    if (hand?.known && hand.note) return hand.note;
+    if (hand && !hand.known && item.quantityNote && !isDisposableNote(item.quantityNote)) return item.quantityNote;
+    return shop;
+  }
+
+  function keyTaken(sourceKey: string): boolean {
+    return liveKeys.has(sourceKey) || orphanKeys.has(sourceKey);
+  }
+
   let removed = 0;
-  for (const itemId of touched) {
-    const left = await db
-      .prepare(`SELECT COUNT(*) AS n FROM grocery_sources WHERE item_id = ?`)
-      .bind(itemId)
-      .first<{ n: number }>();
-    if (Number(left?.n ?? 0) === 0) {
-      await deleteItem(db, itemId);
+  for (const item of items) {
+    if (item.checked) continue;
+    const kept: MemSource[] = [];
+    let changed = false;
+    for (const source of item.sources) {
+      const planId = source.sourceKey.split(":")[1] ?? "";
+      if (source.sourceKey.startsWith(`plan:${planId}:`) && rebuilding.has(planId)) {
+        liveKeys.delete(source.sourceKey);
+        changed = true;
+        continue;
+      }
+      kept.push(source);
+    }
+    if (!changed) continue;
+    item.sources = kept;
+    if (item.sources.length === 0) {
+      item.removed = true;
       removed += 1;
     } else {
-      await refreshItemQuantity(db, itemId);
+      item.quantityNote = noteFor(item);
     }
   }
+
   const totals = { added: 0, updated: 0, skipped: 0, removed };
-  const onHand = await onHandKeys(db);
+  let clock = Date.now();
+  const stamp = (): string => {
+    clock += 1;
+    return new Date(clock).toISOString();
+  };
+
+  function placeIngredient(ingredient: Ingredient, sourceKey: string): keyof GroceryChange {
+    if (ingredient.buy === false || (ingredient.optional && ingredient.buy !== true)) return "skipped";
+    if (onHand.has(groceryKey(ingredient.name))) return "skipped";
+    if (keyTaken(sourceKey)) return "skipped";
+    const name = groceryName(ingredient.name);
+    const key = groceryKey(name);
+    const existing = items.find(
+      (item) => !item.removed && !item.checked && groceryKey(item.name) === key && sectionsMatch(item.section, ingredient.section),
+    );
+    if (!existing) {
+      const created = stamp();
+      const item: MemItem = {
+        id: crypto.randomUUID(),
+        name,
+        quantityNote: null,
+        section: ingredient.section,
+        checked: false,
+        createdAt: created,
+        removed: false,
+        fresh: true,
+        sources: [{ sourceKey, quantity: ingredient.quantity ?? null, unit: ingredient.unit ?? null }],
+      };
+      item.quantityNote = noteFor(item);
+      liveKeys.add(sourceKey);
+      items.push(item);
+      return "added";
+    }
+    if (existing.sources.length === 0) {
+      const handKey = handSourceKey(existing.id, existing.quantityNote);
+      existing.sources.push({ sourceKey: handKey, quantity: null, unit: null });
+      liveKeys.add(handKey);
+    }
+    if (existing.section == null) existing.section = ingredient.section;
+    existing.sources.push({ sourceKey, quantity: ingredient.quantity ?? null, unit: ingredient.unit ?? null });
+    liveKeys.add(sourceKey);
+    existing.quantityNote = noteFor(existing);
+    return "updated";
+  }
+
   for (const entry of entries) {
-    const change = await addEntryGroceries(db, entry, onHand);
-    totals.added += change.added;
-    totals.updated += change.updated;
-    totals.skipped += change.skipped;
+    const ingredients = recipeIngredients.get(entry.recipe_id ?? "") ?? [];
+    for (let index = 0; index < ingredients.length; index += 1) {
+      totals[placeIngredient(ingredients[index], `plan:${entry.id}:${index}`)] += 1;
+    }
+  }
+
+  const statements: D1PreparedStatement[] = [];
+  const now = stamp();
+  const insertSource = (itemId: string, source: MemSource) =>
+    db
+      .prepare(`INSERT INTO grocery_sources (item_id, source_key, quantity, unit) VALUES (?, ?, ?, ?)`)
+      .bind(itemId, source.sourceKey, source.quantity, source.unit);
+  for (const item of items) {
+    if (item.fresh) {
+      statements.push(
+        db
+          .prepare(
+            `INSERT INTO items (id, name, quantity_note, store, category, checked, brand, asin, barcode, staple, staple_id, section, image_url, substitute, notes, created_at, updated_at)
+             VALUES (?, ?, ?, 'local', ?, 0, NULL, NULL, NULL, 0, NULL, ?, NULL, NULL, NULL, ?, ?)`,
+          )
+          .bind(item.id, item.name, item.quantityNote, categoryForSection(item.section ?? "pantry"), item.section, item.createdAt, item.createdAt),
+      );
+      for (const source of item.sources) statements.push(insertSource(item.id, source));
+      continue;
+    }
+    if (item.removed) {
+      statements.push(db.prepare(`DELETE FROM grocery_sources WHERE item_id = ?`).bind(item.id));
+      statements.push(db.prepare(`DELETE FROM items WHERE id = ?`).bind(item.id));
+      continue;
+    }
+    const snap = original.get(item.id);
+    if (!snap) continue;
+    for (const key of snap.keys) {
+      if (!item.sources.some((source) => source.sourceKey === key)) {
+        statements.push(db.prepare(`DELETE FROM grocery_sources WHERE item_id = ? AND source_key = ?`).bind(item.id, key));
+      }
+    }
+    for (const source of item.sources) {
+      if (!snap.keys.has(source.sourceKey)) statements.push(insertSource(item.id, source));
+    }
+    if (item.quantityNote !== snap.quantityNote || item.section !== snap.section) {
+      statements.push(
+        db.prepare(`UPDATE items SET quantity_note = ?, section = ?, updated_at = ? WHERE id = ?`).bind(item.quantityNote, item.section, now, item.id),
+      );
+    }
+  }
+  for (let index = 0; index < statements.length; index += REBUILD_BATCH) {
+    await db.batch(statements.slice(index, index + REBUILD_BATCH));
   }
   return totals;
 }
