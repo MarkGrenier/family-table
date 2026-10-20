@@ -456,6 +456,12 @@ export async function savePlan(db: D1Database, input: PlanInput): Promise<PlanEn
   const previous = await planOn(db, input.date, input.meal);
   const now = nowIso();
   const id = crypto.randomUUID();
+  let note = input.note;
+  let recipeId = input.recipeId;
+  if (input.type === "leftovers" && previous) {
+    if (!note && previous.note) note = previous.note;
+    if (!recipeId && previous.recipeId) recipeId = previous.recipeId;
+  }
   await db
     .prepare(
       `INSERT INTO plan_entries (id, plan_date, meal, entry_type, recipe_id, note, created_at, updated_at)
@@ -466,7 +472,7 @@ export async function savePlan(db: D1Database, input: PlanInput): Promise<PlanEn
          note = excluded.note,
          updated_at = excluded.updated_at`,
     )
-    .bind(id, input.date, input.meal, input.type, input.recipeId, input.note, now, now)
+    .bind(id, input.date, input.meal, input.type, recipeId, note, now, now)
     .run();
   const saved = await planOn(db, input.date, input.meal);
   if (!saved) throw new HttpError(500, "Something went wrong. Try again.");

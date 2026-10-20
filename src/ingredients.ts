@@ -373,7 +373,8 @@ export function normalizeIngredient(raw: unknown): Ingredient | null {
   const parsed = text ? parseIngredientLine(text) : null;
   const nameSource = typeof body.name === "string" && body.name.trim() ? body.name.trim() : parsed?.name;
   if (!nameSource) return null;
-  const qty = readLooseQty(body.qty ?? body.quantity, parsed?.qty ?? null);
+  const qtyProvided = "qty" in body || "quantity" in body;
+  const qty = qtyProvided ? readLooseQty(body.qty ?? body.quantity, null) : (parsed?.qty ?? null);
   const unit = typeof body.unit === "string" && body.unit.trim() ? normalizeUnit(body.unit) : body.unit === null ? null : parsed?.unit ?? null;
   const section = typeof body.section === "string" && isFoodSection(body.section) ? body.section : parsed?.section ?? sectionForName(nameSource);
   const optional = typeof body.optional === "boolean" ? body.optional : parsed?.optional ?? false;

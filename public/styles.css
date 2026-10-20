@@ -280,7 +280,28 @@ h1, .title {
   width: 100%;
 }
 
-.ing-row span:first-child, .g-name { flex: 1; text-align: left; }
+.ing-row span:first-child, .g-name, .link-name { flex: 1; text-align: left; }
+.icon-green { color: var(--green); }
+.day-title { font-size: 1.4rem; }
+.day-note { margin-top: 0.8rem; }
+.field-left { text-align: left; }
+.photo-frame { width: 100%; border-radius: 16px; max-height: 220px; object-fit: cover; }
+.ing-edit {
+  display: grid;
+  grid-template-columns: 4.2rem 4.5rem minmax(0, 1fr) auto;
+  gap: 0.35rem;
+  align-items: center;
+  margin: 0.35rem 0 0.15rem;
+}
+.ing-edit .ing-note { grid-column: 1 / -1; }
+.ing-edit .field-box { min-height: 42px; }
+.meal-row .thumb, .meal-row .thumb-tile, .meal-row .app-mark {
+  width: 52px;
+  height: 52px;
+  border-radius: 12px;
+  flex: none;
+}
+.meal-row .thumb-tile, .meal-row .app-mark { background: #5dbb24; }
 .qty { color: var(--muted); text-align: right; white-space: nowrap; }
 
 .step-block { padding: 0.9rem 0; border-bottom: 1px solid var(--line); }

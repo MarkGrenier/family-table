@@ -993,6 +993,109 @@ describe("grocery API", () => {
     expect(linked[0]).toMatchObject({ type: "leftovers", recipeId: id, recipeName: "Shrimp tacos" });
   });
 
+  it("keeps structured ingredients and step links when one field changes", async () => {
+    const token = env.API_TOKEN;
+    const beef = {
+      text: "1 lb fresh ground beef 93/7",
+      name: "Ground beef 93/7",
+      quantity: 1,
+      qty: 1,
+      unit: "lb",
+      section: "meat",
+      buy: true,
+      optional: false,
+      note: null,
+    };
+    const onion = {
+      text: "1 onion",
+      name: "onion",
+      quantity: 1,
+      qty: 1,
+      unit: null,
+      section: "produce",
+      buy: true,
+      optional: false,
+      note: null,
+    };
+    const created = await call("/api/recipes", {
+      method: "POST",
+      token,
+      body: {
+        name: "Beef tacos",
+        servings: 4,
+        ingredients: [beef, onion],
+        steps: ["Brown the beef."],
+        prepSteps: ["Thaw the beef."],
+        cookSteps: [{ text: "Brown the beef.", minutes: 8, ingredients: [0] }],
+      },
+    });
+    expect(created.status).toBe(201);
+    const recipe = created.json?.recipe as Json;
+    expect((recipe.ingredients as Json[])[0].name).toBe("Ground beef 93/7");
+    expect(String((recipe.ingredients as Json[])[0].text)).toContain("fresh");
+    const id = recipe.id as string;
+
+    const renamed = await call(`/api/recipes/${id}`, { method: "PATCH", token, body: { name: "Weeknight tacos" } });
+    expect(renamed.status).toBe(200);
+    const kept = renamed.json?.recipe as Json;
+    expect(kept.name).toBe("Weeknight tacos");
+    expect(kept.ingredients).toEqual(recipe.ingredients);
+    expect(kept.cookSteps).toEqual([{ text: "Brown the beef.", minutes: 8, ingredients: [0] }]);
+    expect(kept.prepSteps).toEqual(["Thaw the beef."]);
+
+    const edited = await call(`/api/recipes/${id}`, {
+      method: "PATCH",
+      token,
+      body: {
+        ingredients: [{ ...(recipe.ingredients as Json[])[0], name: "Ground beef 90/10" }, (recipe.ingredients as Json[])[1]],
+      },
+    });
+    const lines = (edited.json?.recipe as Json).ingredients as Json[];
+    expect(lines[0].name).toBe("Ground beef 90/10");
+    expect(lines[0].text).toBe("1 lb fresh ground beef 93/7");
+    expect(lines[0].unit).toBe("lb");
+    expect(lines[1]).toEqual((recipe.ingredients as Json[])[1]);
+    expect((edited.json?.recipe as Json).cookSteps).toEqual(recipe.cookSteps);
+  });
+
+  it("keeps a leftovers note when that meal is saved again", async () => {
+    const token = env.API_TOKEN;
+    const chili = await call("/api/recipes", {
+      method: "POST",
+      token,
+      body: { name: "Chicken chili", ingredients: ["1 onion"], steps: ["Simmer."] },
+    });
+    const pasta = await call("/api/recipes", {
+      method: "POST",
+      token,
+      body: { name: "Lemon pasta", ingredients: ["1 lemon"], steps: ["Boil."] },
+    });
+    const chiliId = (chili.json?.recipe as Json).id;
+    const pastaId = (pasta.json?.recipe as Json).id;
+    await call("/api/plan", { method: "POST", token, body: { date: "2026-12-01", meal: "dinner", type: "recipe", recipeId: chiliId } });
+    await call("/api/plan", { method: "POST", token, body: { date: "2026-12-02", meal: "dinner", type: "recipe", recipeId: pastaId } });
+    const first = await call("/api/plan", {
+      method: "POST",
+      token,
+      body: { date: "2026-12-03", meal: "dinner", type: "leftovers", recipeId: chiliId, note: "Chicken chili" },
+    });
+    expect((first.json?.entry as Json).note).toBe("Chicken chili");
+    const again = await call("/api/plan", {
+      method: "POST",
+      token,
+      body: { date: "2026-12-03", meal: "dinner", type: "leftovers", recipeId: pastaId },
+    });
+    expect(again.status).toBe(200);
+    expect((again.json?.entry as Json).note).toBe("Chicken chili");
+    expect((again.json?.entry as Json).recipeId).toBe(pastaId);
+    const renamed = await call("/api/plan", {
+      method: "POST",
+      token,
+      body: { date: "2026-12-03", meal: "dinner", type: "leftovers", recipeId: chiliId, note: "Spicy chili" },
+    });
+    expect((renamed.json?.entry as Json).note).toBe("Spicy chili");
+  });
+
   it("serves the phone page", async () => {
     const response = await exports.default.fetch("https://grocery.test/");
     expect(response.status).toBe(200);
@@ -1014,6 +1117,11 @@ describe("grocery API", () => {
     expect(js).toContain("Edit recipe");
     expect(js).toContain("Delete item");
     expect(js).toContain('data-action="delete-item"');
+    expect(js).toContain('name="ing-name"');
+    expect(js).toContain("raised && cooked");
+    expect(js).toContain("recipeThumb(recipe)");
+    expect(js).not.toContain("meal-letter");
+    expect(js).not.toContain("style=");
     expect(js).not.toContain("Open source");
     expect(js).not.toContain("Nothing else");
     const icons: Array<[string, number]> = [

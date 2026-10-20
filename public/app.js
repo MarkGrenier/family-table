@@ -364,10 +364,7 @@ function mealRow(entry) {
   if (!recipe) {
     return `<button class="meal-row" type="button" data-action="open-day" data-date="${esc(entry.date)}"><span class="meal-copy"><strong>${esc(title)}</strong><span>${esc(meal)}</span></span></button>`;
   }
-  const thumb = recipe.imageUrl
-    ? `<img src="${esc(safeSrc(recipe.imageUrl))}" alt="">`
-    : markImg(52);
-  return `<button class="meal-row" type="button" data-action="open-recipe" data-id="${esc(recipe.id)}" data-date="${esc(entry.date)}" data-meal="${esc(entry.meal)}">${thumb}<span class="meal-copy"><strong>${esc(title)}</strong><span>${esc(meal)}</span></span></button>`;
+  return `<button class="meal-row" type="button" data-action="open-recipe" data-id="${esc(recipe.id)}" data-date="${esc(entry.date)}" data-meal="${esc(entry.meal)}">${recipeThumb(recipe)}<span class="meal-copy"><strong>${esc(title)}</strong><span>${esc(meal)}</span></span></button>`;
 }
 
 function mealLabel(meal) {
@@ -414,7 +411,7 @@ function dayHtml(date) {
   return `<button class="text-green" type="button" data-action="back">Week</button>
     <h1>${esc(longDate(date))}</h1>
     <section><p class="kicker">Dinner</p>
-      ${dinner ? `<p class="title" style="font-size:1.4rem">${recipe ? `<button type="button" class="text-link" data-action="open-recipe" data-id="${esc(recipe.id)}" data-date="${esc(date)}" data-meal="dinner">${esc(planTitle(dinner))}</button>` : esc(planTitle(dinner))}</p><button class="text-green" type="button" data-action="clear-meal" data-id="${esc(dinner.id)}">Remove</button>` : ""}
+      ${dinner ? `<p class="title day-title">${recipe ? `<button type="button" class="text-link" data-action="open-recipe" data-id="${esc(recipe.id)}" data-date="${esc(date)}" data-meal="dinner">${esc(planTitle(dinner))}</button>` : esc(planTitle(dinner))}</p><button class="text-green" type="button" data-action="clear-meal" data-id="${esc(dinner.id)}">Remove</button>` : ""}
       ${pickerHtml(date, "dinner")}
     </section>`;
 }
@@ -427,7 +424,7 @@ function pickerHtml(date, meal) {
     </label>
     ${recipes.map((recipe) => `<button class="link-row" type="button" data-action="pick-recipe" data-id="${esc(recipe.id)}" data-date="${esc(date)}" data-meal="${meal}">${esc(recipe.name)}</button>`).join("")}
     <button class="gray-btn" type="button" data-action="leftovers" data-date="${esc(date)}" data-meal="${meal}">Leftovers</button>
-    <form data-form="day-note" class="stack" style="margin-top:0.8rem">
+    <form data-form="day-note" class="stack day-note">
       <input class="field-box" name="note" maxlength="140" placeholder="Eating out" aria-label="Short note" data-date="${esc(date)}" data-meal="${meal}">
       <button class="gray-btn" type="submit">Save note</button>
     </form>`;
@@ -509,8 +506,12 @@ function recipeView(recipe, mode) {
 
 function cookDock(recipe, raised) {
   const cooked = Boolean(recipe.cookedToday);
+  const start = `<button class="green-btn" type="button" data-action="cook" data-id="${esc(recipe.id)}">Start cooking</button>`;
+  if (raised && cooked) {
+    return `<div class="dock dock-raised">${start}<div class="cooked-pill">✓ Cooked</div></div>`;
+  }
   return `<div class="dock${raised ? " dock-raised" : ""}">
-      ${cooked ? `<div class="cooked-pill">✓ Cooked</div><button class="gray-btn" type="button" data-action="feedback" data-id="${esc(recipe.id)}">Give Feedback</button>` : `<button class="outline-btn" type="button" data-action="mark-cooked" data-id="${esc(recipe.id)}">${checkOutline()} Mark cooked</button><button class="green-btn" type="button" data-action="cook" data-id="${esc(recipe.id)}">Start cooking</button>`}
+      ${cooked ? `<div class="cooked-pill">✓ Cooked</div><button class="gray-btn" type="button" data-action="feedback" data-id="${esc(recipe.id)}">Give Feedback</button>` : `<button class="outline-btn" type="button" data-action="mark-cooked" data-id="${esc(recipe.id)}">${checkOutline()} Mark cooked</button>${start}`}
     </div>`;
 }
 
@@ -567,7 +568,7 @@ function feedbackHtml(id) {
     <div class="pad feedback">
       <p class="ask">How was this recipe?</p>
       <div class="stars">${[1, 2, 3, 4, 5].map((star) => `<button type="button" data-action="star" data-star="${star}" class="${star <= state.stars ? "is-on" : ""}" aria-label="${star} stars">★</button>`).join("")}</div>
-      <label class="field-label" style="text-align:left">Comments for the chef?
+      <label class="field-label field-left">Comments for the chef?
         <textarea class="box" id="feedback-comment" maxlength="1000">${esc(state.comment)}</textarea>
       </label>
       ${state.error ? `<p class="error">${esc(state.error)}</p>` : ""}
@@ -606,7 +607,7 @@ function groceriesHtml() {
   const loose = open.filter((item) => !SECTIONS.some(([id]) => id === (item.section || "other")));
   if (loose.length) groups.push({ id: "other", label: "Other", items: loose });
   const done = state.items.filter((item) => item.checked && item.id !== state.checking);
-  return `<div class="title-row"><h1>Groceries</h1><button type="button" data-action="grocery-menu" aria-label="List options" style="color:var(--green)">${dots()}</button></div>
+  return `<div class="title-row"><h1>Groceries</h1><button class="icon-green" type="button" data-action="grocery-menu" aria-label="List options">${dots()}</button></div>
     ${groups.map((group) => `<h2 class="section-head">${esc(group.label)}</h2>${group.items.map(groceryRow).join("")}`).join("") || `<p class="empty">The list is clear.</p>`}
     ${state.doneOpen && done.length ? `<h2 class="section-head">Completed</h2>${done.map(groceryRow).join("")}` : ""}
     <button class="fab" type="button" data-action="add-item" aria-label="Add">+</button>`;
@@ -638,7 +639,7 @@ function itemHtml(id) {
     <div class="pad">
       ${item.substitute ? `<h2>Need a substitute?</h2><p>${esc(item.substitute)}</p>` : ""}
       ${item.notes ? `<h2>Notes</h2><p>${esc(item.notes)}</p>` : ""}
-      ${recipes.length ? `<h2>You'll use this in...</h2>${recipes.map((recipe) => `<button class="link-row" type="button" data-action="open-recipe" data-id="${esc(recipe.id)}">${recipe.imageUrl ? `<img class="round-thumb" src="${esc(safeSrc(recipe.imageUrl))}" alt="">` : ""}<span style="flex:1;text-align:left">${esc(recipe.name)}</span><span class="chev">›</span></button>`).join("")}` : ""}
+      ${recipes.length ? `<h2>You'll use this in...</h2>${recipes.map((recipe) => `<button class="link-row" type="button" data-action="open-recipe" data-id="${esc(recipe.id)}">${recipe.imageUrl ? `<img class="round-thumb" src="${esc(safeSrc(recipe.imageUrl))}" alt="">` : ""}<span class="link-name">${esc(recipe.name)}</span><span class="chev">›</span></button>`).join("")}` : ""}
     </div>`;
 }
 
@@ -712,7 +713,7 @@ function editRecipeHtml() {
   const servings = draft ? draft.servings : recipe.servings || 4;
   const totalTime = draft ? draft.totalTime : recipe.totalTime || "";
   const imageUrl = draft ? draft.imageUrl : recipe.imageUrl || "";
-  const ingredients = draft ? draft.ingredients : ingredientLines(recipe);
+  const ingredients = draft?.ingredients || recipe.ingredients || [];
   const steps = draft ? draft.steps : editableSteps(recipe);
   return `<div class="sheet"><form class="sheet-card edit-sheet" data-form="edit-recipe" role="dialog" aria-label="Edit recipe">
       <div class="sheet-head"><button class="text-green" type="button" data-action="close-sheet">Cancel</button><strong>Edit recipe</strong><button class="text-green" type="submit">Save</button></div>
@@ -721,22 +722,24 @@ function editRecipeHtml() {
       <label class="field-label">Servings<input class="field-box" name="servings" type="number" inputmode="numeric" min="1" max="99" required value="${esc(servings)}"></label>
       <label class="field-label">Total time<input class="field-box" name="totalTime" maxlength="40" value="${esc(totalTime)}" placeholder="35 min"></label>
       <label class="field-label">Photo URL<input class="field-box" name="imageUrl" maxlength="500" value="${esc(imageUrl)}" placeholder="https://"></label>
-      <label class="field-label">Ingredients<textarea class="box" name="ingredients">${esc(ingredients)}</textarea></label>
-      <p class="small">One ingredient per line.</p>
+      <p class="field-label">Ingredients</p>
+      ${ingredients.map((item, index) => ingredientEditRow(item, index)).join("")}
+      <button class="text-green" type="button" data-action="add-ingredient">Add ingredient</button>
       <label class="field-label">Steps<textarea class="box" name="steps">${esc(steps)}</textarea></label>
-      <p class="small">One step per line.</p>
+      <p class="small">One step per line. Timers and ingredient links stay with each step.</p>
     </form></div>`;
 }
 
-function ingredientLines(recipe) {
-  return (recipe.ingredients || []).map((item) => {
-    const text = String(item.text || "").trim();
-    if (text) return item.optional && !/optional/i.test(text) ? `${text} (optional)` : text;
-    const amount = amountOf(item, 1);
-    const note = item.note ? ` (${item.note})` : "";
-    const optional = item.optional ? " (optional)" : "";
-    return `${amount ? `${amount} ` : ""}${item.name || ""}${note}${optional}`.trim();
-  }).filter(Boolean).join("\n");
+function ingredientEditRow(item, index) {
+  const qty = item.qty ?? item.quantity;
+  const qtyText = qty == null ? "" : formatQty(qty) || String(qty);
+  return `<div class="ing-edit" data-index="${index}">
+      <input class="field-box" name="ing-qty" value="${esc(qtyText)}" aria-label="Quantity" inputmode="decimal" maxlength="12">
+      <input class="field-box" name="ing-unit" value="${esc(item.unit || "")}" aria-label="Unit" maxlength="20">
+      <input class="field-box" name="ing-name" value="${esc(item.name || "")}" aria-label="Ingredient" maxlength="80">
+      <button class="text-btn" type="button" data-action="remove-ingredient" aria-label="Remove ${esc(item.name || "ingredient")}">✕</button>
+      <input class="field-box ing-note" name="ing-note" value="${esc(item.note || "")}" aria-label="Note" maxlength="140" placeholder="Note">
+    </div>`;
 }
 
 function editableSteps(recipe) {
@@ -772,42 +775,174 @@ async function changeMeal(extra) {
   }
 }
 
+function ingredientBase() {
+  const recipe = recipeById(state.sheet?.id);
+  return state.sheet?.draft?.ingredients || recipe?.ingredients || [];
+}
+
+function parseEditQty(raw) {
+  const text = String(raw || "").trim();
+  if (!text) return null;
+  const glyphs = { "½": 1 / 2, "¼": 1 / 4, "¾": 3 / 4, "⅓": 1 / 3, "⅔": 2 / 3, "⅛": 1 / 8, "⅜": 3 / 8 };
+  const mixedGlyph = /^(\d+)\s*([½¼¾⅓⅔⅛⅜])$/.exec(text);
+  if (mixedGlyph) return Number(mixedGlyph[1]) + glyphs[mixedGlyph[2]];
+  if (glyphs[text] != null) return glyphs[text];
+  const mixed = /^(\d+)\s+(\d+)\/(\d+)$/.exec(text);
+  if (mixed && Number(mixed[3])) return Number(mixed[1]) + Number(mixed[2]) / Number(mixed[3]);
+  const fraction = /^(\d+)\/(\d+)$/.exec(text);
+  if (fraction && Number(fraction[2])) return Number(fraction[1]) / Number(fraction[2]);
+  const number = Number(text);
+  return Number.isFinite(number) && number > 0 ? number : null;
+}
+
+function qtySame(left, right) {
+  if (left == null && right == null) return true;
+  if (left == null || right == null) return false;
+  return Math.abs(Number(left) - Number(right)) < 0.001;
+}
+
+function buildIngredient(row) {
+  const index = row.dataset.index;
+  const original = index === "new" ? null : ingredientBase()[Number(index)];
+  const name = row.querySelector("[name=ing-name]").value.trim().replace(/\s+/g, " ");
+  const unit = row.querySelector("[name=ing-unit]").value.trim() || null;
+  const note = row.querySelector("[name=ing-note]").value.trim() || null;
+  const qty = parseEditQty(row.querySelector("[name=ing-qty]").value);
+  if (!name) return null;
+  if (
+    original &&
+    original.name === name &&
+    qtySame(original.qty ?? original.quantity, qty) &&
+    (original.unit || null) === unit &&
+    (original.note || null) === note
+  ) {
+    return original;
+  }
+  const next = { ...(original || { buy: true, optional: false }), name, qty, quantity: qty, unit, note };
+  if (!original) {
+    const amount = qty == null ? "" : `${formatQty(qty) || qty}${unit ? ` ${unit}` : ""}`;
+    next.text = `${amount ? `${amount} ` : ""}${name}${note ? ` (${note})` : ""}`.trim();
+  }
+  return next;
+}
+
+function blankIngredient(sourceIndex = null) {
+  return { name: "", qty: null, quantity: null, unit: null, note: null, text: "", buy: true, optional: false, section: "other", sourceIndex };
+}
+
+function readIngredientDraft(form) {
+  return [...form.querySelectorAll(".ing-edit")].map((row) => {
+    const position = row.dataset.index === "new" ? null : Number(row.dataset.index);
+    const baseItem = position == null ? null : ingredientBase()[position];
+    const sourceIndex = baseItem && Number.isInteger(baseItem.sourceIndex) ? baseItem.sourceIndex : position;
+    return { ...(buildIngredient(row) || blankIngredient(sourceIndex)), sourceIndex };
+  });
+}
+
+function publishIngredient(item) {
+  const { sourceIndex, ...rest } = item;
+  return rest;
+}
+
+function recipeHeader(form) {
+  return {
+    name: String(form.name?.value || ""),
+    servings: String(form.servings?.value || ""),
+    totalTime: String(form.totalTime?.value || ""),
+    imageUrl: String(form.imageUrl?.value || ""),
+  };
+}
+
+function rememberRecipeDraft(form, ingredients) {
+  state.sheet.draft = { ...recipeHeader(form), ingredients, steps: String(form.steps?.value || "") };
+}
+
+function stepLines(text) {
+  return String(text || "").split(/\n/).map((line) => line.trim()).filter(Boolean);
+}
+
+function cookStepText(step) {
+  return typeof step === "string" ? step : step?.text || "";
+}
+
 async function saveRecipeEdit(form) {
   const id = state.sheet?.id;
-  if (!id) return;
-  const name = String(form.get("name") || "");
-  const servingsRaw = String(form.get("servings") || "");
-  const totalTime = String(form.get("totalTime") || "");
-  const imageUrl = String(form.get("imageUrl") || "");
-  const ingredientText = String(form.get("ingredients") || "");
-  const stepText = String(form.get("steps") || "");
-  const ingredients = ingredientText.split(/\n/).map((line) => line.trim()).filter(Boolean);
-  const steps = stepText.split(/\n/).map((line) => line.trim()).filter(Boolean);
+  const recipe = recipeById(id);
+  if (!id || !recipe) return;
+  const header = recipeHeader(form);
+  const name = header.name;
+  const servingsRaw = header.servings;
+  const totalTime = header.totalTime;
+  const imageUrl = header.imageUrl;
+  const stepText = String(form.steps?.value || "");
+  const base = ingredientBase();
+  const rows = [...form.querySelectorAll(".ing-edit")];
+  const ingredients = [];
+  const indexMap = new Map();
+  let ingredientsChanged = rows.length !== (recipe.ingredients || []).length;
+  rows.forEach((row) => {
+    const position = row.dataset.index === "new" ? null : Number(row.dataset.index);
+    const baseItem = position == null ? null : base[position];
+    const originalIndex = baseItem && Number.isInteger(baseItem.sourceIndex) ? baseItem.sourceIndex : position;
+    const built = buildIngredient(row);
+    if (!built) {
+      ingredientsChanged = true;
+      return;
+    }
+    if (originalIndex == null || built !== baseItem) ingredientsChanged = true;
+    if (originalIndex != null) indexMap.set(originalIndex, ingredients.length);
+    ingredients.push(publishIngredient(built));
+  });
+  if ((recipe.ingredients || []).some((_, index) => !indexMap.has(index))) ingredientsChanged = true;
+  const droppedIngredient = (recipe.ingredients || []).some((_, index) => !indexMap.has(index));
+  const lines = stepLines(stepText);
+  const existingCook = recipe.cookSteps || [];
+  const previousLines = existingCook.length ? existingCook.map(cookStepText) : (recipe.steps || []).filter(Boolean);
+  const stepsChanged = lines.length !== previousLines.length || lines.some((line, index) => line !== previousLines[index]);
+  const body = {};
+  if (name !== (recipe.name || "")) body.name = name;
+  const servings = Number(servingsRaw);
+  if (servings !== recipe.servings) body.servings = servings;
+  const nextTime = totalTime.trim() ? totalTime : null;
+  if (nextTime !== (recipe.totalTime || null)) body.totalTime = nextTime;
+  const nextImage = imageUrl.trim() ? imageUrl.trim() : null;
+  if (nextImage !== (recipe.imageUrl || null)) body.imageUrl = nextImage;
+  if (ingredientsChanged) body.ingredients = ingredients;
+  if (stepsChanged || droppedIngredient) {
+    if (existingCook.length) {
+      const remapped = existingCook.map((step, index) => {
+        const source = step && typeof step === "object" ? { ...step } : { text: cookStepText(step), minutes: null, ingredients: [] };
+        if (droppedIngredient) {
+          source.ingredients = (source.ingredients || []).flatMap((ref) => {
+            if (typeof ref !== "number") return [ref];
+            return indexMap.has(ref) ? [indexMap.get(ref)] : [];
+          });
+        }
+        if (stepsChanged) source.text = lines[index] || "";
+        return source;
+      }).filter((step) => step.text);
+      lines.slice(existingCook.length).forEach((text) => remapped.push({ text, minutes: null, ingredients: [] }));
+      body.cookSteps = remapped;
+    } else if (stepsChanged) {
+      body.steps = lines;
+      body.cookSteps = lines.map((text) => ({ text, minutes: null, ingredients: [] }));
+    }
+  }
+  const draft = { ...header, ingredients: readIngredientDraft(form), steps: stepText };
+  if (!Object.keys(body).length) {
+    state.sheet = null;
+    render();
+    return;
+  }
   try {
-    const data = await api(`/api/recipes/${id}`, {
-      method: "PATCH",
-      body: {
-        name,
-        servings: Number(servingsRaw),
-        totalTime: totalTime.trim() ? totalTime : null,
-        imageUrl: imageUrl.trim() ? imageUrl.trim() : null,
-        ingredients,
-        steps,
-        cookSteps: steps,
-      },
-    });
+    const data = await api(`/api/recipes/${id}`, { method: "PATCH", body });
     replaceRecipe(data.recipe);
     if (state.page?.kind === "recipe" && state.page.id === id) state.page.servings = data.recipe.servings;
     if (state.todayId === id) state.todayServings = data.recipe.servings;
     state.sheet = null;
     render();
   } catch (error) {
-    state.sheet = {
-      kind: "edit-recipe",
-      id,
-      error: error.message,
-      draft: { name, servings: servingsRaw, totalTime, imageUrl, ingredients: ingredientText, steps: stepText },
-    };
+    state.sheet = { kind: "edit-recipe", id, error: error.message, draft };
     render();
   }
 }
@@ -1047,16 +1182,7 @@ async function onClick(event) {
   }
   if (action === "undo-check") return undoCheck();
   if (action === "pick-recipe") return planRecipe(button.dataset.date, button.dataset.meal, button.dataset.id);
-  if (action === "leftovers") {
-    const source = leftoverSource(button.dataset.date, button.dataset.meal);
-    return savePlanEntry({
-      date: button.dataset.date,
-      meal: button.dataset.meal,
-      type: "leftovers",
-      recipeId: source?.id,
-      note: source?.name,
-    });
-  }
+  if (action === "leftovers") return savePlanEntry(leftoversPlan(button.dataset.date, button.dataset.meal));
   if (action === "clear-meal") return removePlan(button.dataset.id);
   if (action === "open-recipe") {
     const recipe = recipeById(button.dataset.id);
@@ -1128,12 +1254,27 @@ async function onClick(event) {
     render();
     return;
   }
+  if (action === "add-ingredient" || action === "remove-ingredient") {
+    const form = button.closest("form");
+    if (!form || state.sheet?.kind !== "edit-recipe") return;
+    const ingredients = readIngredientDraft(form);
+    if (action === "remove-ingredient") {
+      const index = Number(button.closest(".ing-edit")?.dataset.index);
+      ingredients.splice(index, 1);
+    } else {
+      ingredients.push(blankIngredient(null));
+    }
+    rememberRecipeDraft(form, ingredients);
+    render();
+    if (action === "add-ingredient") document.querySelector(".ing-edit:last-of-type [name=ing-name]")?.focus();
+    return;
+  }
   if (action === "pick-change") return changeMeal({ type: "recipe", recipeId: button.dataset.id });
   if (action === "pick-leftovers") {
     const context = mealContext();
     if (!context) return;
-    const source = leftoverSource(context.date, context.meal);
-    return changeMeal({ type: "leftovers", recipeId: source?.id, note: source?.name });
+    const plan = leftoversPlan(context.date, context.meal);
+    return changeMeal({ type: "leftovers", recipeId: plan.recipeId, note: plan.note });
   }
   if (action === "cook") return openCook(button.dataset.id);
   if (action === "cook-step") return moveCook(Number(button.dataset.delta));
@@ -1238,7 +1379,7 @@ async function onSubmit(event) {
     return savePlanEntry({ date: input.dataset.date, meal: input.dataset.meal, type: "note", note: new FormData(form).get("note") });
   }
   if (form.dataset.form === "fetch-recipe") return fetchRecipe(new FormData(form).get("url"));
-  if (form.dataset.form === "edit-recipe") return saveRecipeEdit(new FormData(form));
+  if (form.dataset.form === "edit-recipe") return saveRecipeEdit(form);
 }
 
 function onInput(event) {
@@ -1733,6 +1874,17 @@ function tonightRecipe() {
   return recipeForEntry(mealOn(nyToday(), "dinner"));
 }
 
+function leftoversPlan(date, meal) {
+  const current = mealOn(date, meal);
+  const source = leftoverSource(date, meal);
+  const note = current?.note || source?.name || null;
+  const recipeId = current?.note ? current.recipeId || source?.id || null : source?.id || current?.recipeId || null;
+  const body = { date, meal, type: "leftovers" };
+  if (recipeId) body.recipeId = recipeId;
+  if (note) body.note = note;
+  return body;
+}
+
 function leftoverSource(date, meal) {
   const earlier = state.plan
     .filter((entry) => entry.type === "recipe" && entry.recipeId && entry.meal === meal && entry.date < date)
@@ -1800,7 +1952,7 @@ function shortDate(iso) {
   return `${formatUtc(iso, { weekday: "short" })} ${Number(iso.slice(8))}`;
 }
 function photo(url) {
-  return url ? `<img src="${esc(safeSrc(url))}" alt="" style="width:100%;border-radius:16px;max-height:220px;object-fit:cover">` : "";
+  return url ? `<img class="photo-frame" src="${esc(safeSrc(url))}" alt="">` : "";
 }
 function timerSpec(step) {
   if (step.seconds) return { seconds: Number(step.seconds), label: `${step.seconds} sec` };
