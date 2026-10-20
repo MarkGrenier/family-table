@@ -1224,7 +1224,13 @@ describe("grocery API", () => {
     expect(js).toContain("raised && cooked");
     expect(js).toContain("recipeThumb(recipe)");
     expect(js).toContain("Chef's picks");
-    expect(js).toContain("leftover-card");
+    expect(js).toContain("Leftovers night");
+    expect(js).toContain("Night off. Enjoy the leftovers.");
+    expect(js).toContain("/photos/leftovers-hero.jpg");
+    expect(js).toContain("Tomorrow: leftovers");
+    const hero = await exports.default.fetch("https://grocery.test/photos/leftovers-hero.jpg");
+    expect(hero.status).toBe(200);
+    expect(hero.headers.get("Content-Type") ?? "").toContain("image/");
     expect(js).not.toContain("Reheating");
     expect(js).toContain("showRecipes");
     expect(js).toContain("dataset.session");

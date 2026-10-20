@@ -733,12 +733,57 @@ select.box { appearance: none; padding-right: 2.2rem; }
   font-size: 0.78rem;
 }
 
-.screen .leftover-card .hero { border-radius: 16px; overflow: hidden; }
-.today-screen .leftover-card .hero { border-radius: 0; }
-.leftover-card .pad { padding-top: 1.05rem; }
-.screen .leftover-card .pad { padding-left: 0; padding-right: 0; }
-.today-screen .leftover-card .pad { padding-left: 1.15rem; padding-right: 1.15rem; }
-.leftover-card h1 { margin-top: 0.15rem; }
+.night-screen { display: flex; flex-direction: column; }
+.leftover-night { display: flex; flex-direction: column; flex: 1; }
+.night-hero { height: 448px; background: #f6e8cd; }
+.night-hero img { width: 100%; height: 100%; object-fit: cover; object-position: center 46%; }
+.night-label {
+  margin: 0;
+  color: var(--green-dark);
+  font-size: 1.02rem;
+  font-weight: 750;
+}
+.leftover-night h1 { margin-top: 0.2rem; }
+.night-line { margin: 0.65rem 0 0; color: #6f6f74; font-size: 1.05rem; }
+.night-remove { margin-top: 0.35rem; }
+.tomorrow {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  width: calc(100% - 2.3rem);
+  margin: auto 1.15rem 0.35rem;
+  padding: 0.65rem 0.7rem 0.65rem 0.65rem;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: #fff;
+  text-align: left;
+  box-shadow: 0 8px 22px rgba(40, 36, 20, 0.06);
+}
+.tomorrow .thumb, .tomorrow .thumb-tile { width: 64px; height: 64px; flex: none; }
+.tomorrow .thumb-tile .app-mark { width: 64px; height: 64px; border-radius: 12px; }
+.tomorrow-copy { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.tomorrow .kicker { margin: 0; font-size: 0.68rem; }
+.tomorrow strong {
+  display: block;
+  margin-top: 0.05rem;
+  color: var(--ink);
+  font-size: 1.05rem;
+  font-weight: 750;
+  letter-spacing: -0.02em;
+}
+.tomorrow-dish { margin-top: 0.12rem; color: var(--muted); font-size: 0.92rem; }
+.prep-mini {
+  display: inline-flex;
+  align-self: flex-start;
+  margin-top: 0.28rem;
+  padding: 0.12rem 0.5rem;
+  border-radius: 999px;
+  background: var(--green-soft);
+  color: #24520f;
+  font-size: 0.72rem;
+  font-weight: 750;
+}
+.tomorrow .chev { color: #c4c4c8; font-size: 1.4rem; line-height: 1; }
 
 .leftover-row {
   display: flex;

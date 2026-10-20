@@ -173,9 +173,10 @@ function render() {
   }
   const bare = ["recipe", "feedback", "item", "add-item"].includes(state.page?.kind);
   const dinnerTonight = state.tab === "today" && !state.page ? mealOn(nyToday(), "dinner") : null;
+  const dayDinner = state.page?.kind === "day" ? mealOn(state.page.date, "dinner") : null;
   const todayCook = dinnerTonight?.type === "recipe" && Boolean(recipeForEntry(dinnerTonight));
-  const todayLeft = dinnerTonight?.type === "leftovers";
-  const mainClass = bare ? "bare" : todayCook ? "screen today-screen" : todayLeft ? "screen today-screen no-dock" : "screen";
+  const leftoversNightOn = dinnerTonight?.type === "leftovers" || dayDinner?.type === "leftovers";
+  const mainClass = bare ? "bare" : todayCook ? "screen today-screen" : leftoversNightOn ? "screen today-screen no-dock night-screen" : "screen";
   app.innerHTML = `<main class="${mainClass}">${bodyHtml()}</main>${bare ? "" : tabsHtml()}${sheetHtml()}${toastHtml()}`;
   const focus = document.getElementById("add-search");
   if (focus && state.page?.kind === "add-item") focus.focus();
@@ -226,7 +227,7 @@ function todayHtml() {
   const dinner = mealOn(today, "dinner");
   const recipe = recipeForEntry(dinner);
   const events = eventsOn(today);
-  if (dinner?.type === "leftovers") return `${leftoversCard(dinner, recipe)}${eventsHtml(events)}`;
+  if (dinner?.type === "leftovers") return leftoversNight(dinner, recipe);
   if (recipe && dinner) {
     if (state.todayId !== recipe.id) {
       state.todayId = recipe.id;
@@ -240,20 +241,58 @@ function todayHtml() {
     ${recipe ? cookDock(recipe, true) : ""}`;
 }
 
-function leftoversCard(entry, recipe) {
-  const image = recipe?.imageUrl || entry?.imageUrl || "";
-  const visual = image
-    ? `<img src="${esc(safeSrc(image))}" alt="">`
-    : `<span class="hero-mark" aria-hidden="true">${plateIcon()}</span>`;
-  return `<article class="leftover-card">
-      <div class="hero${image ? "" : " hero-empty"}">${visual}
+function leftoversNight(entry, recipe, options = {}) {
+  const photo = foodPhoto(recipe, entry);
+  const back = options.back ? `<button class="float left" type="button" data-action="back" aria-label="Back">${chevLeft()}</button>` : "";
+  const remove = options.remove ? `<button class="text-green night-remove" type="button" data-action="clear-meal" data-id="${esc(entry.id)}">Remove</button>` : "";
+  return `<article class="leftover-night">
+      <div class="hero night-hero">
+        <img src="${esc(photo || "/photos/leftovers-hero.jpg")}" alt="">
+        ${back}
         <button class="float right" type="button" data-action="recipe-menu" data-date="${esc(entry.date)}" data-meal="${esc(entry.meal)}" aria-label="More">${dots()}</button>
       </div>
       <div class="pad">
-        <p class="kicker">Leftovers</p>
+        <p class="night-label">Leftovers night</p>
         <h1>${esc(dishName(entry, recipe))}</h1>
+        <p class="night-line">Night off. Enjoy the leftovers.</p>
+        ${remove}
       </div>
+      ${tomorrowCard(entry.date)}
     </article>`;
+}
+
+function foodPhoto(recipe, entry) {
+  const image = String(recipe?.imageUrl || entry?.imageUrl || "");
+  if (!image || image === "/plate.svg" || image === "/mark.svg" || image.endsWith("/plate.svg")) return "";
+  return safeSrc(image);
+}
+
+function tomorrowCard(date) {
+  const entry = mealOn(addDays(date, 1), "dinner");
+  if (!entry) return "";
+  const recipe = recipeForEntry(entry);
+  if (entry.type === "leftovers") {
+    const name = recipe?.name || entry.recipeName || entry.note || "";
+    return `<button class="tomorrow" type="button" data-action="open-day" data-date="${esc(entry.date)}">
+        ${recipe ? recipeThumb(recipe) : `<span class="thumb-tile" aria-hidden="true">${plateIcon()}</span>`}
+        <span class="tomorrow-copy"><strong>Tomorrow: leftovers</strong>${name ? `<span class="tomorrow-dish">${esc(name)}</span>` : ""}</span>
+        <span class="chev" aria-hidden="true">›</span>
+      </button>`;
+  }
+  if (entry.type === "note") {
+    return `<button class="tomorrow" type="button" data-action="open-day" data-date="${esc(entry.date)}">
+        <span class="tomorrow-copy"><span class="kicker">Tomorrow</span><strong>${esc(entry.note || "A note")}</strong></span>
+        <span class="chev" aria-hidden="true">›</span>
+      </button>`;
+  }
+  if (!recipe) return "";
+  const steps = (recipe.nightBefore || []).filter(Boolean);
+  const prep = steps.length ? `<span class="prep-mini">Prep for tomorrow · ${steps.length} ${steps.length === 1 ? "step" : "steps"}</span>` : "";
+  return `<button class="tomorrow" type="button" data-action="open-recipe" data-id="${esc(recipe.id)}" data-date="${esc(entry.date)}" data-meal="${esc(entry.meal)}">
+      ${recipeThumb(recipe)}
+      <span class="tomorrow-copy"><span class="kicker">Tomorrow</span><strong>${esc(dishName(entry, recipe))}</strong>${prep}</span>
+      <span class="chev" aria-hidden="true">›</span>
+    </button>`;
 }
 
 function leftoversRow(entry, recipe) {
@@ -455,11 +494,10 @@ function mealsOn(date) {
 function dayHtml(date) {
   const dinner = mealOn(date, "dinner");
   const recipe = recipeForEntry(dinner);
+  if (dinner?.type === "leftovers") return leftoversNight(dinner, recipe, { back: true, remove: true });
   const planned = !dinner
     ? ""
-    : dinner.type === "leftovers"
-      ? `${leftoversCard(dinner, recipe)}<button class="text-green" type="button" data-action="clear-meal" data-id="${esc(dinner.id)}">Remove</button>`
-      : `<p class="title day-title">${recipe ? `<button type="button" class="text-link" data-action="open-recipe" data-id="${esc(recipe.id)}" data-date="${esc(date)}" data-meal="dinner">${esc(planTitle(dinner))}</button>` : esc(planTitle(dinner))}</p><button class="text-green" type="button" data-action="clear-meal" data-id="${esc(dinner.id)}">Remove</button>`;
+    : `<p class="title day-title">${recipe ? `<button type="button" class="text-link" data-action="open-recipe" data-id="${esc(recipe.id)}" data-date="${esc(date)}" data-meal="dinner">${esc(planTitle(dinner))}</button>` : esc(planTitle(dinner))}</p><button class="text-green" type="button" data-action="clear-meal" data-id="${esc(dinner.id)}">Remove</button>`;
   return `<button class="text-green" type="button" data-action="back">Week</button>
     <h1>${esc(longDate(date))}</h1>
     <section><p class="kicker">Dinner</p>
@@ -530,7 +568,7 @@ function recipeHtml(id) {
   const recipe = recipeById(id);
   if (!recipe) return `<div class="pad"><button class="text-green" type="button" data-action="back">Recipes</button><p>That recipe isn't here anymore.</p></div>`;
   const entry = state.page?.planDate ? mealOn(state.page.planDate, state.page.planMeal) : null;
-  if (entry?.type === "leftovers") return leftoversCard(entry, recipeForEntry(entry) || recipe);
+  if (entry?.type === "leftovers") return leftoversNight(entry, recipeForEntry(entry) || recipe, { back: true });
   return `${recipeView(recipe, "page")}${cookDock(recipe, false)}`;
 }
 
@@ -1264,12 +1302,15 @@ async function onClick(event) {
   if (action === "clear-meal") return removePlan(button.dataset.id);
   if (action === "open-recipe") {
     const recipe = recipeById(button.dataset.id);
+    const fromToday = !state.page && state.tab === "today";
     state.recipeBack = state.page?.kind === "item"
       ? { tab: "groceries", page: state.page }
       : state.tab === "calendar"
         ? { tab: "calendar", page: state.page?.kind === "day" ? state.page : null }
-        : { tab: "recipes", page: null };
-    state.tab = state.recipeBack.tab === "groceries" ? "groceries" : "recipes";
+        : fromToday
+          ? { tab: "today", page: null }
+          : { tab: "recipes", page: null };
+    state.tab = state.recipeBack.tab === "groceries" ? "groceries" : state.recipeBack.tab === "today" ? "today" : "recipes";
     state.page = {
       kind: "recipe",
       id: button.dataset.id,
@@ -2031,7 +2072,7 @@ function visibleRange() {
     return { from, to: gridEnd };
   }
   const end = state.page?.kind === "day" && state.page.date > addDays(today, 6) ? state.page.date : addDays(today, 6);
-  return { from: today, to: end };
+  return { from: today, to: addDays(end, 1) };
 }
 function formatUtc(iso, options) {
   const [year, month, day] = iso.split("-").map(Number);
