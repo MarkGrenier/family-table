@@ -1,7 +1,7 @@
 import { deriveShareKey, sha256Hex } from "./auth";
 import { createRecipe } from "./food";
 import { HttpError } from "./http";
-import { assertPublicHttpsUrl, fetchPublicPage, pageTitle, recipeFromDocument } from "./import-recipe";
+import { assertPublicHttpsUrl, fetchPublicPage, pagePhoto, pageTitle, recipeFromDocument } from "./import-recipe";
 
 export const SHARE_PEOPLE = ["Mark", "Emma"] as const;
 
@@ -56,12 +56,12 @@ export async function importSharedRecipe(db: D1Database, rawUrl: string): Promis
     if (error instanceof HttpError && error.status === 400) throw error;
     finalUrl = assertPublicHttpsUrl(rawUrl).href;
   }
-  const parsed = html ? recipeFromDocument(html) : null;
+  const parsed = html ? recipeFromDocument(html, finalUrl) : null;
   const complete = Boolean(parsed && parsed.ingredients.length > 0 && parsed.steps.length > 0);
   const name = oneLine(parsed?.name || (html ? pageTitle(html) : "") || "Recipe") || "Recipe";
   const recipe = await createRecipe(db, {
     name,
-    imageUrl: parsed?.imageUrl ?? null,
+    imageUrl: parsed?.imageUrl || (html ? pagePhoto(html, finalUrl) : null),
     servings: parsed?.servings ?? 4,
     ingredients: parsed?.ingredients ?? [],
     steps: parsed?.steps ?? [],

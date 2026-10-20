@@ -1400,6 +1400,70 @@ describe("grocery API", () => {
     expect(restored.find((item) => item.id === (manual.json?.item as Json).id)?.quantityNote).toBe("2 cartons");
   });
 
+  it("keeps the main photo from the recipe, then the page card", async () => {
+    const token = env.API_TOKEN;
+    const pages: Record<string, string> = {
+      "https://recipes.example/layered": `<!doctype html>
+        <meta property="og:image" content="https://images.example/og.jpg">
+        <meta name="twitter:image" content="https://images.example/tw.jpg">
+        <script type="application/ld+json">${JSON.stringify({
+          "@graph": [
+            { "@type": "Recipe", name: "First cake", recipeIngredient: ["1 egg"], recipeInstructions: ["Bake."], image: "http://images.example/skip.jpg" },
+            { "@type": "Recipe", name: "Second cake", image: { "@type": "ImageObject", contentUrl: "https://images.example/from-recipe.jpg" } },
+          ],
+        })}</script>`,
+      "https://recipes.example/relative": `<!doctype html><script type="application/ld+json">${JSON.stringify({
+        "@type": "Recipe",
+        name: "Relative cake",
+        image: "images/cake.jpg",
+        recipeIngredient: ["1 egg"],
+        recipeInstructions: ["Bake."],
+      })}</script>`,
+      "https://recipes.example/card": `<!doctype html>
+        <meta property="og:image" content="http://images.example/og-http.jpg">
+        <meta property="og:image" content="https://images.example/og-https.jpg">
+        <meta name="twitter:image" content="https://images.example/tw-only.jpg">
+        <script type="application/ld+json">${JSON.stringify({
+          "@type": "Recipe",
+          name: "Card cake",
+          recipeIngredient: ["1 egg"],
+          recipeInstructions: ["Bake."],
+        })}</script>`,
+      "https://recipes.example/bird": `<!doctype html>
+        <meta name="twitter:image:src" content="https://images.example/bird.jpg?w=1&amp;h=2">
+        <script type="application/ld+json">${JSON.stringify({
+          "@type": "Recipe",
+          name: "Bird cake",
+          recipeIngredient: ["1 egg"],
+          recipeInstructions: ["Bake."],
+        })}</script>`,
+    };
+    const original = globalThis.fetch;
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const href = String(input);
+      const body = pages[href];
+      if (body) return new Response(body, { status: 200, headers: { "Content-Type": "text/html" } });
+      return original(input, init);
+    }) as typeof fetch;
+    try {
+      const layered = await call("/api/recipes/import", { method: "POST", token, body: { url: "https://recipes.example/layered" } });
+      expect(layered.status).toBe(201);
+      expect((layered.json?.recipe as Json).name).toBe("First cake");
+      expect((layered.json?.recipe as Json).imageUrl).toBe("https://images.example/from-recipe.jpg");
+
+      const relative = await call("/api/recipes/import", { method: "POST", token, body: { url: "https://recipes.example/relative" } });
+      expect((relative.json?.recipe as Json).imageUrl).toBe("https://recipes.example/images/cake.jpg");
+
+      const card = await call("/api/recipes/import", { method: "POST", token, body: { url: "https://recipes.example/card" } });
+      expect((card.json?.recipe as Json).imageUrl).toBe("https://images.example/og-https.jpg");
+
+      const bird = await call("/api/recipes/import", { method: "POST", token, body: { url: "https://recipes.example/bird" } });
+      expect((bird.json?.recipe as Json).imageUrl).toBe("https://images.example/bird.jpg?w=1&h=2");
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
   it("imports from a share key without shopping or opening the rest of the list", async () => {
     const token = env.API_TOKEN;
     const setup = await call("/api/share-setup", { token });
@@ -1432,18 +1496,25 @@ describe("grocery API", () => {
     expect(blocked.text).toBe("That share key didn't work.");
     expect((await call("/api/recipes", { token })).json).toEqual({ recipes: [] });
 
-    const full = `<!doctype html><title>Ignored</title><script type="application/ld+json">${JSON.stringify({
+    const full = `<!doctype html><title>Ignored</title>
+      <meta property="og:image" content="https://images.example/og-pasta.jpg">
+      <meta name="twitter:image" content="https://images.example/tw-pasta.jpg">
+      <script type="application/ld+json">${JSON.stringify({
       "@type": "Recipe",
       name: "Lemon pasta",
+      image: "/images/pasta.jpg",
       recipeYield: "4 servings",
       recipeIngredient: ["1 lemon", "1/2 lb spaghetti"],
       recipeInstructions: ["Boil the pasta."],
     })}</script>`;
-    const partial = `<!doctype html><title>Half a soup</title><script type="application/ld+json">${JSON.stringify({
+    const partial = `<!doctype html><title>Half a soup</title>
+      <meta name="twitter:image" content="https://images.example/tw-soup.jpg">
+      <meta property="og:image" content="https://images.example/og-soup.jpg">
+      <script type="application/ld+json">${JSON.stringify({
       "@type": "Recipe",
       name: "Half a soup",
     })}</script>`;
-    const notes = `<!doctype html><title>Tuesday notes</title><p>Not a recipe.</p>`;
+    const notes = `<!doctype html><title>Tuesday notes</title><meta name="twitter:image" content="https://images.example/tw-notes.jpg"><p>Not a recipe.</p>`;
     const original = globalThis.fetch;
     globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
       const href = String(input);
@@ -1478,11 +1549,15 @@ describe("grocery API", () => {
     const pasta = recipes.find((recipe) => recipe.name === "Lemon pasta");
     expect(pasta?.needsReview).toBe(false);
     expect(pasta?.sourceUrl).toBe("https://recipes.example/pasta");
+    expect(pasta?.imageUrl).toBe("https://recipes.example/images/pasta.jpg");
     expect(((await call("/api/items", { token })).json?.items as Json[])).toEqual([]);
     const review = ((await call("/api/recipes?needsReview=true", { token })).json?.recipes ?? []) as Json[];
     expect(review.map((recipe) => recipe.name).sort()).toEqual(["Half a soup", "Recipe", "Tuesday notes"]);
     expect(review.every((recipe) => recipe.needsReview === true)).toBe(true);
     expect(String(review.find((recipe) => recipe.name === "Tuesday notes")?.sourceUrl)).toBe("https://recipes.example/notes");
+    expect(review.find((recipe) => recipe.name === "Half a soup")?.imageUrl).toBe("https://images.example/og-soup.jpg");
+    expect(review.find((recipe) => recipe.name === "Tuesday notes")?.imageUrl).toBe("https://images.example/tw-notes.jpg");
+    expect(review.find((recipe) => recipe.name === "Recipe")?.imageUrl).toBeNull();
     const starred = await call(`/api/recipes/${review.find((recipe) => recipe.name === "Tuesday notes")?.id}`, {
       method: "PATCH",
       token,
@@ -1537,6 +1612,9 @@ describe("grocery API", () => {
     expect(js).toContain('class="lo-pill"');
     expect(js).toContain("mealLabel(entry.meal)");
     expect(js).toContain("Night off. Enjoy the leftovers.");
+    expect(js).toContain("fallback-photo");
+    expect(js).toContain("onPhotoError");
+    expect(js).not.toContain("onerror=");
     expect(js).toContain("Share button");
     expect(js).toContain('data-action="copy-share-key"');
     expect(js).toContain("Needs a look");

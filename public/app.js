@@ -53,6 +53,7 @@ const SECTIONS = [
 
 const app = document.getElementById("app");
 app.addEventListener("click", onClick);
+app.addEventListener("error", onPhotoError, true);
 app.addEventListener("submit", onSubmit);
 app.addEventListener("input", onInput);
 app.addEventListener("pointerdown", onPointerDown);
@@ -247,7 +248,7 @@ function leftoversNight(entry, recipe, options = {}) {
   const remove = options.remove ? `<button class="text-green night-remove" type="button" data-action="clear-meal" data-id="${esc(entry.id)}">Remove</button>` : "";
   return `<article class="leftover-night">
       <div class="hero night-hero">
-        <img src="${esc(photo || "/photos/leftovers-hero.jpg")}" alt="">
+        <img class="fallback-photo" src="${esc(photo || "/photos/leftovers-hero.jpg")}" alt="">
         ${back}
         <button class="float right" type="button" data-action="recipe-menu" data-date="${esc(entry.date)}" data-meal="${esc(entry.meal)}" aria-label="More">${dots()}</button>
       </div>
@@ -615,7 +616,7 @@ function hero(recipe, showBack, prepTag = "") {
   if (!recipe.imageUrl) {
     return `<div class="hero hero-empty">${back}<span class="hero-mark" aria-hidden="true">${plateIcon()}</span>${prepTag}${menu}</div>`;
   }
-  return `<div class="hero"><img src="${esc(safeSrc(recipe.imageUrl))}" alt="">
+  return `<div class="hero"><img class="fallback-photo" src="${esc(safeSrc(recipe.imageUrl))}" alt="">
       ${back}
       ${prepTag}
       ${menu}
@@ -728,11 +729,11 @@ function itemHtml(id) {
       <button class="text-btn" type="button" data-action="edit-item" data-id="${esc(item.id)}">Edit</button></div>
     <div class="pad"><h1>${esc(`${qtyOf(item) ? `${qtyOf(item)} ` : ""}${item.name}`)}</h1>
       <p class="subhead">${esc(sectionLabel(item.section))}</p></div>
-    ${item.imageUrl ? `<img class="photo-edge" src="${esc(safeSrc(item.imageUrl))}" alt="">` : ""}
+    ${item.imageUrl ? `<img class="photo-edge fallback-photo" src="${esc(safeSrc(item.imageUrl))}" alt="">` : ""}
     <div class="pad">
       ${item.substitute ? `<h2>Need a substitute?</h2><p>${esc(item.substitute)}</p>` : ""}
       ${item.notes ? `<h2>Notes</h2><p>${esc(item.notes)}</p>` : ""}
-      ${recipes.length ? `<h2>You'll use this in...</h2>${recipes.map((recipe) => `<button class="link-row" type="button" data-action="open-recipe" data-id="${esc(recipe.id)}">${recipe.imageUrl ? `<img class="round-thumb" src="${esc(safeSrc(recipe.imageUrl))}" alt="">` : ""}<span class="link-name">${esc(recipe.name)}</span><span class="chev">›</span></button>`).join("")}` : ""}
+      ${recipes.length ? `<h2>You'll use this in...</h2>${recipes.map((recipe) => `<button class="link-row" type="button" data-action="open-recipe" data-id="${esc(recipe.id)}">${recipe.imageUrl ? `<img class="round-thumb fallback-photo" src="${esc(safeSrc(recipe.imageUrl))}" alt="">` : ""}<span class="link-name">${esc(recipe.name)}</span><span class="chev">›</span></button>`).join("")}` : ""}
     </div>`;
 }
 
@@ -2155,7 +2156,24 @@ function shortDate(iso) {
   return `${formatUtc(iso, { weekday: "short" })} ${Number(iso.slice(8))}`;
 }
 function photo(url) {
-  return url ? `<img class="photo-frame" src="${esc(safeSrc(url))}" alt="">` : "";
+  return url ? `<img class="photo-frame fallback-photo" src="${esc(safeSrc(url))}" alt="">` : "";
+}
+function onPhotoError(event) {
+  const img = event.target;
+  if (!img || img.tagName !== "IMG" || !img.classList.contains("fallback-photo")) return;
+  const hero = img.closest(".hero");
+  const tile = document.createElement("span");
+  tile.setAttribute("aria-hidden", "true");
+  tile.innerHTML = plateIcon();
+  if (hero) {
+    hero.classList.add("hero-empty");
+    tile.className = "hero-mark";
+  } else if (img.classList.contains("photo-edge") || img.classList.contains("photo-frame")) {
+    tile.className = "photo-fallback";
+  } else {
+    tile.className = "thumb-tile";
+  }
+  img.replaceWith(tile);
 }
 function timerSpec(step) {
   if (step.seconds) return { seconds: Number(step.seconds), label: `${step.seconds} sec` };
@@ -2240,7 +2258,7 @@ function safeSrc(value) {
   return "";
 }
 function recipeThumb(recipe) {
-  if (recipe.imageUrl) return `<img class="thumb" src="${esc(safeSrc(recipe.imageUrl))}" alt="">`;
+  if (recipe.imageUrl) return `<img class="thumb fallback-photo" src="${esc(safeSrc(recipe.imageUrl))}" alt="">`;
   return `<span class="thumb-tile" aria-hidden="true">${plateIcon()}</span>`;
 }
 

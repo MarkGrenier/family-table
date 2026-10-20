@@ -95,55 +95,69 @@ function decodeBasic(value: string): string {
 
 export async function importRecipeFromUrl(rawUrl: string): Promise<ImportedRecipe> {
   const page = await fetchPublicPage(rawUrl);
-  const recipe = recipeFromDocument(page.html);
+  const recipe = recipeFromDocument(page.html, page.finalUrl);
   if (!recipe) {
     throw new HttpError(422, "Couldn't find a recipe on that page. You can type it in instead.");
   }
   return { ...recipe, sourceUrl: page.finalUrl };
 }
 
-export function recipeFromDocument(html: string): Omit<ImportedRecipe, "sourceUrl"> | null {
-  const blocks = [...html.matchAll(/<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)];
-  let recipe: Omit<ImportedRecipe, "sourceUrl"> | null = null;
-  for (const block of blocks) {
-    const parsed = parseLd(block[1] ?? "");
-    if (!parsed) continue;
-    const found = findRecipes(parsed)[0];
-    if (found) {
-      recipe = normalizeRecipe(found);
-      break;
-    }
-  }
-  if (!recipe) {
-    const asJson = parseLd(html.trim());
-    if (asJson) {
-      const found = findRecipes(asJson)[0];
-      if (found) recipe = normalizeRecipe(found);
-    }
-  }
+export function recipeFromDocument(html: string, baseUrl = ""): Omit<ImportedRecipe, "sourceUrl"> | null {
+  const nodes = recipeNodes(html);
+  const first = nodes[0];
+  if (!first) return null;
+  const recipe = normalizeRecipe(first, baseUrl);
   if (!recipe) return null;
   if (!recipe.imageUrl) {
-    const imageUrl = ogImage(html);
-    if (imageUrl) return { ...recipe, imageUrl };
+    for (const node of nodes) {
+      const imageUrl = imageFrom(node.image, baseUrl);
+      if (imageUrl) {
+        recipe.imageUrl = imageUrl;
+        break;
+      }
+    }
   }
+  if (!recipe.imageUrl) recipe.imageUrl = pagePhoto(html, baseUrl);
   return recipe;
 }
 
-function ogImage(html: string): string | null {
-  const patterns = [
-    /<meta[^>]+property=["']og:image(?::secure_url|:url)?["'][^>]*content=["']([^"']+)["']/i,
-    /<meta[^>]+content=["']([^"']+)["'][^>]*property=["']og:image(?::secure_url|:url)?["']/i,
-    /<meta[^>]+name=["']twitter:image(?::src)?["'][^>]*content=["']([^"']+)["']/i,
-    /<meta[^>]+content=["']([^"']+)["'][^>]*name=["']twitter:image(?::src)?["']/i,
-  ];
+export function pagePhoto(html: string, baseUrl = ""): string | null {
+  return metaImage(html, OG_IMAGE, baseUrl) || metaImage(html, TWITTER_IMAGE, baseUrl);
+}
+
+const OG_IMAGE = [
+  /<meta[^>]+property=["']og:image(?::secure_url|:url)?["'][^>]*content=["']([^"']+)["']/gi,
+  /<meta[^>]+content=["']([^"']+)["'][^>]*property=["']og:image(?::secure_url|:url)?["']/gi,
+];
+
+const TWITTER_IMAGE = [
+  /<meta[^>]+(?:name|property)=["']twitter:image(?::src)?["'][^>]*content=["']([^"']+)["']/gi,
+  /<meta[^>]+content=["']([^"']+)["'][^>]*(?:name|property)=["']twitter:image(?::src)?["']/gi,
+];
+
+function metaImage(html: string, patterns: RegExp[], baseUrl: string): string | null {
   for (const pattern of patterns) {
-    const match = pattern.exec(html);
-    const raw = match?.[1]?.replace(/&amp;/g, "&").trim();
-    if (!raw) continue;
-    const image = httpsImage(raw);
-    if (image) return image;
+    const copy = new RegExp(pattern.source, pattern.flags);
+    for (const match of html.matchAll(copy)) {
+      const image = httpsImage(decodeBasic(match[1] ?? ""), baseUrl);
+      if (image) return image;
+    }
   }
   return null;
+}
+
+function recipeNodes(html: string): Record<string, unknown>[] {
+  const nodes: Record<string, unknown>[] = [];
+  const blocks = [...html.matchAll(/<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)];
+  for (const block of blocks) {
+    const parsed = parseLd(block[1] ?? "");
+    if (parsed) findRecipes(parsed, nodes);
+  }
+  if (!nodes.length) {
+    const asJson = parseLd(html.trim());
+    if (asJson) findRecipes(asJson, nodes);
+  }
+  return nodes;
 }
 
 function parseLd(raw: string): unknown {
@@ -179,7 +193,7 @@ function typesOf(node: Record<string, unknown>): string[] {
   return list.map((entry) => String(entry).toLowerCase());
 }
 
-function normalizeRecipe(node: Record<string, unknown>): Omit<ImportedRecipe, "sourceUrl"> | null {
+function normalizeRecipe(node: Record<string, unknown>, baseUrl: string): Omit<ImportedRecipe, "sourceUrl"> | null {
   const name = textOf(node.name).slice(0, 120);
   if (!name) return null;
   const ingredients = asList(node.recipeIngredient)
@@ -189,7 +203,7 @@ function normalizeRecipe(node: Record<string, unknown>): Omit<ImportedRecipe, "s
   const steps = stepsFrom(node.recipeInstructions).slice(0, 40);
   return {
     name,
-    imageUrl: imageFrom(node.image),
+    imageUrl: imageFrom(node.image, baseUrl),
     servings: servingsFrom(node.recipeYield),
     ingredients,
     steps,
@@ -209,25 +223,31 @@ function asList(value: unknown): unknown[] {
   return [value];
 }
 
-function imageFrom(value: unknown): string | null {
-  if (typeof value === "string") return httpsImage(value);
+function imageFrom(value: unknown, baseUrl: string): string | null {
+  if (typeof value === "string") return httpsImage(value, baseUrl);
   if (Array.isArray(value)) {
     for (const entry of value) {
-      const found = imageFrom(entry);
+      const found = imageFrom(entry, baseUrl);
       if (found) return found;
     }
     return null;
   }
   if (value && typeof value === "object") {
     const node = value as Record<string, unknown>;
-    return imageFrom(node.url ?? node.contentUrl);
+    for (const key of ["url", "contentUrl", "thumbnailUrl", "@id"] as const) {
+      const found = imageFrom(node[key], baseUrl);
+      if (found) return found;
+    }
+    return null;
   }
   return null;
 }
 
-function httpsImage(value: string): string | null {
+function httpsImage(value: string, baseUrl = ""): string | null {
+  const raw = value.trim();
+  if (!raw || raw.startsWith("data:")) return null;
   try {
-    const url = new URL(value.trim());
+    const url = baseUrl ? new URL(raw, baseUrl) : new URL(raw);
     if (url.protocol !== "https:") return null;
     return url.href.slice(0, 500);
   } catch {
