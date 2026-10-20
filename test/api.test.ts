@@ -964,4 +964,35 @@ describe("grocery API", () => {
     expect(html).toContain("/manifest.json");
     expect(response.headers.get("Content-Security-Policy")).toContain("default-src 'self'");
   });
+
+  it("serves the plate home-screen icons and the recipe menu", async () => {
+    const script = await exports.default.fetch("https://grocery.test/app.js");
+    expect(script.status).toBe(200);
+    const js = await script.text();
+    expect(js).toContain('sortButton("recent", "Recent")');
+    expect(js).not.toContain("Recently made");
+    expect(js).toContain("Change meal");
+    expect(js).toContain("Edit recipe");
+    expect(js).not.toContain("Open source");
+    expect(js).not.toContain("Nothing else");
+    const icons: Array<[string, number]> = [
+      ["/icons/apple-touch-icon.png", 180],
+      ["/icons/icon-192.png", 192],
+      ["/icons/icon-512.png", 512],
+      ["/icons/icon-maskable.png", 512],
+      ["/icons/favicon-32.png", 32],
+    ];
+    for (const [path, size] of icons) {
+      const icon = await exports.default.fetch(`https://grocery.test${path}`);
+      expect(icon.status).toBe(200);
+      expect(icon.headers.get("Content-Type") ?? "").toContain("image/png");
+      const bytes = new Uint8Array(await icon.arrayBuffer());
+      expect(bytes[0]).toBe(0x89);
+      const width = (bytes[16] << 24) | (bytes[17] << 16) | (bytes[18] << 8) | bytes[19];
+      const height = (bytes[20] << 24) | (bytes[21] << 16) | (bytes[22] << 8) | bytes[23];
+      expect(width).toBe(size);
+      expect(height).toBe(size);
+      if (path.endsWith("apple-touch-icon.png")) expect(bytes[25]).toBe(2);
+    }
+  });
 });

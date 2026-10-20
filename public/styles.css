@@ -427,6 +427,22 @@ h1, .title {
   font-size: 1.05rem;
 }
 
+.pick-list { margin: 0.2rem 0 0.6rem; }
+.pick-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+  min-height: 64px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  font-weight: 650;
+}
+.sheet-card.edit-sheet { max-height: 94vh; }
+.edit-sheet .field-label { margin: 0.28rem 0; }
+.edit-sheet textarea.box { min-height: 2.9rem; }
+.edit-sheet .small { margin: 0.1rem 0 0.2rem; }
+
 .field-label { display: block; margin: 0.7rem 0; color: var(--muted); font-size: 0.82rem; }
 .select-wrap { position: relative; display: block; }
 .select-wrap::after {

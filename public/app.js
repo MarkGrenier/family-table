@@ -32,6 +32,7 @@ const state = {
   todayServings: null,
   todayServingsOpen: false,
   todayId: null,
+  mealQuery: "",
 };
 
 const SECTIONS = [
@@ -357,7 +358,7 @@ function mealRow(entry) {
   const thumb = recipe.imageUrl
     ? `<img src="${esc(safeSrc(recipe.imageUrl))}" alt="">`
     : `<span class="meal-letter">${esc((recipe.name || "?").slice(0, 1))}</span>`;
-  return `<button class="meal-row" type="button" data-action="open-recipe" data-id="${esc(recipe.id)}">${thumb}<span class="meal-copy"><strong>${esc(title)}</strong><span>${esc(meal)}</span></span></button>`;
+  return `<button class="meal-row" type="button" data-action="open-recipe" data-id="${esc(recipe.id)}" data-date="${esc(entry.date)}" data-meal="${esc(entry.meal)}">${thumb}<span class="meal-copy"><strong>${esc(title)}</strong><span>${esc(meal)}</span></span></button>`;
 }
 
 function mealLabel(meal) {
@@ -404,7 +405,7 @@ function dayHtml(date) {
   return `<button class="text-green" type="button" data-action="back">Week</button>
     <h1>${esc(longDate(date))}</h1>
     <section><p class="kicker">Dinner</p>
-      ${dinner ? `<p class="title" style="font-size:1.4rem">${recipe ? `<button type="button" class="text-link" data-action="open-recipe" data-id="${esc(recipe.id)}">${esc(planTitle(dinner))}</button>` : esc(planTitle(dinner))}</p><button class="text-green" type="button" data-action="clear-meal" data-id="${esc(dinner.id)}">Remove</button>` : ""}
+      ${dinner ? `<p class="title" style="font-size:1.4rem">${recipe ? `<button type="button" class="text-link" data-action="open-recipe" data-id="${esc(recipe.id)}" data-date="${esc(date)}" data-meal="dinner">${esc(planTitle(dinner))}</button>` : esc(planTitle(dinner))}</p><button class="text-green" type="button" data-action="clear-meal" data-id="${esc(dinner.id)}">Remove</button>` : ""}
       ${pickerHtml(date, "dinner")}
     </section>`;
 }
@@ -429,7 +430,7 @@ function recipesHtml() {
       <input id="recipe-search" class="field-box" type="search" value="${esc(state.recipeQuery)}" placeholder="Search recipes" autocomplete="off">
     </label>
     <div class="sort" role="group" aria-label="Sort recipes">
-      ${sortButton("favorites", "Favorites")}${sortButton("recent", "Recently made")}${sortButton("az", "A-Z")}
+      ${sortButton("favorites", "Favorites")}${sortButton("recent", "Recent")}${sortButton("az", "A-Z")}
     </div>
     <div id="recipe-list">${recipeList(visibleRecipes())}</div>`;
 }
@@ -653,6 +654,151 @@ function newRecipeHtml() {
     ${state.page.error ? `<p class="error">${esc(state.page.error)}</p>` : ""}</div>`;
 }
 
+function mealContext() {
+  if (state.page?.kind === "recipe" && state.page.planDate && state.page.planMeal) {
+    return { date: state.page.planDate, meal: state.page.planMeal };
+  }
+  if (!state.page && state.tab === "today") {
+    const dinner = mealOn(nyToday(), "dinner");
+    if (dinner) return { date: dinner.date, meal: dinner.meal };
+  }
+  return null;
+}
+
+function activeRecipe() {
+  if (state.page?.kind === "recipe") return recipeById(state.page.id) || null;
+  if (!state.page && state.tab === "today") {
+    const recipe = tonightRecipe();
+    if (!recipe) return null;
+    return recipeById(recipe.id) || recipe;
+  }
+  return null;
+}
+
+function changeMealHtml() {
+  const query = state.mealQuery.trim().toLowerCase();
+  const recipes = state.recipes
+    .filter((recipe) => !query || recipe.name.toLowerCase().includes(query))
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
+  return `<div class="sheet"><div class="sheet-card" role="dialog" aria-label="Change meal">
+      <div class="sheet-head"><button class="text-green" type="button" data-action="close-sheet">Cancel</button><strong>Change meal</strong><span></span></div>
+      ${state.sheet.error ? `<p class="error">${esc(state.sheet.error)}</p>` : ""}
+      <label class="search">Search
+        <input id="meal-search" class="field-box" type="search" value="${esc(state.mealQuery)}" placeholder="Search recipes" autocomplete="off">
+      </label>
+      <button class="menu-row" type="button" data-action="pick-leftovers">Leftovers</button>
+      <div class="pick-list">${recipes.length ? recipes.map((recipe) => `<button class="pick-row" type="button" data-action="pick-change" data-id="${esc(recipe.id)}">${recipeThumb(recipe)}<span>${esc(recipe.name)}</span></button>`).join("") : `<p class="muted">Nothing matches that.</p>`}</div>
+    </div></div>`;
+}
+
+function editRecipeHtml() {
+  const recipe = recipeById(state.sheet?.id) || activeRecipe();
+  if (!recipe) return "";
+  const draft = state.sheet.draft;
+  const name = draft ? draft.name : recipe.name || "";
+  const servings = draft ? draft.servings : recipe.servings || 4;
+  const totalTime = draft ? draft.totalTime : recipe.totalTime || "";
+  const imageUrl = draft ? draft.imageUrl : recipe.imageUrl || "";
+  const ingredients = draft ? draft.ingredients : ingredientLines(recipe);
+  const steps = draft ? draft.steps : editableSteps(recipe);
+  return `<div class="sheet"><form class="sheet-card edit-sheet" data-form="edit-recipe" role="dialog" aria-label="Edit recipe">
+      <div class="sheet-head"><button class="text-green" type="button" data-action="close-sheet">Cancel</button><strong>Edit recipe</strong><button class="text-green" type="submit">Save</button></div>
+      ${state.sheet.error ? `<p class="error">${esc(state.sheet.error)}</p>` : ""}
+      <label class="field-label">Title<input class="field-box" name="name" required maxlength="120" value="${esc(name)}"></label>
+      <label class="field-label">Servings<input class="field-box" name="servings" type="number" inputmode="numeric" min="1" max="99" required value="${esc(servings)}"></label>
+      <label class="field-label">Total time<input class="field-box" name="totalTime" maxlength="40" value="${esc(totalTime)}" placeholder="35 min"></label>
+      <label class="field-label">Photo URL<input class="field-box" name="imageUrl" maxlength="500" value="${esc(imageUrl)}" placeholder="https://"></label>
+      <label class="field-label">Ingredients<textarea class="box" name="ingredients">${esc(ingredients)}</textarea></label>
+      <p class="small">One ingredient per line.</p>
+      <label class="field-label">Steps<textarea class="box" name="steps">${esc(steps)}</textarea></label>
+      <p class="small">One step per line.</p>
+    </form></div>`;
+}
+
+function ingredientLines(recipe) {
+  return (recipe.ingredients || []).map((item) => {
+    const text = String(item.text || "").trim();
+    if (text) return item.optional && !/optional/i.test(text) ? `${text} (optional)` : text;
+    const amount = amountOf(item, 1);
+    const note = item.note ? ` (${item.note})` : "";
+    const optional = item.optional ? " (optional)" : "";
+    return `${amount ? `${amount} ` : ""}${item.name || ""}${note}${optional}`.trim();
+  }).filter(Boolean).join("\n");
+}
+
+function editableSteps(recipe) {
+  const cook = (recipe.cookSteps || []).map((step) => (typeof step === "string" ? step : step?.text)).filter(Boolean);
+  const lines = cook.length ? cook : (recipe.steps || []).filter(Boolean);
+  return lines.join("\n");
+}
+
+async function changeMeal(extra) {
+  const context = mealContext();
+  if (!context) return;
+  const nextId = extra.recipeId || null;
+  const body = { date: context.date, meal: context.meal, type: extra.type };
+  if (nextId) body.recipeId = nextId;
+  if (extra.note) body.note = extra.note;
+  try {
+    await api("/api/plan", { method: "POST", body });
+    if (state.page?.kind === "recipe") {
+      if (nextId && recipeById(nextId)) {
+        const recipe = recipeById(nextId);
+        state.page = { kind: "recipe", id: nextId, servings: recipe.servings || 4, panel: "ingredients", planDate: context.date, planMeal: context.meal };
+      } else if (!nextId) {
+        state.tab = context.date === nyToday() ? "today" : "calendar";
+        state.page = null;
+      }
+    }
+    state.sheet = null;
+    state.mealQuery = "";
+    await refresh(true);
+  } catch (error) {
+    state.sheet = { kind: "change-meal", error: error.message };
+    render();
+  }
+}
+
+async function saveRecipeEdit(form) {
+  const id = state.sheet?.id;
+  if (!id) return;
+  const name = String(form.get("name") || "");
+  const servingsRaw = String(form.get("servings") || "");
+  const totalTime = String(form.get("totalTime") || "");
+  const imageUrl = String(form.get("imageUrl") || "");
+  const ingredientText = String(form.get("ingredients") || "");
+  const stepText = String(form.get("steps") || "");
+  const ingredients = ingredientText.split(/\n/).map((line) => line.trim()).filter(Boolean);
+  const steps = stepText.split(/\n/).map((line) => line.trim()).filter(Boolean);
+  try {
+    const data = await api(`/api/recipes/${id}`, {
+      method: "PATCH",
+      body: {
+        name,
+        servings: Number(servingsRaw),
+        totalTime: totalTime.trim() ? totalTime : null,
+        imageUrl: imageUrl.trim() ? imageUrl.trim() : null,
+        ingredients,
+        steps,
+        cookSteps: steps,
+      },
+    });
+    replaceRecipe(data.recipe);
+    if (state.page?.kind === "recipe" && state.page.id === id) state.page.servings = data.recipe.servings;
+    if (state.todayId === id) state.todayServings = data.recipe.servings;
+    state.sheet = null;
+    render();
+  } catch (error) {
+    state.sheet = {
+      kind: "edit-recipe",
+      id,
+      error: error.message,
+      draft: { name, servings: servingsRaw, totalTime, imageUrl, ingredients: ingredientText, steps: stepText },
+    };
+    render();
+  }
+}
+
 function sheetHtml() {
   if (state.sheet?.kind === "prep") return prepSheet();
   if (state.sheet?.kind === "grocery-menu") {
@@ -674,12 +820,15 @@ function sheetHtml() {
       </form></div>`;
   }
   if (state.sheet?.kind === "recipe-menu") {
-    const recipe = recipeById(state.page?.id);
-    return `<div class="sheet"><div class="sheet-card" role="dialog">
+    const context = mealContext();
+    return `<div class="sheet"><div class="sheet-card" role="dialog" aria-label="Recipe">
         <div class="sheet-head"><span></span><button type="button" data-action="close-sheet" aria-label="Close">✕</button></div>
-        ${recipe?.sourceUrl ? `<a class="menu-row" href="${esc(safeSrc(recipe.sourceUrl))}" target="_blank" rel="noopener noreferrer">Open source</a>` : `<p class="muted">Nothing else on this recipe.</p>`}
+        ${context ? `<button class="menu-row" type="button" data-action="change-meal">Change meal</button>` : ""}
+        <button class="menu-row" type="button" data-action="edit-recipe">Edit recipe</button>
       </div></div>`;
   }
+  if (state.sheet?.kind === "change-meal") return changeMealHtml();
+  if (state.sheet?.kind === "edit-recipe") return editRecipeHtml();
   if (state.sheet?.kind === "cook-list") {
     const recipe = recipeById(state.page?.id);
     const factor = (state.page?.servings || recipe?.servings || 1) / (recipe?.servings || 1);
@@ -845,7 +994,14 @@ async function onClick(event) {
         ? { tab: "calendar", page: state.page?.kind === "day" ? state.page : null }
         : { tab: "recipes", page: null };
     state.tab = state.recipeBack.tab === "groceries" ? "groceries" : "recipes";
-    state.page = { kind: "recipe", id: button.dataset.id, servings: recipe?.servings || 4, panel: "ingredients" };
+    state.page = {
+      kind: "recipe",
+      id: button.dataset.id,
+      servings: recipe?.servings || 4,
+      panel: "ingredients",
+      planDate: button.dataset.date || null,
+      planMeal: button.dataset.meal || null,
+    };
     state.sheet = null;
     state.stars = 0;
     state.comment = "";
@@ -887,6 +1043,26 @@ async function onClick(event) {
     render();
     return;
   }
+  if (action === "change-meal") {
+    state.mealQuery = "";
+    state.sheet = { kind: "change-meal", error: "" };
+    render();
+    return;
+  }
+  if (action === "edit-recipe") {
+    const recipe = activeRecipe();
+    if (!recipe) return;
+    state.sheet = { kind: "edit-recipe", id: recipe.id, error: "" };
+    render();
+    return;
+  }
+  if (action === "pick-change") return changeMeal({ type: "recipe", recipeId: button.dataset.id });
+  if (action === "pick-leftovers") {
+    const context = mealContext();
+    if (!context) return;
+    const source = leftoverSource(context.date, context.meal);
+    return changeMeal({ type: "leftovers", recipeId: source?.id, note: source?.name });
+  }
   if (action === "cook") return openCook(button.dataset.id);
   if (action === "cook-step") return moveCook(Number(button.dataset.delta));
   if (action === "close-cook") return closeCook();
@@ -907,14 +1083,20 @@ async function onClick(event) {
   if (action === "mark-cooked") return markCooked(button.dataset.id);
   if (action === "feedback") {
     state.feedbackFrom = state.page?.kind === "recipe" ? "recipe" : "today";
-    state.page = { kind: "feedback", id: button.dataset.id };
+    state.page = {
+      kind: "feedback",
+      id: button.dataset.id,
+      planDate: state.page?.planDate || null,
+      planMeal: state.page?.planMeal || null,
+      servings: state.page?.kind === "recipe" ? state.page.servings : state.todayServings,
+    };
     state.error = "";
     render();
     return;
   }
   if (action === "close-feedback") {
     state.page = state.feedbackFrom === "recipe"
-      ? { kind: "recipe", id: state.page.id, servings: recipeById(state.page.id)?.servings, panel: "ingredients" }
+      ? { kind: "recipe", id: state.page.id, servings: state.page.servings || recipeById(state.page.id)?.servings, panel: "ingredients", planDate: state.page.planDate || null, planMeal: state.page.planMeal || null }
       : null;
     render();
     return;
@@ -982,6 +1164,7 @@ async function onSubmit(event) {
     return savePlanEntry({ date: input.dataset.date, meal: input.dataset.meal, type: "note", note: new FormData(form).get("note") });
   }
   if (form.dataset.form === "fetch-recipe") return fetchRecipe(new FormData(form).get("url"));
+  if (form.dataset.form === "edit-recipe") return saveRecipeEdit(new FormData(form));
 }
 
 function onInput(event) {
@@ -1002,6 +1185,16 @@ function onInput(event) {
     return;
   }
   if (event.target.id === "feedback-comment") state.comment = event.target.value;
+  if (event.target.id === "meal-search") {
+    state.mealQuery = event.target.value;
+    render();
+    const field = document.getElementById("meal-search");
+    if (field) {
+      field.focus();
+      field.setSelectionRange(field.value.length, field.value.length);
+    }
+    return;
+  }
   if (event.target.classList?.contains("day-search")) {
     state.dayQuery = event.target.value;
     render();
@@ -1123,7 +1316,9 @@ async function sendFeedback(id) {
   try {
     const data = await api(`/api/recipes/${id}/feedback`, { method: "POST", body: { stars: state.stars, comment: state.comment } });
     replaceRecipe(data.recipe);
-    state.page = state.feedbackFrom === "recipe" ? { kind: "recipe", id, servings: data.recipe.servings, panel: "ingredients" } : null;
+    state.page = state.feedbackFrom === "recipe"
+      ? { kind: "recipe", id, servings: data.recipe.servings, panel: "ingredients", planDate: state.page?.planDate || null, planMeal: state.page?.planMeal || null }
+      : null;
     state.error = "";
     render();
   } catch (error) {
