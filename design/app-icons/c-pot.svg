@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- C. Cooking pot with steam and a small heart. Full-bleed 512. Wire this file into public/icons when chosen. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="512" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#fffaf3"/>
+      <stop offset="100%" stop-color="#e4f2cc"/>
+    </linearGradient>
+    <radialGradient id="sheen" cx="50%" cy="0%" r="68%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.8"/>
+      <stop offset="62%" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="enamel" x1="170" y1="230" x2="360" y2="430" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#8ed85a"/>
+      <stop offset="45%" stop-color="#52b41e"/>
+      <stop offset="100%" stop-color="#2f7d10"/>
+    </linearGradient>
+    <linearGradient id="lid" x1="140" y1="170" x2="380" y2="260" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#e7f0dc"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" fill="url(#bg)"/>
+  <rect width="512" height="512" fill="url(#sheen)"/>
+  <ellipse cx="256" cy="408" rx="126" ry="18" fill="#3d7a16" opacity="0.12"/>
+  <g fill="none" stroke="#4eae1c" stroke-width="16" stroke-linecap="round">
+    <path d="M188 156c18-26 14-48 2-62"/>
+    <path d="M324 156c-16-28-12-50 2-66"/>
+  </g>
+  <path fill="#4eae1c" d="M256 168c-18-16-52-36-52-62c0-18 14-30 32-30c10 0 18 6 20 14c2-8 10-14 20-14c18 0 32 12 32 30c0 26-34 46-52 62z"/>
+  <rect x="108" y="268" width="42" height="34" rx="15" fill="#d5eeae"/>
+  <rect x="362" y="268" width="42" height="34" rx="15" fill="#c6e59a"/>
+  <rect x="136" y="228" width="240" height="156" rx="52" fill="url(#enamel)"/>
+  <path d="M176 268c28 22 132 22 160 0" fill="none" stroke="#ffffff" stroke-opacity="0.3" stroke-width="12" stroke-linecap="round"/>
+  <ellipse cx="256" cy="236" rx="136" ry="42" fill="url(#lid)"/>
+  <ellipse cx="256" cy="242" rx="100" ry="24" fill="#f3f8ea"/>
+  <circle cx="256" cy="206" r="15" fill="#ffffff"/>
+  <circle cx="256" cy="206" r="15" fill="none" stroke="#d7e8c4" stroke-width="3"/>
+</svg>

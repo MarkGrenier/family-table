@@ -971,7 +971,8 @@ describe("grocery API", () => {
     const js = await script.text();
     expect(js).toContain('sortButton("recent", "Recent")');
     expect(js).not.toContain("Recently made");
-    expect(js).toContain("Change meal");
+    expect(js).toContain("Swap meal");
+    expect(js).not.toContain("Change meal");
     expect(js).toContain("Edit recipe");
     expect(js).not.toContain("Open source");
     expect(js).not.toContain("Nothing else");

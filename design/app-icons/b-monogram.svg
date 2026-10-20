@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- B. Lowercase ft monogram, outlined from Inter Bold so it renders without the font. Full-bleed 512. Wire this file into public/icons when chosen. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="36" y1="0" x2="490" y2="512" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#97e25a"/>
+      <stop offset="46%" stop-color="#5dbb24"/>
+      <stop offset="100%" stop-color="#348f12"/>
+    </linearGradient>
+    <radialGradient id="sheen" cx="28%" cy="0%" r="75%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.42"/>
+      <stop offset="52%" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="512" height="512" fill="url(#bg)"/>
+  <rect width="512" height="512" fill="url(#sheen)"/>
+  <g fill="#f6f3ec" transform="translate(256 274) scale(0.205 -0.205) translate(-737.5 -745.0)">
+    <g transform="translate(0 0)"><path d="M750 1118V889H516V0H217V889H20V1118H217V1204Q217 1382 321.0 1471.0Q425 1560 580 1560Q651 1560 709.0 1549.0Q767 1538 795 1529L741 1303Q723 1308 696.5 1313.0Q670 1318 641 1318Q572 1318 544.0 1285.5Q516 1253 516 1194V1118Z"/></g><g transform="translate(725 0)"><path d="M683 1118V889H474V327Q474 223 576 223Q593 223 623.5 227.5Q654 232 671 236L714 11Q664 -4 614.5 -10.0Q565 -16 520 -16Q352 -16 263.0 65.5Q174 147 174 301V889H20V1118H174V1384H474V1118Z"/></g>
+  </g>
+</svg>

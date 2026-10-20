@@ -680,8 +680,8 @@ function changeMealHtml() {
   const recipes = state.recipes
     .filter((recipe) => !query || recipe.name.toLowerCase().includes(query))
     .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
-  return `<div class="sheet"><div class="sheet-card" role="dialog" aria-label="Change meal">
-      <div class="sheet-head"><button class="text-green" type="button" data-action="close-sheet">Cancel</button><strong>Change meal</strong><span></span></div>
+  return `<div class="sheet"><div class="sheet-card" role="dialog" aria-label="Swap meal">
+      <div class="sheet-head"><button class="text-green" type="button" data-action="close-sheet">Cancel</button><strong>Swap meal</strong><span></span></div>
       ${state.sheet.error ? `<p class="error">${esc(state.sheet.error)}</p>` : ""}
       <label class="search">Search
         <input id="meal-search" class="field-box" type="search" value="${esc(state.mealQuery)}" placeholder="Search recipes" autocomplete="off">
@@ -823,7 +823,7 @@ function sheetHtml() {
     const context = mealContext();
     return `<div class="sheet"><div class="sheet-card" role="dialog" aria-label="Recipe">
         <div class="sheet-head"><span></span><button type="button" data-action="close-sheet" aria-label="Close">✕</button></div>
-        ${context ? `<button class="menu-row" type="button" data-action="change-meal">Change meal</button>` : ""}
+        ${context ? `<button class="menu-row" type="button" data-action="change-meal">Swap meal</button>` : ""}
         <button class="menu-row" type="button" data-action="edit-recipe">Edit recipe</button>
       </div></div>`;
   }
