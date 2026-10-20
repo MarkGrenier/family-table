@@ -19,6 +19,11 @@ import {
   getRecipe,
   getWeek,
   replaceWeek,
+  markCooked,
+  listFeedback,
+  addFeedback,
+  deleteRecipeSourcedItems,
+  withGroceryRecipes,
 } from "./food";
 import { cleanWeekStart, dateRange, parseEvent, parseEventList, parsePlan, parseRecipe, parseRecipePatch, parseServingsOverride, parseWeek } from "./food-validate";
 import { HttpError, json, readJson } from "./http";
@@ -113,7 +118,12 @@ async function handleApi(request: Request, env: Env, path: string): Promise<Resp
   if (!allowed) throw new HttpError(401, "Sign in, or send the helper password.");
 
   if (path === "/api/items" && method === "GET") {
-    return json({ items: await listItems(env.DB) });
+    return json({ items: await withGroceryRecipes(env.DB, await listItems(env.DB)) });
+  }
+  if (path === "/api/items" && method === "DELETE") {
+    const source = new URL(request.url).searchParams.get("source");
+    if (source !== "recipe") throw new HttpError(400, "Use source=recipe to clear ingredients added from recipes.");
+    return json({ deleted: await deleteRecipeSourcedItems(env.DB) });
   }
   if (path === "/api/items" && method === "POST") {
     const item = await createItem(env.DB, parseNewItem(await readJson(request)));
@@ -201,6 +211,25 @@ async function handleFood(request: Request, env: Env, path: string, method: stri
   if (path === "/api/recipes" && method === "POST") {
     const recipe = await createRecipe(env.DB, parseRecipe(await readJson(request)));
     return json({ recipe }, 201);
+  }
+  const recipeCooked = /^\/api\/recipes\/([A-Za-z0-9-]{1,80})\/cooked$/.exec(path);
+  if (recipeCooked) {
+    if (method !== "POST") throw new HttpError(405, "That action isn't available.");
+    return json({ recipe: await markCooked(env.DB, recipeCooked[1]) });
+  }
+  const recipeFeedback = /^\/api\/recipes\/([A-Za-z0-9-]{1,80})\/feedback$/.exec(path);
+  if (recipeFeedback) {
+    if (method === "GET") return json({ feedback: await listFeedback(env.DB, recipeFeedback[1]) });
+    if (method !== "POST") throw new HttpError(405, "That action isn't available.");
+    const body = await readJson(request);
+    const stars = typeof body.stars === "number" ? body.stars : Number(body.stars);
+    if (!Number.isInteger(stars) || stars < 1 || stars > 5) throw new HttpError(400, "Pick 1 to 5 stars.");
+    const comment = body.comment == null || body.comment === "" ? null : body.comment;
+    if (comment != null && typeof comment !== "string") throw new HttpError(400, "The comment should be words.");
+    if (typeof comment === "string" && comment.trim().length > 1000) throw new HttpError(400, "That comment is too long.");
+    const saved = await addFeedback(env.DB, recipeFeedback[1], stars, typeof comment === "string" ? comment.trim() || null : null);
+    const recipe = await getRecipe(env.DB, recipeFeedback[1]);
+    return json({ feedback: saved, recipe }, 201);
   }
   const recipeGroceries = /^\/api\/recipes\/([A-Za-z0-9-]{1,80})\/groceries$/.exec(path);
   if (recipeGroceries) {

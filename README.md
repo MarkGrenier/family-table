@@ -72,7 +72,7 @@ A browser window opens. Sign in to Cloudflare and approve the question it asks. 
 
 The phones already have the grocery list. This step adds recipes, the week plan, and family events. It does not erase anything already on the list.
 
-New files are added as `migrations/0003_food.sql`, `migrations/0004_recipe_sections.sql`, and so on. Older migration files stay as they are. The command below applies every one that is not on the live list yet.
+New files are `migrations/0003_food.sql`, `migrations/0004_recipe_sections.sql`, and `migrations/0005_mealime.sql`. Older migration files stay as they are. The command below applies every one that is not on the live list yet. `0005_mealime.sql` adds grocery sections, cookware, cooked days, and feedback. It does not change rows that are already there.
 
 ```bash
 npx wrangler d1 migrations apply grocery --remote
@@ -133,17 +133,16 @@ Open the app on both phones. When one of you changes dinner, a recipe, or the gr
 
 ## Using the app
 
-Four tabs sit at the bottom: Today, Week, Recipes, and Groceries. Tap one. Nothing here uses a swipe.
+Four tabs sit at the bottom: Today, Week, Recipes, and Groceries. The Groceries tab shows how many things are still to buy.
 
-- **Today** is tonight's dinner. If a recipe is planned, tap **Start cooking** for one step at a time. Breakfast or lunch shows up only when something is planned. Family events for the day sit underneath in small type. If dinner is empty, tap **Plan dinner**.
-- **Week** is this week and next, Monday through Sunday, in Eastern time. Tap a day to pick a recipe, leftovers, or a short note such as eating out. **+ Add breakfast** and **+ Add lunch** appear on that day when you want them. Choosing a recipe puts its ingredients on the grocery list. Taking that recipe off the day, or picking a different one, takes those things back off if they haven't been bought yet. Leftovers and notes don't add anything.
-- **Recipes** is the cookbook. Search by name, and tap the star for a favorite. **Favorites**, **Recently made**, and **A-Z** sort the list. A recipe that has already been planned shows **Last made Oct 12** in grey under the name, and again on the recipe page. Open a recipe to change the number of servings, which scales amounts the app can read, such as `1/2 lb`. **Add ingredients to groceries** uses that serving count. **Cook** shows one big step at a time and tries to keep the screen awake. **Add a recipe** takes a link. If the page has a recipe on it, the name, photo, amounts, steps, time, and link are filled in. If not, type the name, one ingredient per line, and one step per line. The source link stays on the recipe. Sending a new week does not remove recipes.
-- **Groceries** is one list. Type something and tap **Add**. Tap the round circle to mark it bought. Bought items sit under **Done**, and **Clear** takes them off after you confirm. Tap the words of an item to rename it or delete it. A grey line under a name says which recipe it is for. Adding the same recipe twice does not stack it again.
-- The app follows the phone's light or dark setting.
+- **Today** is tonight's dinner. If a recipe is planned, tap **Start cooking**.
+- **Week** is this week and next, Monday through Sunday, in Eastern time. Tap a day to pick a recipe, leftovers, or a short note such as eating out. Choosing a recipe puts the things you need to buy on the grocery list. Salt, pepper, oil, water, and spices stay off the list. Taking that recipe off the day takes those unchecked items back off. Leftovers and notes don't add anything.
+- **Recipes** is the cookbook. **Favorites**, **Recently made**, and **A-Z** sort the list. A recipe shows **Last made Oct 12** when it has been planned before. Open one for the photo, a heart, **Cookware**, **Ingredients**, and **Instructions**. Tap the servings to scale the amounts. **Cooked?** records that you made it. **Start cooking** walks through the steps. Sending a new week does not remove recipes.
+- **Groceries** is grouped by food type, not by store. Tap the circle to mark something bought. Tap the row, or swipe it right, for details. Hold the row to edit the name, amount, and section. The green **+** adds something. The green dots share the list, show completed items, or mark them all complete.
 
 ## If something goes wrong
 
-- "That passcode didn't work" — on the live site, use the passcode from step 4, not the practice passcode from this computer.
+- "Wrong passcode" — on the live site, use the passcode from step 4, not the practice passcode from this computer.
 - The page will not load on your phone at `127.0.0.1` — that address only works on the computer that is running `npm start`. Phones use the `workers.dev` address.
 - You changed the passcode — each phone needs to open the app and sign in again.
 - `npm start` says the port is already in use — the list is probably already running in another terminal window. Close that one, or just open [http://127.0.0.1:47219](http://127.0.0.1:47219).
@@ -196,6 +195,10 @@ Returns `{ "items": [ ... ] }`.
 Send only what changed. Example: `{ "checked": true }`. Leaving `barcode` out keeps the one already saved. Sending a barcode here does not, by itself, turn the item into a staple.
 
 `DELETE /api/items/ID`
+
+`DELETE /api/items?source=recipe` removes every grocery line that was added from a recipe or a planned meal. Lines typed by hand stay. The reply is `{ "deleted": 12 }`.
+
+Each item may also include `section` (`produce`, `meat`, `dairy`, `bakery`, `frozen`, `pantry`, `baking`, `oils`, `snacks`, `beverages`, `household`, or `other`), `imageUrl`, `substitute`, and `notes`. `GET /api/items` adds `recipes` on each line: `{ "id", "name", "imageUrl" }` for the recipes that need it. Older fields `store` and `category` stay.
 
 `POST /api/items/clear-checked`
 
@@ -265,22 +268,69 @@ If it is new, the reply is `{ "barcode", "known": false, "suggestion" }`. `sugge
 
 `GET /api/recipes?favorite=true` returns only favorites. You can use both, as in `GET /api/recipes?q=chili&favorite=true`.
 
-Each recipe includes `favorite`, `lastMade`, and `timesMade`. `lastMade` is the most recent date it was planned, up through today in Eastern time, or `null` if that has not happened. A date still in the future does not count. `timesMade` is how many meals it was planned for on those dates. Leftovers do not count.
+Each recipe includes `favorite`, `lastMade`, and `timesMade`. `lastMade` is the most recent date it was cooked or planned, up through today in Eastern time, or `null` if that has not happened. A date still in the future does not count. `timesMade` counts those planned meals, plus a day you marked it cooked when it was not already planned. Leftovers do not count, and cooking it on a day it was already planned does not count twice.
 
 `POST /api/recipes`
 
+A recipe's ingredients can be plain lines, or objects. Old lines still work. Water, salt, pepper, oil, and common spices are marked `buy: false` so planning the recipe does not put them on the grocery list. `optional: true` is skipped too.
+
 ```json
 {
-  "name": "Weeknight chili",
-  "servings": 4,
-  "ingredients": ["1 lb ground beef", "1 onion"],
-  "steps": ["Brown the beef.", "Simmer."],
-  "totalTime": "45 min",
-  "sourceUrl": "https://example.com/chili",
-  "imageUrl": "https://example.com/chili.jpg",
+  "name": "Cilantro-lime chicken",
+  "servings": 2,
+  "totalTime": "35 minutes",
+  "cookware": ["chef's knife", "citrus juicer"],
+  "ingredients": [
+    {
+      "text": "1 lb chicken thighs, boneless skinless",
+      "name": "chicken thighs",
+      "qty": 1,
+      "unit": "lb",
+      "section": "meat",
+      "buy": true,
+      "optional": false,
+      "note": "boneless skinless"
+    },
+    {
+      "text": "1/2 small bunch cilantro",
+      "name": "cilantro",
+      "qty": 0.5,
+      "unit": "bunch",
+      "section": "produce",
+      "buy": true,
+      "optional": false,
+      "note": "small"
+    },
+    "–2 tsp water to thin",
+    "1/2 tsp black pepper"
+  ],
+  "prepSteps": ["Chop the cilantro."],
+  "cookSteps": [
+    {
+      "text": "Pat the chicken dry and put it in a bowl.",
+      "minutes": null,
+      "ingredients": [0]
+    },
+    {
+      "text": "Simmer until the chicken is cooked through.",
+      "minutes": 12,
+      "ingredients": []
+    }
+  ],
+  "kidsPlates": "Plain rice and fruit.",
+  "reheating": "Warm gently with a splash of water.",
+  "sourceUrl": "https://example.com/chicken",
   "favorite": false
 }
 ```
+
+`section` is one of `produce`, `meat`, `dairy`, `bakery`, `frozen`, `pantry`, `baking`, `oils`, `snacks`, `beverages`, `household`, `other`. A step's `ingredients` list is positions in the ingredient list, starting at 0, or the ingredient's name. `quantity` is still accepted as another name for `qty`.
+
+`cookware` is an optional list of tools. Each recipe also comes back with `averageRating` and `lastComment` once someone has sent feedback.
+
+`POST /api/recipes/ID/cooked` marks it cooked today. That updates `lastMade`, `timesMade`, and `cookedToday`. Tapping it again the same day does not count twice.
+
+`POST /api/recipes/ID/feedback` with `{ "stars": 5, "comment": "The kids ate it." }` saves a rating. `GET /api/recipes/ID/feedback` reads them back. `stars` is 1 to 5.
 
 `GET /api/recipes/ID`
 

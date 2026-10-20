@@ -1,8 +1,45 @@
+export const FOOD_SECTIONS = [
+  "produce",
+  "meat",
+  "dairy",
+  "bakery",
+  "frozen",
+  "pantry",
+  "baking",
+  "oils",
+  "snacks",
+  "beverages",
+  "household",
+  "other",
+] as const;
+
+export type FoodSection = (typeof FOOD_SECTIONS)[number];
+
+export const SECTION_LABELS: Record<FoodSection, string> = {
+  produce: "Produce",
+  meat: "Meat & Seafood",
+  dairy: "Dairy Cheese & Eggs",
+  bakery: "Bakery",
+  frozen: "Frozen",
+  pantry: "Pantry",
+  baking: "Baking & Spices",
+  oils: "Oils Sauces & Condiments",
+  snacks: "Snacks",
+  beverages: "Beverages",
+  household: "Household",
+  other: "Other",
+};
+
 export type Ingredient = {
   text: string;
   quantity: number | null;
+  qty: number | null;
   unit: string | null;
   name: string;
+  section: FoodSection;
+  buy: boolean;
+  optional: boolean;
+  note: string | null;
 };
 
 const FRACTIONS: Record<string, number> = {
@@ -55,6 +92,7 @@ const UNIT_WORDS: Record<string, string> = {
   bunch: "bunch",
   bunches: "bunch",
   pinch: "pinch",
+  pinches: "pinch",
   slice: "slice",
   slices: "slice",
   piece: "piece",
@@ -69,6 +107,12 @@ const UNIT_WORDS: Record<string, string> = {
   jars: "jar",
   box: "box",
   boxes: "box",
+  pint: "pint",
+  pints: "pint",
+  quart: "quart",
+  quarts: "quart",
+  gallon: "gallon",
+  gallons: "gallon",
 };
 
 const PLURAL: Record<string, string> = {
@@ -84,6 +128,10 @@ const PLURAL: Record<string, string> = {
   bag: "bags",
   jar: "jars",
   box: "boxes",
+  pint: "pints",
+  quart: "quarts",
+  gallon: "gallons",
+  pinch: "pinches",
 };
 
 const NICE_FRACTIONS: Array<[number, number]> = [
@@ -100,28 +148,202 @@ const NICE_FRACTIONS: Array<[number, number]> = [
   [5, 6],
 ];
 
+const PANTRY_BASICS = new Set([
+  "water",
+  "ice",
+  "salt",
+  "kosher salt",
+  "sea salt",
+  "table salt",
+  "pepper",
+  "black pepper",
+  "white pepper",
+  "oil",
+  "olive oil",
+  "extra virgin olive oil",
+  "vegetable oil",
+  "canola oil",
+  "cooking spray",
+  "nonstick spray",
+]);
+
+const SPICES = [
+  "cumin",
+  "paprika",
+  "oregano",
+  "thyme",
+  "cinnamon",
+  "chili powder",
+  "garlic powder",
+  "onion powder",
+  "cayenne",
+  "nutmeg",
+  "bay leaf",
+  "bay leaves",
+  "red pepper flakes",
+  "italian seasoning",
+  "chili flakes",
+  "ground pepper",
+  "cracked pepper",
+];
+
+export function isFoodSection(value: string): value is FoodSection {
+  return (FOOD_SECTIONS as readonly string[]).includes(value);
+}
+
+export function isPantryBasic(name: string): boolean {
+  const clean = name.trim().toLowerCase();
+  if (!clean) return false;
+  if (PANTRY_BASICS.has(clean)) return true;
+  if (SPICES.some((spice) => clean === spice || clean.endsWith(` ${spice}`))) return true;
+  if (/\b(salt|cooking spray)\b/.test(clean) && !/salted/.test(clean)) return true;
+  if (/^(black|white|ground|cracked)\s+pepper$/.test(clean)) return true;
+  if (/^(olive|vegetable|canola|sesame|avocado|cooking)\s+oil$/.test(clean)) return true;
+  if (clean === "water" || clean.endsWith(" water")) return true;
+  return false;
+}
+
+export function sectionForName(name: string): FoodSection {
+  const n = name.toLowerCase();
+  if (isPantryBasic(n) && /pepper|cumin|paprika|oregano|thyme|cinnamon|chili|cayenne|nutmeg|bay|seasoning|powder|salt/.test(n) && !/bell|chicken/.test(n)) {
+    return /oil/.test(n) ? "oils" : "baking";
+  }
+  if (/soap|detergent|paper towel|trash bag|foil|sponge|cleaner|bleach/.test(n)) return "household";
+  if (/frozen|ice cream/.test(n)) return "frozen";
+  if (/bread|bagel|bun|roll|tortilla|pita|baguette/.test(n)) return "bakery";
+  if (/milk|cheese|yogurt|butter|cream|egg/.test(n) && !/eggplant|cream of/.test(n)) return "dairy";
+  if (/chicken|beef|pork|turkey|salmon|shrimp|fish|bacon|sausage|steak|lamb|cod|tuna|meat/.test(n)) return "meat";
+  if (/flour|sugar|yeast|baking powder|baking soda|vanilla|cornstarch|cocoa|chocolate chip/.test(n)) return "baking";
+  if (/soy sauce|vinegar|ketchup|mustard|mayonnaise|mayo|salsa|hot sauce|sriracha|dressing|broth|stock/.test(n)) return "oils";
+  if (/\boil\b|sauce|condiment/.test(n)) return "oils";
+  if (/chip|cracker|pretzel|popcorn|cookie|granola bar/.test(n)) return "snacks";
+  if (/juice|soda|coffee|tea|wine|beer|kombucha|sparkling/.test(n)) return "beverages";
+  if (/onion|garlic|tomato|lettuce|cilantro|lime|lemon|avocado|potato|apple|banana|spinach|carrot|celery|cucumber|broccoli|zucchini|pepper|herb|scallion|ginger|mushroom|cabbage|kale|berry|berries|corn|peas|green bean/.test(n)) {
+    if (/powder|flake|seasoning|black pepper|white pepper/.test(n)) return "baking";
+    return "produce";
+  }
+  if (/rice|pasta|bean|lentil|oat|cereal|noodle|spaghetti|tortilla chip|canned|can of|broth/.test(n)) return "pantry";
+  return "pantry";
+}
+
+export function categoryForSection(section: FoodSection): "produce" | "shelf" | "refrigerated" | "frozen" {
+  if (section === "produce") return "produce";
+  if (section === "frozen") return "frozen";
+  if (section === "dairy" || section === "meat") return "refrigerated";
+  return "shelf";
+}
+
+function normalizeRaw(raw: string): string {
+  return raw
+    .trim()
+    .replace(/[⁄]/g, "/")
+    .replace(/[–—]/g, "-")
+    .replace(/\s+/g, " ");
+}
+
 export function parseIngredientLine(raw: string): Ingredient | null {
-  const text = raw.trim().replace(/\s+/g, " ");
+  return parseIngredientLines(raw)[0] ?? null;
+}
+
+export function parseIngredientLines(raw: string): Ingredient[] {
+  const original = raw.trim().replace(/\s+/g, " ");
+  if (!original) return [];
+  const pieces = splitCompound(normalizeRaw(original));
+  return pieces.flatMap((piece) => {
+    const parsed = parseOne(piece);
+    if (!parsed) return [];
+    return [{ ...parsed, text: pieces.length === 1 ? original : piece }];
+  });
+}
+
+function splitCompound(line: string): string[] {
+  const parts = line
+    .split(/,\s*(?=(?:[–\-]\s*)?\d|[½¼¾⅓⅔⅛⅜⅝⅞])|\s+and\s+(?=(?:[–\-]\s*)?\d|[½¼¾⅓⅔⅛⅜⅝⅞])/i)
+    .map((part) => part.trim())
+    .filter(Boolean);
+  return parts.length ? parts : [line];
+}
+
+function parseOne(input: string): Omit<Ingredient, "text"> | null {
+  let text = input.trim();
   if (!text) return null;
-  const leading = readQuantity(text);
-  if (!leading) {
-    return { text, quantity: null, unit: null, name: text };
-  }
-  let rest = leading.rest;
+  let optional = /\boptional\b/i.test(text);
+  const notes: string[] = [];
+  text = text
+    .replace(/\(([^)]*)\)/g, (_all, inner: string) => {
+      const bit = inner.trim();
+      if (!bit) return " ";
+      if (/optional/i.test(bit)) optional = true;
+      else notes.push(bit.replace(/^~\s*/, "~"));
+      return " ";
+    })
+    .replace(/\s+/g, " ")
+    .trim();
+  text = text.replace(/^[•*]\s*/, "");
+  text = text.replace(/^-\s*(\d)/, "$1");
+  text = text.replace(/^(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)/, (_all, _low: string, high: string) => high);
+
+  let qty: number | null = null;
   let unit: string | null = null;
-  const unitMatch = /^([A-Za-z]+)\b\s*/.exec(rest);
-  if (unitMatch && UNIT_WORDS[unitMatch[1].toLowerCase()]) {
-    unit = UNIT_WORDS[unitMatch[1].toLowerCase()];
-    rest = rest.slice(unitMatch[0].length);
+  let rest = text;
+  const slashUnit = /^(\d+)\s*\/\s*([A-Za-z]+)\b\.?\s*/.exec(text);
+  const impliedUnit = /^\/\s*([A-Za-z]+)\b\.?\s*/.exec(text);
+  if (slashUnit && UNIT_WORDS[slashUnit[2].toLowerCase().replace(/\.$/, "")]) {
+    qty = Number(slashUnit[1]);
+    unit = UNIT_WORDS[slashUnit[2].toLowerCase().replace(/\.$/, "")];
+    rest = text.slice(slashUnit[0].length);
+  } else if (impliedUnit && UNIT_WORDS[impliedUnit[1].toLowerCase().replace(/\.$/, "")]) {
+    qty = 1;
+    unit = UNIT_WORDS[impliedUnit[1].toLowerCase().replace(/\.$/, "")];
+    rest = text.slice(impliedUnit[0].length);
+  } else {
+    const leading = readQuantity(text);
+    if (leading) {
+      qty = leading.quantity;
+      rest = leading.rest;
+      const unitMatch = /^([A-Za-z]+)\b\.?\s*/.exec(rest);
+      const word = unitMatch?.[1].toLowerCase().replace(/\.$/, "") ?? "";
+      if (unitMatch && UNIT_WORDS[word]) {
+        unit = UNIT_WORDS[word];
+        rest = rest.slice(unitMatch[0].length);
+      }
+    }
   }
-  rest = rest.replace(/^of\s+/i, "").replace(/^\(.*\)\s*/, "").trim();
-  if (!rest) return { text, quantity: null, unit: null, name: text };
-  return { text, quantity: leading.quantity, unit, name: rest };
+  rest = rest.replace(/^of\s+/i, "").replace(/^-\s*/, "").trim();
+  const purpose = /^(.*?)\s+(to\s+.+)$/i.exec(rest);
+  if (purpose && purpose[1].trim().length > 1 && !/^to$/i.test(purpose[1])) {
+    notes.push(purpose[2].trim());
+    rest = purpose[1].trim();
+  }
+  const comma = rest.indexOf(",");
+  if (comma > 0) {
+    const extra = rest.slice(comma + 1).trim();
+    if (extra) notes.push(extra);
+    rest = rest.slice(0, comma).trim();
+  }
+  rest = rest.replace(/^(small|medium|large)\s+/i, (word) => {
+    notes.push(word.trim().toLowerCase());
+    return "";
+  });
+  const name = rest.replace(/\s+/g, " ").trim();
+  if (!name) return null;
+  const section = sectionForName(name);
+  const buy = !optional && !isPantryBasic(name);
+  return {
+    quantity: qty,
+    qty,
+    unit,
+    name,
+    section,
+    buy,
+    optional,
+    note: notes.length ? notes.join(", ").slice(0, 140) : null,
+  };
 }
 
 function readQuantity(text: string): { quantity: number; rest: string } | null {
   const mixed = /^(\d+)\s+(\d+)\/(\d+)\b\s*/.exec(text);
-  if (mixed) {
+  if (mixed && Number(mixed[3]) !== 0) {
     const quantity = Number(mixed[1]) + Number(mixed[2]) / Number(mixed[3]);
     if (quantity > 0) return { quantity, rest: text.slice(mixed[0].length) };
   }
@@ -131,7 +353,7 @@ function readQuantity(text: string): { quantity: number; rest: string } | null {
     if (quantity > 0) return { quantity, rest: text.slice(glyph[0].length) };
   }
   const fraction = /^(\d+)\/(\d+)\b\s*/.exec(text);
-  if (fraction) {
+  if (fraction && Number(fraction[2]) !== 0) {
     const quantity = Number(fraction[1]) / Number(fraction[2]);
     if (quantity > 0) return { quantity, rest: text.slice(fraction[0].length) };
   }
@@ -141,6 +363,53 @@ function readQuantity(text: string): { quantity: number; rest: string } | null {
     if (quantity > 0) return { quantity, rest: text.slice(number[0].length) };
   }
   return null;
+}
+
+export function normalizeIngredient(raw: unknown): Ingredient | null {
+  if (typeof raw === "string") return parseIngredientLine(raw);
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const body = raw as Record<string, unknown>;
+  const text = typeof body.text === "string" ? body.text.trim() : "";
+  const parsed = text ? parseIngredientLine(text) : null;
+  const nameSource = typeof body.name === "string" && body.name.trim() ? body.name.trim() : parsed?.name;
+  if (!nameSource) return null;
+  const qty = readLooseQty(body.qty ?? body.quantity, parsed?.qty ?? null);
+  const unit = typeof body.unit === "string" && body.unit.trim() ? normalizeUnit(body.unit) : body.unit === null ? null : parsed?.unit ?? null;
+  const section = typeof body.section === "string" && isFoodSection(body.section) ? body.section : parsed?.section ?? sectionForName(nameSource);
+  const optional = typeof body.optional === "boolean" ? body.optional : parsed?.optional ?? false;
+  const buy = typeof body.buy === "boolean" ? body.buy : parsed?.buy ?? !isPantryBasic(nameSource);
+  const note = typeof body.note === "string" ? body.note.trim() || null : body.note === null ? null : parsed?.note ?? null;
+  const name = nameSource.replace(/\s+/g, " ");
+  const display = text || [formatQuantity(qty ?? 0), unit, name].filter(Boolean).join(" ");
+  return {
+    text: display,
+    quantity: qty,
+    qty,
+    unit,
+    name,
+    section,
+    buy: optional ? false : buy,
+    optional,
+    note,
+  };
+}
+
+function readLooseQty(value: unknown, fallback: number | null): number | null {
+  if (value == null || value === "") return fallback;
+  if (typeof value === "number" && Number.isFinite(value) && value > 0) return value;
+  if (typeof value === "string") {
+    const read = readQuantity(value.trim());
+    if (read && !read.rest.trim()) return read.quantity;
+    const number = Number(value);
+    if (Number.isFinite(number) && number > 0) return number;
+  }
+  return fallback;
+}
+
+function normalizeUnit(value: string): string | null {
+  const word = value.trim().toLowerCase().replace(/\.$/, "");
+  if (!word) return null;
+  return UNIT_WORDS[word] ?? word.slice(0, 20);
 }
 
 export function formatQuantity(value: number): string {
@@ -166,15 +435,23 @@ export function unitLabel(unit: string | null, quantity: number): string {
   return unit;
 }
 
+export function amountText(quantity: number | null, unit: string | null): string {
+  if (quantity == null) return "";
+  const label = unitLabel(unit, quantity);
+  return `${formatQuantity(quantity)}${label ? ` ${label}` : ""}`.trim();
+}
+
 export function scaleIngredient(ingredient: Ingredient, factor: number): Ingredient {
   if (ingredient.quantity == null || !Number.isFinite(factor) || factor <= 0) return ingredient;
   const quantity = ingredient.quantity * factor;
   const unit = unitLabel(ingredient.unit, quantity);
   const name = ingredient.name;
-  const amount = `${formatQuantity(quantity)}${unit ? ` ${unit}` : ""}`.trim();
+  const amount = amountText(quantity, ingredient.unit);
   return {
     ...ingredient,
     quantity,
+    qty: quantity,
+    unit: ingredient.unit,
     text: `${amount} ${name}`.trim(),
   };
 }
@@ -185,117 +462,52 @@ export function groceryName(name: string): string {
   return titled.slice(0, 80);
 }
 
-type RecipeCounts = Map<string, number>;
-
-export function buildGroceryNote(quantity: number | null, unit: string | null, recipes: RecipeCounts): string {
-  const amount =
-    quantity == null
-      ? ""
-      : `${formatQuantity(quantity)}${unit ? ` ${unitLabel(unit, quantity)}` : ""}`.trim();
-  const names = [...recipes.entries()].map(([name, count]) => (count > 1 ? `${name} ×${count}` : name));
-  const recipeText = names.join(", ");
-  const note = amount && recipeText ? `${amount} · ${recipeText}` : amount || recipeText;
-  return note.slice(0, 140);
+export function combineAmounts(existing: string | null, addition: Ingredient): string | null {
+  const piece = amountText(addition.quantity, addition.unit);
+  if (!existing) return piece || null;
+  const parsed = parseAmount(existing);
+  if (!parsed) return existing;
+  if (!piece || addition.quantity == null) return existing;
+  if (parsed.quantity != null && parsed.unit === addition.unit) {
+    return amountText(parsed.quantity + addition.quantity, addition.unit) || null;
+  }
+  if (existing === piece) return existing;
+  return `${existing} + ${piece}`.slice(0, 140);
 }
 
-export function parseGroceryNote(note: string | null): {
-  structured: boolean;
-  quantity: number | null;
-  unit: string | null;
-  amountText: string;
-  recipes: RecipeCounts;
-} {
-  const recipes: RecipeCounts = new Map();
-  const empty = { structured: true, quantity: null, unit: null, amountText: "", recipes };
-  if (!note || !note.trim()) return empty;
-  const marker = note.lastIndexOf(" · ");
-  const recipeText = marker === -1 ? note : note.slice(marker + 3);
-  const amountText = marker === -1 ? "" : note.slice(0, marker).trim();
-  if (amountText && !amountText.split("+").every((chunk) => isAmountChunk(chunk))) {
-    return { structured: false, quantity: null, unit: null, amountText: "", recipes };
-  }
-  if (marker === -1 && /^\d/.test(note.trim())) {
-    return { structured: false, quantity: null, unit: null, amountText: "", recipes };
-  }
-  for (const part of recipeText.split(",")) {
-    const match = /^(.*?)(?:\s×(\d+))?$/.exec(part.trim());
-    if (!match || !match[1].trim()) continue;
-    recipes.set(match[1].trim(), Math.max(1, Number(match[2] || 1)));
-  }
-  if (!amountText) return { structured: true, quantity: null, unit: null, amountText: "", recipes };
-  const chunks = amountText.split("+").map((chunk) => chunk.trim());
-  if (chunks.length !== 1) return { structured: true, quantity: null, unit: null, amountText, recipes };
-  const read = readQuantity(chunks[0]);
-  if (!read) return { structured: true, quantity: null, unit: null, amountText, recipes };
-  const unitWord = read.rest.trim().toLowerCase();
-  const unit = unitWord ? (UNIT_WORDS[unitWord] ?? null) : null;
-  if (unitWord && !unit) return { structured: false, quantity: null, unit: null, amountText: "", recipes };
-  return { structured: true, quantity: read.quantity, unit, amountText, recipes };
-}
-
-function isAmountChunk(chunk: string): boolean {
-  const text = chunk.trim();
-  const read = readQuantity(text);
-  if (!read) return false;
-  const unitWord = read.rest.trim().toLowerCase();
-  return unitWord === "" || Boolean(UNIT_WORDS[unitWord]);
-}
-
-export function mergeGroceryNote(existing: string | null, addition: Ingredient, recipeName: string): string {
-  const parsed = parseGroceryNote(existing);
-  if (!parsed.structured) {
-    if (!existing) return recipeName.slice(0, 140);
-    if (existing.toLowerCase().includes(recipeName.toLowerCase())) return existing.slice(0, 140);
-    return `${existing}, ${recipeName}`.slice(0, 140);
-  }
-  parsed.recipes.set(recipeName, (parsed.recipes.get(recipeName) ?? 0) + 1);
-  const piece = amountPiece(addition);
-  let amount = parsed.amountText;
-  if (piece) {
-    if (!amount) amount = piece;
-    else if (parsed.quantity != null && parsed.unit === addition.unit) {
-      amount = amountPiece({ ...addition, quantity: parsed.quantity + (addition.quantity ?? 0) });
-    } else amount = `${amount} + ${piece}`;
-  }
-  const names = [...parsed.recipes.entries()].map(([name, count]) => (count > 1 ? `${name} ×${count}` : name));
-  const recipeText = names.join(", ");
-  const note = amount && recipeText ? `${amount} · ${recipeText}` : amount || recipeText;
-  return note.slice(0, 140);
-}
-
-function amountPiece(ingredient: Ingredient): string {
-  if (ingredient.quantity == null) return "";
-  const unit = unitLabel(ingredient.unit, ingredient.quantity);
-  return `${formatQuantity(ingredient.quantity)}${unit ? ` ${unit}` : ""}`.trim();
-}
-
-export function unmergeGroceryNote(existing: string | null, addition: Ingredient, recipeName: string): string | null {
-  const parsed = parseGroceryNote(existing);
-  if (!parsed.structured) {
-    if (!existing) return null;
-    const suffix = `, ${recipeName}`;
-    if (existing.endsWith(suffix)) {
-      const rest = existing.slice(0, -suffix.length).trim();
-      return rest || null;
-    }
+export function subtractAmount(existing: string | null, addition: Ingredient): string | null {
+  if (!existing) return null;
+  const parsed = parseAmount(existing);
+  const piece = amountText(addition.quantity, addition.unit);
+  if (!parsed) {
+    if (piece && existing.endsWith(` + ${piece}`)) return existing.slice(0, -(piece.length + 3)) || null;
+    if (piece && existing.startsWith(`${piece} + `)) return existing.slice(piece.length + 3) || null;
     return existing;
   }
-  const count = parsed.recipes.get(recipeName) ?? 0;
-  if (count <= 1) parsed.recipes.delete(recipeName);
-  else parsed.recipes.set(recipeName, count - 1);
-  const piece = amountPiece(addition);
-  let amount = parsed.amountText;
-  if (piece) {
-    if (parsed.quantity != null && parsed.unit === addition.unit && addition.quantity != null) {
-      const next = parsed.quantity - addition.quantity;
-      amount = next > 0.001 ? amountPiece({ ...addition, quantity: next }) : "";
-    } else if (amount === piece) amount = "";
-    else if (amount.endsWith(` + ${piece}`)) amount = amount.slice(0, -(piece.length + 3));
-    else if (amount.startsWith(`${piece} + `)) amount = amount.slice(piece.length + 3);
+  if (addition.quantity == null) return existing;
+  if (parsed.quantity != null && parsed.unit === addition.unit) {
+    const next = parsed.quantity - addition.quantity;
+    return next > 0.001 ? amountText(next, addition.unit) : null;
   }
-  const names = [...parsed.recipes.entries()].map(([name, times]) => (times > 1 ? `${name} ×${times}` : name));
-  const recipeText = names.join(", ");
-  if (!amount && !recipeText) return null;
-  const note = amount && recipeText ? `${amount} · ${recipeText}` : amount || recipeText;
-  return note.slice(0, 140);
+  if (existing === piece) return null;
+  if (piece && existing.endsWith(` + ${piece}`)) return existing.slice(0, -(piece.length + 3)) || null;
+  if (piece && existing.startsWith(`${piece} + `)) return existing.slice(piece.length + 3) || null;
+  return existing;
+}
+
+export function parseAmount(note: string | null): { quantity: number | null; unit: string | null } | null {
+  if (!note || !note.trim()) return { quantity: null, unit: null };
+  const text = note.trim();
+  if (text.includes("+") || text.includes("·")) return null;
+  const read = readQuantity(text);
+  if (!read) return null;
+  const unitWord = read.rest.trim().toLowerCase().replace(/\.$/, "");
+  if (!unitWord) return { quantity: read.quantity, unit: null };
+  const unit = UNIT_WORDS[unitWord];
+  if (!unit || read.rest.trim().split(/\s+/).length > 1) return null;
+  return { quantity: read.quantity, unit };
+}
+
+export function normalizeStoredIngredient(raw: unknown): Ingredient | null {
+  return normalizeIngredient(raw);
 }

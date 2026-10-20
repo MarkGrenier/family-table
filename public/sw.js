@@ -1,5 +1,5 @@
-const CACHE = "grocery-shell-v9";
-const SHELL = ["/", "/styles.css?v=8", "/app.js?v=8", "/manifest.json", "/icons/icon-192.png", "/icons/apple-touch-icon.png"];
+const CACHE = "grocery-shell-v13";
+const SHELL = ["/", "/styles.css?v=12", "/app.js?v=12", "/manifest.json", "/icons/icon-192.png", "/icons/apple-touch-icon.png"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(SHELL)));

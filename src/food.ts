@@ -1,10 +1,12 @@
-import { createItem, deleteItem, listItems, updateItem } from "./db";
+import { createItem, deleteItem, listItems, updateItem, type Item } from "./db";
 import {
-  buildGroceryNote,
+  amountText,
+  categoryForSection,
+  combineAmounts,
   groceryName,
-  mergeGroceryNote,
+  normalizeStoredIngredient,
   scaleIngredient,
-  unmergeGroceryNote,
+  subtractAmount,
   type Ingredient,
 } from "./ingredients";
 import { HttpError } from "./http";
@@ -22,6 +24,10 @@ export type Recipe = {
   favorite: boolean;
   lastMade: string | null;
   timesMade: number;
+  cookedToday: boolean;
+  averageRating: number | null;
+  lastComment: string | null;
+  cookware: string[];
   externalId: string | null;
   coversNights: number | null;
   nightBefore: string[];
@@ -77,12 +83,13 @@ type RecipeRow = {
   cook_steps_json: string;
   kids_plates: string | null;
   reheating: string | null;
+  cookware_json: string;
   created_at: string;
   updated_at: string;
 };
 
 const RECIPE_COLUMNS =
-  "id, name, image_url, servings, ingredients_json, steps_json, total_time, source_url, favorite, external_id, covers_nights, night_before_json, prep_steps_json, cook_steps_json, kids_plates, reheating, created_at, updated_at";
+  "id, name, image_url, servings, ingredients_json, steps_json, total_time, source_url, favorite, external_id, covers_nights, night_before_json, prep_steps_json, cook_steps_json, kids_plates, reheating, cookware_json, created_at, updated_at";
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -102,7 +109,7 @@ function recipeFromRow(row: RecipeRow): Recipe {
     name: row.name,
     imageUrl: row.image_url,
     servings: Number(row.servings) || 4,
-    ingredients: parseJson<Ingredient[]>(row.ingredients_json, []),
+    ingredients: parseJson<unknown[]>(row.ingredients_json, []).map((entry) => normalizeStoredIngredient(entry)).filter((entry): entry is Ingredient => Boolean(entry)),
     steps: parseJson<string[]>(row.steps_json, []),
     totalTime: row.total_time,
     sourceUrl: row.source_url,
@@ -113,9 +120,21 @@ function recipeFromRow(row: RecipeRow): Recipe {
     coversNights: row.covers_nights == null ? null : Number(row.covers_nights),
     nightBefore: parseJson<string[]>(row.night_before_json, []),
     prepSteps: parseJson<string[]>(row.prep_steps_json, []),
-    cookSteps: parseJson<CookStep[]>(row.cook_steps_json, []),
+    cookSteps: parseJson<unknown[]>(row.cook_steps_json, []).map((step) => {
+      if (typeof step === "string") return { text: step, minutes: null, ingredients: [] };
+      const body = (step ?? {}) as { text?: string; minutes?: number | null; ingredients?: Array<number | string> };
+      return {
+        text: body.text ?? "",
+        minutes: body.minutes ?? null,
+        ingredients: Array.isArray(body.ingredients) ? body.ingredients : [],
+      };
+    }),
     kidsPlates: row.kids_plates,
     reheating: row.reheating,
+    cookware: parseJson<string[]>(row.cookware_json, []),
+    cookedToday: false,
+    averageRating: null,
+    lastComment: null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -130,26 +149,74 @@ export function easternToday(now = new Date()): string {
   }).format(now);
 }
 
-async function madeStats(db: D1Database): Promise<Map<string, { lastMade: string; timesMade: number }>> {
-  const rows = await db
+type RecipeMeta = {
+  lastMade: string | null;
+  timesMade: number;
+  cookedToday: boolean;
+  averageRating: number | null;
+  lastComment: string | null;
+};
+
+async function recipeMeta(db: D1Database): Promise<Map<string, RecipeMeta>> {
+  const today = easternToday();
+  const plans = await db
     .prepare(
-      `SELECT recipe_id, MAX(plan_date) AS last_made, COUNT(*) AS times_made
-       FROM plan_entries
-       WHERE entry_type = 'recipe' AND recipe_id IS NOT NULL AND plan_date <= ?
-       GROUP BY recipe_id`,
+      `SELECT recipe_id, plan_date FROM plan_entries
+       WHERE entry_type = 'recipe' AND recipe_id IS NOT NULL AND plan_date <= ?`,
     )
-    .bind(easternToday())
-    .all<{ recipe_id: string; last_made: string; times_made: number }>();
-  const stats = new Map<string, { lastMade: string; timesMade: number }>();
-  for (const row of rows.results ?? []) {
-    stats.set(row.recipe_id, { lastMade: row.last_made, timesMade: Number(row.times_made) || 0 });
+    .bind(today)
+    .all<{ recipe_id: string; plan_date: string }>();
+  const cooks = await db
+    .prepare(`SELECT recipe_id, made_on FROM recipe_made`)
+    .all<{ recipe_id: string; made_on: string }>();
+  const feedback = await db
+    .prepare(`SELECT recipe_id, stars, comment, created_at FROM recipe_feedback ORDER BY created_at ASC`)
+    .all<{ recipe_id: string; stars: number; comment: string | null; created_at: string }>();
+  const stats = new Map<string, { count: number; dates: Set<string>; cookedToday: boolean; stars: number[]; lastComment: string | null }>();
+  const bucket = (id: string) => {
+    const current = stats.get(id);
+    if (current) return current;
+    const created = { count: 0, dates: new Set<string>(), cookedToday: false, stars: [] as number[], lastComment: null as string | null };
+    stats.set(id, created);
+    return created;
+  };
+  for (const row of plans.results ?? []) {
+    const item = bucket(row.recipe_id);
+    item.count += 1;
+    item.dates.add(row.plan_date);
   }
-  return stats;
+  for (const row of cooks.results ?? []) {
+    const item = bucket(row.recipe_id);
+    if (row.made_on <= today && !item.dates.has(row.made_on)) {
+      item.count += 1;
+      item.dates.add(row.made_on);
+    } else if (row.made_on <= today) item.dates.add(row.made_on);
+    if (row.made_on === today) item.cookedToday = true;
+  }
+  for (const row of feedback.results ?? []) {
+    const item = bucket(row.recipe_id);
+    item.stars.push(Number(row.stars));
+    if (row.comment && row.comment.trim()) item.lastComment = row.comment.trim();
+  }
+  const meta = new Map<string, RecipeMeta>();
+  for (const [id, item] of stats) {
+    const dates = [...item.dates].sort();
+    const average = item.stars.length ? item.stars.reduce((sum, star) => sum + star, 0) / item.stars.length : null;
+    meta.set(id, {
+      lastMade: dates.length ? dates[dates.length - 1] : null,
+      timesMade: item.count,
+      cookedToday: item.cookedToday,
+      averageRating: average == null ? null : Math.round(average * 10) / 10,
+      lastComment: item.lastComment,
+    });
+  }
+  return meta;
 }
 
-function withMade(recipe: Recipe, stats: Map<string, { lastMade: string; timesMade: number }>): Recipe {
+function withMeta(recipe: Recipe, stats: Map<string, RecipeMeta>): Recipe {
   const made = stats.get(recipe.id);
-  return made ? { ...recipe, lastMade: made.lastMade, timesMade: made.timesMade } : recipe;
+  if (!made) return recipe;
+  return { ...recipe, ...made };
 }
 
 export async function listRecipes(db: D1Database, query = "", favoriteOnly = false): Promise<Recipe[]> {
@@ -163,15 +230,15 @@ export async function listRecipes(db: D1Database, query = "", favoriteOnly = fal
   if (favoriteOnly) where.push("favorite = 1");
   const sql = `SELECT ${RECIPE_COLUMNS} FROM recipes${where.length ? ` WHERE ${where.join(" AND ")}` : ""} ORDER BY favorite DESC, name COLLATE NOCASE`;
   const rows = await db.prepare(sql).bind(...binds).all<RecipeRow>();
-  const stats = await madeStats(db);
-  return (rows.results ?? []).map((row) => withMade(recipeFromRow(row), stats));
+  const stats = await recipeMeta(db);
+  return (rows.results ?? []).map((row) => withMeta(recipeFromRow(row), stats));
 }
 
 export async function getRecipe(db: D1Database, id: string): Promise<Recipe | null> {
   const row = await db.prepare(`SELECT ${RECIPE_COLUMNS} FROM recipes WHERE id = ?`).bind(id).first<RecipeRow>();
   if (!row) return null;
-  const stats = await madeStats(db);
-  return withMade(recipeFromRow(row), stats);
+  const stats = await recipeMeta(db);
+  return withMeta(recipeFromRow(row), stats);
 }
 
 export async function createRecipe(db: D1Database, input: RecipeInput): Promise<Recipe> {
@@ -181,9 +248,9 @@ export async function createRecipe(db: D1Database, input: RecipeInput): Promise<
     .prepare(
       `INSERT INTO recipes (
          id, name, image_url, servings, ingredients_json, steps_json, total_time, source_url, favorite,
-         external_id, covers_nights, night_before_json, prep_steps_json, cook_steps_json, kids_plates, reheating,
+         external_id, covers_nights, night_before_json, prep_steps_json, cook_steps_json, kids_plates, reheating, cookware_json,
          created_at, updated_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .bind(
       id,
@@ -202,6 +269,7 @@ export async function createRecipe(db: D1Database, input: RecipeInput): Promise<
       JSON.stringify(input.cookSteps ?? []),
       input.kidsPlates ?? null,
       input.reheating ?? null,
+      JSON.stringify(input.cookware ?? []),
       now,
       now,
     )
@@ -231,13 +299,14 @@ export async function updateRecipe(db: D1Database, id: string, patch: RecipePatc
     cookSteps: patch.cookSteps ?? existing.cookSteps,
     kidsPlates: patch.kidsPlates === undefined ? existing.kidsPlates : patch.kidsPlates,
     reheating: patch.reheating === undefined ? existing.reheating : patch.reheating,
+    cookware: patch.cookware ?? existing.cookware,
     updatedAt: nowIso(),
   };
   await db
     .prepare(
       `UPDATE recipes
        SET name = ?, image_url = ?, servings = ?, ingredients_json = ?, steps_json = ?, total_time = ?, source_url = ?, favorite = ?,
-           external_id = ?, covers_nights = ?, night_before_json = ?, prep_steps_json = ?, cook_steps_json = ?, kids_plates = ?, reheating = ?,
+           external_id = ?, covers_nights = ?, night_before_json = ?, prep_steps_json = ?, cook_steps_json = ?, kids_plates = ?, reheating = ?, cookware_json = ?,
            updated_at = ?
        WHERE id = ?`,
     )
@@ -257,6 +326,7 @@ export async function updateRecipe(db: D1Database, id: string, patch: RecipePatc
       JSON.stringify(next.cookSteps),
       next.kidsPlates,
       next.reheating,
+      JSON.stringify(next.cookware),
       next.updatedAt,
       id,
     )
@@ -544,6 +614,7 @@ async function upsertRecipe(db: D1Database, input: RecipeInput): Promise<Recipe>
     cookSteps: input.cookSteps ?? [],
     kidsPlates: input.kidsPlates ?? null,
     reheating: input.reheating ?? null,
+    cookware: input.cookware ?? [],
     imageUrl: input.imageUrl === undefined ? existing.imageUrl : input.imageUrl,
     favorite: input.favorite === undefined ? existing.favorite : input.favorite,
   });
@@ -630,8 +701,8 @@ async function removeOneSource(
     await deleteItem(db, itemId);
     return;
   }
-  if (ingredient && recipeName) {
-    await updateItem(db, itemId, { quantityNote: unmergeGroceryNote(item.quantityNote, ingredient, recipeName) });
+  if (ingredient) {
+    await updateItem(db, itemId, { quantityNote: subtractAmount(item.quantityNote, ingredient) });
   }
   await db.prepare(`DELETE FROM grocery_sources WHERE item_id = ? AND source_key = ?`).bind(itemId, sourceKey).run();
 }
@@ -639,24 +710,25 @@ async function removeOneSource(
 async function addOneIngredient(
   db: D1Database,
   ingredient: Ingredient,
-  recipeName: string,
+  _recipeName: string,
   sourceKey: string,
 ): Promise<keyof GroceryChange> {
+  if (ingredient.buy === false || ingredient.optional) return "skipped";
   const name = groceryName(ingredient.name);
   const items = await listItems(db);
   const existing = items.find((item) => !item.checked && item.name.toLowerCase() === name.toLowerCase());
   if (!existing) {
-    const recipes = new Map<string, number>([[recipeName, 1]]);
     const item = await createItem(db, {
       name,
-      quantityNote: buildGroceryNote(ingredient.quantity, ingredient.unit, recipes),
+      quantityNote: amountText(ingredient.quantity, ingredient.unit) || null,
       store: "local",
-      category: "shelf",
+      category: categoryForSection(ingredient.section),
       checked: false,
       brand: null,
       asin: null,
       barcode: null,
       staple: false,
+      section: ingredient.section,
     });
     await db.prepare(`INSERT INTO grocery_sources (item_id, source_key) VALUES (?, ?)`).bind(item.id, sourceKey).run();
     return "added";
@@ -673,8 +745,112 @@ async function addOneIngredient(
   if (Number(sourceCount?.n ?? 0) === 0) {
     await db.prepare(`INSERT INTO grocery_sources (item_id, source_key) VALUES (?, ?)`).bind(existing.id, `user:${existing.id}`).run();
   }
-  const note = mergeGroceryNote(existing.quantityNote, ingredient, recipeName);
-  await updateItem(db, existing.id, { quantityNote: note || null });
+  const note = combineAmounts(existing.quantityNote, ingredient);
+  await updateItem(db, existing.id, {
+    quantityNote: note,
+    section: existing.section ?? ingredient.section,
+  });
   await db.prepare(`INSERT INTO grocery_sources (item_id, source_key) VALUES (?, ?)`).bind(existing.id, sourceKey).run();
   return "updated";
+}
+
+export type ItemRecipe = { id: string; name: string; imageUrl: string | null };
+
+export async function recipesForGroceries(db: D1Database): Promise<Record<string, ItemRecipe[]>> {
+  const sources = await db.prepare(`SELECT item_id, source_key FROM grocery_sources`).all<{ item_id: string; source_key: string }>();
+  const plans = await db
+    .prepare(`SELECT id, recipe_id FROM plan_entries WHERE recipe_id IS NOT NULL`)
+    .all<{ id: string; recipe_id: string }>();
+  const recipes = await db.prepare(`SELECT id, name, image_url FROM recipes`).all<{ id: string; name: string; image_url: string | null }>();
+  const planRecipe = new Map((plans.results ?? []).map((row) => [row.id, row.recipe_id]));
+  const recipeById = new Map((recipes.results ?? []).map((row) => [row.id, row]));
+  const linked: Record<string, ItemRecipe[]> = {};
+  for (const source of sources.results ?? []) {
+    const parts = source.source_key.split(":");
+    let recipeId: string | null = null;
+    if (parts[0] === "recipe") recipeId = parts[1] ?? null;
+    if (parts[0] === "plan") recipeId = planRecipe.get(parts[1] ?? "") ?? null;
+    if (!recipeId) continue;
+    const recipe = recipeById.get(recipeId);
+    if (!recipe) continue;
+    const list = linked[source.item_id] ?? [];
+    if (!list.some((entry) => entry.id === recipe.id)) {
+      list.push({ id: recipe.id, name: recipe.name, imageUrl: recipe.image_url });
+    }
+    linked[source.item_id] = list;
+  }
+  return linked;
+}
+
+export async function deleteRecipeSourcedItems(db: D1Database): Promise<number> {
+  const rows = await db
+    .prepare(`SELECT DISTINCT item_id FROM grocery_sources WHERE source_key LIKE 'plan:%' OR source_key LIKE 'recipe:%'`)
+    .all<{ item_id: string }>();
+  let deleted = 0;
+  for (const row of rows.results ?? []) {
+    const item = (await listItems(db)).find((entry) => entry.id === row.item_id);
+    if (!item) continue;
+    await deleteItem(db, row.item_id);
+    deleted += 1;
+  }
+  return deleted;
+}
+
+export async function markCooked(db: D1Database, recipeId: string): Promise<Recipe> {
+  const existing = await getRecipe(db, recipeId);
+  if (!existing) throw new HttpError(404, "That recipe isn't here anymore.");
+  const today = easternToday();
+  const already = await db
+    .prepare(`SELECT id FROM recipe_made WHERE recipe_id = ? AND made_on = ?`)
+    .bind(recipeId, today)
+    .first<{ id: string }>();
+  if (!already) {
+    await db
+      .prepare(`INSERT INTO recipe_made (id, recipe_id, made_on, created_at) VALUES (?, ?, ?, ?)`)
+      .bind(crypto.randomUUID(), recipeId, today, nowIso())
+      .run();
+  }
+  const recipe = await getRecipe(db, recipeId);
+  if (!recipe) throw new HttpError(404, "That recipe isn't here anymore.");
+  return recipe;
+}
+
+export type RecipeFeedback = { id: string; recipeId: string; stars: number; comment: string | null; date: string };
+
+export async function listFeedback(db: D1Database, recipeId: string): Promise<RecipeFeedback[]> {
+  const recipe = await getRecipe(db, recipeId);
+  if (!recipe) throw new HttpError(404, "That recipe isn't here anymore.");
+  const rows = await db
+    .prepare(`SELECT id, recipe_id, stars, comment, created_at FROM recipe_feedback WHERE recipe_id = ? ORDER BY created_at DESC`)
+    .bind(recipeId)
+    .all<{ id: string; recipe_id: string; stars: number; comment: string | null; created_at: string }>();
+  return (rows.results ?? []).map((row) => ({
+    id: row.id,
+    recipeId: row.recipe_id,
+    stars: Number(row.stars),
+    comment: row.comment,
+    date: row.created_at.slice(0, 10),
+  }));
+}
+
+export async function addFeedback(
+  db: D1Database,
+  recipeId: string,
+  stars: number,
+  comment: string | null,
+): Promise<RecipeFeedback> {
+  const recipe = await getRecipe(db, recipeId);
+  if (!recipe) throw new HttpError(404, "That recipe isn't here anymore.");
+  const id = crypto.randomUUID();
+  const createdAt = nowIso();
+  await db
+    .prepare(`INSERT INTO recipe_feedback (id, recipe_id, stars, comment, created_at) VALUES (?, ?, ?, ?, ?)`)
+    .bind(id, recipeId, stars, comment, createdAt)
+    .run();
+  return { id, recipeId, stars, comment, date: createdAt.slice(0, 10) };
+}
+
+export async function withGroceryRecipes<T extends Item>(db: D1Database, items: T[]): Promise<Array<T & { recipes: ItemRecipe[] }>> {
+  const linked = await recipesForGroceries(db);
+  return items.map((item) => ({ ...item, recipes: linked[item.id] ?? [] }));
 }

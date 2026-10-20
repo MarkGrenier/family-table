@@ -1,10 +1,10 @@
 import { HttpError } from "./http";
-import { parseIngredientLine, type Ingredient } from "./ingredients";
+import { isFoodSection, normalizeIngredient, parseIngredientLines, type FoodSection, type Ingredient } from "./ingredients";
 
 export type Meal = "breakfast" | "lunch" | "dinner";
 export type PlanType = "recipe" | "leftovers" | "note";
 
-export type CookStep = { text: string; minutes: number | null };
+export type CookStep = { text: string; minutes: number | null; ingredients: Array<number | string> };
 
 export type RecipeInput = {
   name: string;
@@ -16,6 +16,7 @@ export type RecipeInput = {
   sourceUrl: string | null;
   favorite: boolean;
   externalId?: string | null;
+  cookware?: string[];
   coversNights?: number | null;
   nightBefore?: string[];
   prepSteps?: string[];
@@ -140,18 +141,44 @@ export function cleanIngredients(value: unknown): Ingredient[] {
   if (value.length > 80) throw new HttpError(400, "That's too many ingredients.");
   const ingredients: Ingredient[] = [];
   for (const entry of value) {
-    const line =
-      typeof entry === "string"
-        ? entry
-        : entry && typeof entry === "object" && typeof (entry as { text?: unknown }).text === "string"
-          ? (entry as { text: string }).text
-          : "";
-    if (typeof line !== "string") throw new HttpError(400, "Each ingredient should be a line of text.");
-    if (line.trim().length > 200) throw new HttpError(400, "One of those ingredients is too long.");
-    const parsed = parseIngredientLine(line);
-    if (parsed) ingredients.push(parsed);
+    if (typeof entry === "string") {
+      if (entry.trim().length > 200) throw new HttpError(400, "One of those ingredients is too long.");
+      ingredients.push(...parseIngredientLines(entry));
+      continue;
+    }
+    if (entry && typeof entry === "object") {
+      const text = typeof (entry as { text?: unknown }).text === "string" ? (entry as { text: string }).text : "";
+      if (text.length > 200) throw new HttpError(400, "One of those ingredients is too long.");
+      const parsed = normalizeIngredient(entry);
+      if (parsed) ingredients.push(parsed);
+      continue;
+    }
+    throw new HttpError(400, "Each ingredient should be a line of text.");
   }
   return ingredients;
+}
+
+export function cleanCookware(value: unknown): string[] {
+  if (value == null) return [];
+  if (!Array.isArray(value)) throw new HttpError(400, "Cookware should be a list.");
+  if (value.length > 40) throw new HttpError(400, "That's too much cookware.");
+  const items: string[] = [];
+  for (const entry of value) {
+    if (typeof entry !== "string") throw new HttpError(400, "Each piece of cookware should be a few words.");
+    const text = entry.trim().replace(/\s+/g, " ");
+    if (!text) continue;
+    if (text.length > 80) throw new HttpError(400, "One of those cookware lines is too long.");
+    items.push(text);
+  }
+  return items;
+}
+
+export function cleanSection(value: unknown): FoodSection | null {
+  if (value == null || value === "") return null;
+  if (typeof value !== "string" || !isFoodSection(value)) {
+    throw new HttpError(400, "Pick a grocery section.");
+  }
+  return value;
 }
 
 export function cleanSteps(value: unknown): string[] {
@@ -199,7 +226,7 @@ export function cleanCookSteps(value: unknown): CookStep[] {
       const text = entry.trim().replace(/\s+/g, " ");
       if (!text) continue;
       if (text.length > 1000) throw new HttpError(400, "One of those steps is too long.");
-      steps.push({ text, minutes: null });
+      steps.push({ text, minutes: null, ingredients: [] });
       continue;
     }
     if (!entry || typeof entry !== "object" || typeof (entry as { text?: unknown }).text !== "string") {
@@ -217,9 +244,28 @@ export function cleanCookSteps(value: unknown): CookStep[] {
       }
       minutes = number;
     }
-    steps.push({ text, minutes });
+    const ingredients = cleanStepIngredients((entry as { ingredients?: unknown }).ingredients);
+    steps.push({ text, minutes, ingredients });
   }
   return steps;
+}
+
+function cleanStepIngredients(value: unknown): Array<number | string> {
+  if (value == null) return [];
+  if (!Array.isArray(value)) throw new HttpError(400, "A step's ingredients should be a list.");
+  const refs: Array<number | string> = [];
+  for (const entry of value) {
+    if (typeof entry === "number" && Number.isInteger(entry) && entry >= 0 && entry < 80) {
+      refs.push(entry);
+      continue;
+    }
+    if (typeof entry === "string" && entry.trim()) {
+      refs.push(entry.trim().slice(0, 120));
+      continue;
+    }
+    throw new HttpError(400, "A step ingredient should be a number or a name.");
+  }
+  return refs;
 }
 
 function recipeSections(body: Record<string, unknown>, steps: string[]) {
@@ -232,6 +278,7 @@ function recipeSections(body: Record<string, unknown>, steps: string[]) {
     nightBefore: cleanSteps(body.nightBefore),
     prepSteps: cleanSteps(body.prepSteps),
     cookSteps,
+    cookware: cleanCookware(body.cookware),
     kidsPlates: optionalText(body.kidsPlates, "Kids' plates", 500),
     reheating: optionalText(body.reheating, "Reheating", 500),
   };
@@ -265,6 +312,7 @@ export function parseRecipePatch(body: Record<string, unknown>): RecipePatch {
   if ("nightBefore" in body) patch.nightBefore = cleanSteps(body.nightBefore);
   if ("prepSteps" in body) patch.prepSteps = cleanSteps(body.prepSteps);
   if ("cookSteps" in body) patch.cookSteps = cleanCookSteps(body.cookSteps);
+  if ("cookware" in body) patch.cookware = cleanCookware(body.cookware);
   if ("kidsPlates" in body) patch.kidsPlates = optionalText(body.kidsPlates, "Kids' plates", 500);
   if ("reheating" in body) patch.reheating = optionalText(body.reheating, "Reheating", 500);
   if (Object.keys(patch).length === 0) throw new HttpError(400, "Nothing to change.");

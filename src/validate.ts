@@ -1,4 +1,5 @@
 import { HttpError } from "./http";
+import { isFoodSection, type FoodSection } from "./ingredients";
 
 export const STORES = ["costco", "local", "amazon"] as const;
 export type Store = (typeof STORES)[number];
@@ -19,6 +20,10 @@ export type ItemInput = {
   asin: string | null;
   barcode: string | null;
   staple: boolean;
+  section?: FoodSection | null;
+  imageUrl?: string | null;
+  substitute?: string | null;
+  notes?: string | null;
 };
 
 export type ItemPatch = {
@@ -31,6 +36,10 @@ export type ItemPatch = {
   asin?: string | null;
   barcode?: string | null;
   staple?: boolean;
+  section?: FoodSection | null;
+  imageUrl?: string | null;
+  substitute?: string | null;
+  notes?: string | null;
 };
 
 export type StapleInput = {
@@ -133,7 +142,17 @@ export function parseNewItem(body: Record<string, unknown>): ItemInput {
     asin: cleanAsin(body.asin),
     barcode: body.barcode == null || body.barcode === "" ? null : cleanBarcode(body.barcode),
     staple: body.staple == null ? false : cleanBool(body.staple, "Staple"),
+    section: cleanFoodSection(body.section),
+    imageUrl: cleanOptional(body.imageUrl, "The photo", 500),
+    substitute: cleanOptional(body.substitute, "The substitute", 280),
+    notes: cleanOptional(body.notes, "The note", 500),
   };
+}
+
+function cleanFoodSection(value: unknown): FoodSection | null {
+  if (value == null || value === "") return null;
+  if (typeof value !== "string" || !isFoodSection(value)) throw new HttpError(400, "Pick a grocery section.");
+  return value;
 }
 
 export function parseItemPatch(body: Record<string, unknown>): ItemPatch {
@@ -150,6 +169,10 @@ export function parseItemPatch(body: Record<string, unknown>): ItemPatch {
   if ("asin" in body) patch.asin = cleanAsin(body.asin);
   if ("barcode" in body) patch.barcode = cleanBarcode(body.barcode);
   if ("staple" in body) patch.staple = cleanBool(body.staple, "Staple");
+  if ("section" in body) patch.section = cleanFoodSection(body.section);
+  if ("imageUrl" in body) patch.imageUrl = cleanOptional(body.imageUrl, "The photo", 500);
+  if ("substitute" in body) patch.substitute = cleanOptional(body.substitute, "The substitute", 280);
+  if ("notes" in body) patch.notes = cleanOptional(body.notes, "The note", 500);
   if (Object.keys(patch).length === 0) {
     throw new HttpError(400, "Nothing to change.");
   }

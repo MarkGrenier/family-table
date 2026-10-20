@@ -1,4 +1,5 @@
 import { HttpError } from "./http";
+import type { FoodSection } from "./ingredients";
 import {
   barcodeKeys,
   mergedCategory,
@@ -20,6 +21,10 @@ export type Item = {
   barcode: string | null;
   staple: boolean;
   stapleId: string | null;
+  section: FoodSection | null;
+  imageUrl: string | null;
+  substitute: string | null;
+  notes: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -59,6 +64,10 @@ type ItemRow = {
   barcode: string | null;
   staple: number;
   staple_id: string | null;
+  section: string | null;
+  image_url: string | null;
+  substitute: string | null;
+  notes: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -76,7 +85,7 @@ type StapleRow = {
 };
 
 const ITEM_COLUMNS =
-  "id, name, quantity_note, store, category, checked, brand, asin, barcode, staple, staple_id, created_at, updated_at";
+  "id, name, quantity_note, store, category, checked, brand, asin, barcode, staple, staple_id, section, image_url, substitute, notes, created_at, updated_at";
 
 const STAPLE_COLUMNS = "id, name, store, category, brand, asin, barcode, created_at, updated_at";
 
@@ -97,6 +106,10 @@ function toItem(row: ItemRow): Item {
     barcode: row.barcode,
     staple: row.staple === 1,
     stapleId: row.staple_id,
+    section: (row.section as FoodSection | null) ?? null,
+    imageUrl: row.image_url,
+    substitute: row.substitute,
+    notes: row.notes,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -244,7 +257,7 @@ export async function createItem(db: D1Database, input: ItemInput): Promise<Item
   const stapleFlag = remember ? 1 : 0;
   statements.push(
     db
-      .prepare(`INSERT INTO items (${ITEM_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .prepare(`INSERT INTO items (${ITEM_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .bind(
         id,
         input.name,
@@ -257,6 +270,10 @@ export async function createItem(db: D1Database, input: ItemInput): Promise<Item
         input.barcode,
         stapleFlag,
         stapleId,
+        input.section ?? null,
+        input.imageUrl ?? null,
+        input.substitute ?? null,
+        input.notes ?? null,
         now,
         now,
       ),
@@ -294,6 +311,10 @@ export async function updateItem(db: D1Database, id: string, patch: ItemPatch): 
     asin: patch.asin === undefined ? existing.asin : patch.asin,
     barcode: patch.barcode === undefined ? existing.barcode : patch.barcode,
     staple: patch.staple ?? existing.staple,
+    section: patch.section === undefined ? existing.section : patch.section,
+    imageUrl: patch.imageUrl === undefined ? existing.imageUrl : patch.imageUrl,
+    substitute: patch.substitute === undefined ? existing.substitute : patch.substitute,
+    notes: patch.notes === undefined ? existing.notes : patch.notes,
   };
 
   const now = nowIso();
@@ -351,7 +372,8 @@ export async function updateItem(db: D1Database, id: string, patch: ItemPatch): 
     db
       .prepare(
         `UPDATE items
-         SET name = ?, quantity_note = ?, store = ?, category = ?, checked = ?, brand = ?, asin = ?, barcode = ?, staple = ?, staple_id = ?, updated_at = ?
+         SET name = ?, quantity_note = ?, store = ?, category = ?, checked = ?, brand = ?, asin = ?, barcode = ?, staple = ?, staple_id = ?,
+             section = ?, image_url = ?, substitute = ?, notes = ?, updated_at = ?
          WHERE id = ?`,
       )
       .bind(
@@ -365,6 +387,10 @@ export async function updateItem(db: D1Database, id: string, patch: ItemPatch): 
         next.barcode,
         next.staple ? 1 : 0,
         stapleId,
+        next.section,
+        next.imageUrl,
+        next.substitute,
+        next.notes,
         now,
         id,
       ),
@@ -449,7 +475,7 @@ export async function addStapleToList(
   const now = nowIso();
   try {
     await db
-      .prepare(`INSERT INTO items (${ITEM_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .prepare(`INSERT INTO items (${ITEM_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .bind(
         itemId,
         staple.name,
@@ -462,6 +488,10 @@ export async function addStapleToList(
         staple.barcode,
         1,
         staple.id,
+        null,
+        null,
+        null,
+        null,
         now,
         now,
       )
