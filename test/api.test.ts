@@ -11,12 +11,16 @@ function pngUint32(bytes: Uint8Array, offset: number) {
 async function pngPixel(bytes: Uint8Array, x: number, y: number) {
   let offset = 8;
   let width = 0;
+  let color = 2;
   const parts: Uint8Array[] = [];
   while (offset + 8 <= bytes.length) {
     const length = pngUint32(bytes, offset);
     const type = String.fromCharCode(bytes[offset + 4], bytes[offset + 5], bytes[offset + 6], bytes[offset + 7]);
     const data = bytes.subarray(offset + 8, offset + 8 + length);
-    if (type === "IHDR") width = pngUint32(data, 0);
+    if (type === "IHDR") {
+      width = pngUint32(data, 0);
+      color = data[9];
+    }
     if (type === "IDAT") parts.push(data);
     if (type === "IEND") break;
     offset += 12 + length;
@@ -29,8 +33,36 @@ async function pngPixel(bytes: Uint8Array, x: number, y: number) {
   }
   const stream = new Blob([packed]).stream().pipeThrough(new DecompressionStream("deflate"));
   const raw = new Uint8Array(await new Response(stream).arrayBuffer());
-  const index = y * (width * 3 + 1) + 1 + x * 3;
-  return [raw[index], raw[index + 1], raw[index + 2]];
+  const channels = color === 6 ? 4 : 3;
+  const stride = width * channels;
+  const row = new Uint8Array(stride);
+  const prev = new Uint8Array(stride);
+  const paeth = (left: number, up: number, upLeft: number) => {
+    const estimate = left + up - upLeft;
+    const leftDelta = Math.abs(estimate - left);
+    const upDelta = Math.abs(estimate - up);
+    const upLeftDelta = Math.abs(estimate - upLeft);
+    if (leftDelta <= upDelta && leftDelta <= upLeftDelta) return left;
+    return upDelta <= upLeftDelta ? up : upLeft;
+  };
+  for (let line = 0; line <= y; line += 1) {
+    const filter = raw[line * (stride + 1)];
+    const start = line * (stride + 1) + 1;
+    for (let index = 0; index < stride; index += 1) {
+      const left = index >= channels ? row[index - channels] : 0;
+      const up = prev[index];
+      const upLeft = index >= channels ? prev[index - channels] : 0;
+      const value = raw[start + index];
+      if (filter === 1) row[index] = (value + left) & 255;
+      else if (filter === 2) row[index] = (value + up) & 255;
+      else if (filter === 3) row[index] = (value + Math.floor((left + up) / 2)) & 255;
+      else if (filter === 4) row[index] = (value + paeth(left, up, upLeft)) & 255;
+      else row[index] = value;
+    }
+    prev.set(row);
+  }
+  const pixel = x * channels;
+  return [row[pixel], row[pixel + 1], row[pixel + 2]];
 }
 
 async function call(
@@ -132,7 +164,9 @@ describe("grocery API", () => {
     const home = await exports.default.fetch(new Request("https://grocery.test/", { headers: { Cookie: cookie } }));
     const page = await home.text();
     expect(page).toContain('data-session="1"');
-    expect(page).not.toContain('class="splash"');
+    expect(page).toContain('id="splash"');
+    expect(page).toContain("splash-family");
+    expect(page).not.toContain("login-brand");
     expect(page).not.toContain('src="/mark.svg"');
     expect(page).not.toContain("passcode");
     expect(home.headers.get("Set-Cookie") ?? "").toContain("Max-Age=34560000");
@@ -140,7 +174,9 @@ describe("grocery API", () => {
     const anon = await exports.default.fetch("https://grocery.test/");
     const anonHtml = await anon.text();
     expect(anonHtml).toContain('data-session="0"');
-    expect(anonHtml).not.toContain('class="splash"');
+    expect(anonHtml).toContain('id="splash"');
+    expect(anonHtml).toContain("splash-table");
+    expect(anonHtml).not.toContain("login-brand");
     expect(anonHtml).not.toContain('src="/mark.svg"');
     expect(anonHtml).not.toContain("passcode");
     expect(anon.headers.get("Set-Cookie")).toBeNull();
@@ -1737,6 +1773,8 @@ describe("grocery API", () => {
     expect(js).toContain("markImg(88)");
     expect(js).not.toContain('class="splash"');
     expect(js).not.toContain("splashHtml");
+    expect(js).toContain("const SPLASH_MS = 600");
+    expect(js).toContain('getElementById("splash")');
     expect(js).not.toContain("Loading…");
     const html = await (await exports.default.fetch("https://grocery.test/")).text();
     expect(html).toContain("apple-touch-startup-image");
@@ -1750,10 +1788,12 @@ describe("grocery API", () => {
     const startupHeight = (startupBytes[20] << 24) | (startupBytes[21] << 16) | (startupBytes[22] << 8) | startupBytes[23];
     expect(startupWidth).toBe(1170);
     expect(startupHeight).toBe(2532);
-    const center = await pngPixel(startupBytes, Math.floor(startupWidth / 2), Math.floor(startupHeight / 2));
-    const corner = await pngPixel(startupBytes, 0, 0);
-    expect(center).toEqual([247, 247, 245]);
-    expect(corner).toEqual([247, 247, 245]);
+    const corner = await pngPixel(startupBytes, 8, 8);
+    expect(Math.abs(corner[0] - 247)).toBeLessThan(20);
+    expect(Math.abs(corner[1] - 247)).toBeLessThan(20);
+    expect(Math.abs(corner[2] - 245)).toBeLessThan(20);
+    const plate = await pngPixel(startupBytes, 397, 1152);
+    expect(plate).toEqual([93, 187, 36]);
     expect(js).not.toContain("meal-letter");
     expect(js).not.toContain("style=");
     expect(js).not.toContain("Open source");

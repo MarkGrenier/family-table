@@ -35,6 +35,21 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+@font-face {
+  font-family: Fraunces;
+  src: url("/fonts/fraunces-roman.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: block;
+}
+@font-face {
+  font-family: Fraunces;
+  src: url("/fonts/fraunces-italic.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: italic;
+  font-display: block;
+}
+
 button, input, textarea, select { font: inherit; color: inherit; }
 button { background: none; border: 0; padding: 0; cursor: pointer; }
 img { max-width: 100%; display: block; }
@@ -862,6 +877,83 @@ body:has(.night-screen),
 }
 .day-meals { margin-top: 1.15rem; }
 .day-meals .primary { margin-top: 0.4rem; }
+
+.splash {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  overflow: hidden;
+  color: #111111;
+  background:
+    radial-gradient(ellipse 55% 70% at 18% 50%, rgba(231, 246, 216, 0.9) 0%, rgba(231, 246, 216, 0) 70%),
+    radial-gradient(ellipse 90% 80% at 50% 50%, transparent 40%, rgba(220, 218, 210, 0.45) 100%),
+    #f7f7f5;
+  transition: opacity 320ms ease;
+}
+.splash.is-done { opacity: 0; pointer-events: none; }
+.splash-grain {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.09;
+  mix-blend-mode: multiply;
+  background-image: url("/splash/grain.svg");
+}
+.splash-lockup {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.splash-plate {
+  width: 92px;
+  height: 92px;
+  flex: none;
+  display: block;
+  border-radius: 22%;
+  overflow: hidden;
+  background: #5dbb24;
+}
+.splash-plate svg { width: 92px; height: 92px; display: block; }
+.splash-bar {
+  width: 1px;
+  height: 58px;
+  background: #b7d48f;
+  flex: none;
+}
+.splash-words {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  height: 92px;
+  font-family: Fraunces, "Iowan Old Style", Palatino, serif;
+}
+.splash-family {
+  margin: 0;
+  font-weight: 450;
+  font-style: italic;
+  font-size: 26px;
+  line-height: 1;
+  letter-spacing: -0.015em;
+  font-variation-settings: "opsz" 72, "SOFT" 60, "WONK" 1, "wght" 450;
+  color: #24301c;
+}
+.splash-table {
+  margin: 5px 0 0;
+  font-weight: 640;
+  font-style: normal;
+  font-size: 46px;
+  line-height: 0.82;
+  letter-spacing: -0.048em;
+  font-variation-settings: "opsz" 144, "SOFT" 20, "WONK" 1, "wght" 640;
+  color: #111111;
+}
+@media (prefers-reduced-motion: reduce) {
+  .splash { transition: none; }
+}
 .review-pill {
   display: inline-flex;
   align-self: flex-start;

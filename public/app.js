@@ -80,15 +80,47 @@ function swallowNextClick() {
 boot();
 setInterval(() => refresh(false), 5000);
 
+const SPLASH_MS = 600;
+
 async function boot() {
+  const started = performance.now();
+  const fonts = splashFonts();
   if (app.dataset.session === "0") state.authed = false;
   const me = await fetch("/api/items");
   const typed = document.getElementById("passcode");
   if (typed) state.passcode = typed.value;
   state.authed = me.status !== 401;
   if (state.authed) await refresh(true);
+  await fonts;
+  const remain = SPLASH_MS - (performance.now() - started);
+  if (remain > 0) await wait(remain);
   state.loading = false;
   render();
+  dismissSplash();
+}
+
+async function splashFonts() {
+  if (!document.fonts?.load) return;
+  try {
+    await Promise.race([
+      Promise.all([
+        document.fonts.load("italic 450 26px Fraunces"),
+        document.fonts.load("640 46px Fraunces"),
+      ]),
+      wait(800),
+    ]);
+  } catch {
+    /* The lockup still reads in the fallback serif. */
+  }
+}
+
+function dismissSplash() {
+  const splash = document.getElementById("splash");
+  if (!splash) return;
+  splash.classList.add("is-done");
+  const remove = () => splash.remove();
+  splash.addEventListener("transitionend", remove, { once: true });
+  setTimeout(remove, 400);
 }
 
 async function refresh(force) {
