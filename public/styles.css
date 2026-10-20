@@ -166,7 +166,9 @@ h1, .title {
   margin: 0 auto;
 }
 
-.login h1 { font-size: 2.6rem; margin-bottom: 0.4rem; }
+.login-brand { display: flex; flex-direction: column; align-items: flex-start; margin-bottom: 1.15rem; }
+.login-brand .app-mark { width: 88px; height: 88px; border-radius: 20px; margin-bottom: 0.85rem; }
+.login h1 { font-size: 2.6rem; margin-bottom: 0; }
 .login .lede { color: var(--muted); margin: 0 0 1.6rem; }
 
 .pass-box {
@@ -214,7 +216,7 @@ h1, .title {
 }
 
 .hero-mark { display: grid; place-items: center; }
-.hero-mark svg { width: 76px; height: 76px; }
+.hero-mark .app-mark { width: 88px; height: 88px; border-radius: 20px; }
 
 .float {
   position: absolute;
@@ -503,10 +505,10 @@ select.box { appearance: none; padding-right: 2.2rem; }
 .thumb-tile {
   display: grid;
   place-items: center;
-  background: var(--green-soft);
-  color: #3d8f12;
+  overflow: hidden;
+  background: #5dbb24;
 }
-.thumb-tile svg { width: 30px; height: 30px; }
+.thumb-tile .app-mark { width: 52px; height: 52px; border-radius: 12px; }
 .recipe-copy { display: flex; flex-direction: column; min-width: 0; text-align: left; }
 .recipe-copy .small { font-size: 0.85rem; }
 

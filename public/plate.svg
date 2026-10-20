@@ -1,9 +1,16 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 500">
-  <rect width="800" height="500" fill="#f4f1ea"/>
-  <ellipse cx="400" cy="250" rx="250" ry="180" fill="#ffffff"/>
-  <ellipse cx="300" cy="240" rx="90" ry="70" fill="#8fbf55"/>
-  <ellipse cx="470" cy="230" rx="110" ry="78" fill="#e7c27a"/>
-  <circle cx="250" cy="200" r="16" fill="#d4533c"/>
-  <circle cx="290" cy="180" r="12" fill="#e07a3d"/>
-  <circle cx="330" cy="210" r="10" fill="#c4473a"/>
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Cutout plate mark. Square, full-bleed, same drawing as the home-screen icon. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <rect width="512" height="512" fill="#5dbb24"/>
+  <g transform="translate(0.50 0.50)">
+  <circle cx="256" cy="256" r="154" fill="#ffffff"/>
+  <circle cx="256" cy="256" r="116" fill="none" stroke="#cfe3bf" stroke-width="9"/>
+  <g fill="#5dbb24" transform="translate(192.96 258.00) rotate(0) scale(0.960 0.960) translate(-36.50 -105.50)">
+  <path d="M0 16 C0 5 16 5 16 16 L16 98 L0 98 Z"/>
+  <path d="M29 11 C29 0 45 0 45 11 L45 106 L29 106 Z"/>
+  <path d="M58 16 C58 5 74 5 74 16 L74 98 L58 98 Z"/>
+  <path d="M0 80 C0 112 18 128 29 134 L29 198 C29 214 46 214 46 198 L46 134 C57 128 74 112 74 80 C64 100 54 108 37 108 C20 108 10 100 0 80 Z"/></g>
+  <g fill="#5dbb24" transform="translate(299.84 258.00) rotate(0) scale(-0.960 0.960) translate(-18.50 -109.50)">
+  <path d="M18 10 C26 12 32 24 34 40 C38 62 36 86 30 108 C26 124 22 136 20 148 L20 198 C20 214 2 214 2 198 L2 36 C2 20 8 10 18 10 Z"/></g>
+</g>
 </svg>

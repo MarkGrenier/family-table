@@ -164,7 +164,7 @@ function render() {
 
 function loginHtml() {
   return `<main class="login">
-    <h1>Family Table</h1>
+    <div class="login-brand">${markImg(88)}<h1>Family Table</h1></div>
     <form id="login-form">
       <div class="pass-box">
         <input id="passcode" name="passcode" type="password" autocomplete="current-password" autocorrect="off" autocapitalize="off" spellcheck="false" inputmode="text" placeholder="Enter family passcode" aria-label="Passcode">
@@ -357,7 +357,7 @@ function mealRow(entry) {
   }
   const thumb = recipe.imageUrl
     ? `<img src="${esc(safeSrc(recipe.imageUrl))}" alt="">`
-    : `<span class="meal-letter">${esc((recipe.name || "?").slice(0, 1))}</span>`;
+    : markImg(52);
   return `<button class="meal-row" type="button" data-action="open-recipe" data-id="${esc(recipe.id)}" data-date="${esc(entry.date)}" data-meal="${esc(entry.meal)}">${thumb}<span class="meal-copy"><strong>${esc(title)}</strong><span>${esc(meal)}</span></span></button>`;
 }
 
@@ -1788,8 +1788,12 @@ function recipeThumb(recipe) {
   return `<span class="thumb-tile" aria-hidden="true">${plateIcon()}</span>`;
 }
 
+function markImg(size) {
+  return `<img class="app-mark" src="/mark.svg" alt="" width="${size}" height="${size}">`;
+}
+
 function plateIcon() {
-  return `<svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 8v12M5.5 8v7M10.5 8v7M8 20v16"/><path d="M38 8c2.4 1.6 3.6 4.2 3.6 7.2 0 3.2-1.6 5.4-3.6 6.4V36"/><ellipse cx="24" cy="30" rx="11" ry="7"/><ellipse cx="24" cy="30" rx="6" ry="3.4"/></svg>`;
+  return markImg(76);
 }
 
 function heart(on) {
