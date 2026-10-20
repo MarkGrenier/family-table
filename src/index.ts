@@ -89,9 +89,8 @@ async function serveAsset(request: Request, env: Env): Promise<Response> {
   headers.set("Cache-Control", "private, no-cache");
   headers.set("Vary", "Cookie");
   const authed = await sessionOk(request, env.PASSCODE);
-  const shell = authed
-    ? `<div id="app" data-session="1"><main class="splash"><img class="app-mark" src="/mark.svg" alt="" width="72" height="72"></main></div>`
-    : `<div id="app" data-session="0"></div>`;
+  const splash = `<main class="splash"><img class="app-mark" src="/mark.svg" alt="" width="72" height="72"></main>`;
+  const shell = `<div id="app" data-session="${authed ? "1" : "0"}">${splash}</div>`;
   const html = (await upstream.text()).replace("<div id=\"app\"></div>", shell);
   return new Response(html, { status: upstream.status, statusText: upstream.statusText, headers });
 }

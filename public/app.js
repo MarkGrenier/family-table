@@ -82,14 +82,8 @@ boot();
 setInterval(() => refresh(false), 5000);
 
 async function boot() {
-  const hinted = app.dataset.session;
-  if (hinted === "0") {
-    state.authed = false;
-    state.loading = false;
-    render();
-  } else if (!app.querySelector(".splash")) {
-    app.innerHTML = splashHtml();
-  }
+  if (!app.querySelector(".splash")) app.innerHTML = splashHtml();
+  if (app.dataset.session === "0") state.authed = false;
   const me = await fetch("/api/items");
   const typed = document.getElementById("passcode");
   if (typed) state.passcode = typed.value;
@@ -198,7 +192,7 @@ function render() {
     return;
   }
   if (state.loading) {
-    app.innerHTML = `<main class="screen"><p class="muted">Loading…</p></main>`;
+    app.innerHTML = splashHtml();
     finish();
     return;
   }

@@ -110,6 +110,8 @@ describe("grocery API", () => {
     const anon = await exports.default.fetch("https://grocery.test/");
     const anonHtml = await anon.text();
     expect(anonHtml).toContain('data-session="0"');
+    expect(anonHtml).toContain('class="splash"');
+    expect(anonHtml).toContain('src="/mark.svg"');
     expect(anonHtml).not.toContain("passcode");
     expect(anon.headers.get("Set-Cookie")).toBeNull();
 
@@ -1674,6 +1676,19 @@ describe("grocery API", () => {
     expect(js).toContain("showRecipes");
     expect(js).toContain("dataset.session");
     expect(js).toContain('class="splash"');
+    expect(js).not.toContain("Loading…");
+    const html = await (await exports.default.fetch("https://grocery.test/")).text();
+    expect(html).toContain("apple-touch-startup-image");
+    expect(html).toContain("/splash/apple-splash-1170-2532.png");
+    const startup = await exports.default.fetch("https://grocery.test/splash/apple-splash-1170-2532.png");
+    expect(startup.status).toBe(200);
+    expect(startup.headers.get("Content-Type") ?? "").toContain("image/png");
+    const startupBytes = new Uint8Array(await startup.arrayBuffer());
+    expect(startupBytes[0]).toBe(0x89);
+    const startupWidth = (startupBytes[16] << 24) | (startupBytes[17] << 16) | (startupBytes[18] << 8) | startupBytes[19];
+    const startupHeight = (startupBytes[20] << 24) | (startupBytes[21] << 16) | (startupBytes[22] << 8) | startupBytes[23];
+    expect(startupWidth).toBe(1170);
+    expect(startupHeight).toBe(2532);
     expect(js).not.toContain("meal-letter");
     expect(js).not.toContain("style=");
     expect(js).not.toContain("Open source");
