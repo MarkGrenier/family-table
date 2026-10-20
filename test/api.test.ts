@@ -119,6 +119,44 @@ describe("grocery API", () => {
     expect((await call("/api/items", { token })).json).toEqual({ items: [] });
   });
 
+  it("hides a grocery item and puts the same one back", async () => {
+    const token = env.API_TOKEN;
+    const created = await call("/api/items", {
+      method: "POST",
+      token,
+      body: { name: "Lemons", store: "local", category: "produce", section: "produce" },
+    });
+    expect(created.status).toBe(201);
+    const item = created.json?.item as Json;
+
+    const hidden = await call(`/api/items/${item.id}`, { method: "PATCH", token, body: { deleted: true } });
+    expect(hidden.status).toBe(200);
+    const listed = ((await call("/api/items", { token })).json?.items ?? []) as Json[];
+    expect(listed.some((entry) => entry.id === item.id)).toBe(false);
+
+    const bad = await call(`/api/items/${item.id}`, { method: "PATCH", token, body: { deleted: "yes" } });
+    expect(bad.status).toBe(400);
+
+    const restored = await call(`/api/items/${item.id}`, { method: "PATCH", token, body: { deleted: false } });
+    expect(restored.status).toBe(200);
+    expect((restored.json?.item as Json).id).toBe(item.id);
+    expect((restored.json?.item as Json).name).toBe("Lemons");
+    const back = ((await call("/api/items", { token })).json?.items ?? []) as Json[];
+    expect(back.some((entry) => entry.id === item.id && entry.name === "Lemons")).toBe(true);
+
+    const staple = await call("/api/items", {
+      method: "POST",
+      token,
+      body: { name: "Paper towels", store: "costco", category: "shelf", staple: true },
+    });
+    const line = staple.json?.item as Json;
+    await call(`/api/items/${line.id}`, { method: "PATCH", token, body: { deleted: true } });
+    const again = await call(`/api/staples/${line.stapleId}/add`, { method: "POST", token });
+    expect(again.status).toBe(200);
+    expect(again.json?.alreadyOnList).toBe(false);
+    expect((again.json?.item as Json).id).not.toBe(line.id);
+  });
+
   it("only allows aisles that belong to the store", async () => {
     const token = env.API_TOKEN;
     expect((await call("/api/items", { method: "POST", token, body: { name: "Bananas", store: "costco", category: "produce" } })).status).toBe(400);
@@ -974,6 +1012,8 @@ describe("grocery API", () => {
     expect(js).toContain("Swap meal");
     expect(js).not.toContain("Change meal");
     expect(js).toContain("Edit recipe");
+    expect(js).toContain("Delete item");
+    expect(js).toContain('data-action="delete-item"');
     expect(js).not.toContain("Open source");
     expect(js).not.toContain("Nothing else");
     const icons: Array<[string, number]> = [

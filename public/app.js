@@ -28,6 +28,7 @@ const state = {
   monthPick: null,
   prepDone: {},
   undo: null,
+  swipeId: null,
   todayPanel: "ingredients",
   todayServings: null,
   todayServingsOpen: false,
@@ -55,8 +56,9 @@ app.addEventListener("click", onClick);
 app.addEventListener("submit", onSubmit);
 app.addEventListener("input", onInput);
 app.addEventListener("pointerdown", onPointerDown);
+app.addEventListener("pointermove", onPointerMove);
 app.addEventListener("pointerup", onPointerUp);
-app.addEventListener("pointercancel", () => clearGesture());
+app.addEventListener("pointercancel", onPointerCancel);
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible" && state.page?.kind === "cook") lockScreen();
 });
@@ -66,6 +68,13 @@ let wakeLock = null;
 let undoTimer = null;
 let checkGeneration = 0;
 let swallowClick = false;
+
+function swallowNextClick() {
+  swallowClick = true;
+  setTimeout(() => {
+    swallowClick = false;
+  }, 0);
+}
 
 boot();
 setInterval(() => refresh(false), 5000);
@@ -97,7 +106,7 @@ async function refresh(force) {
     state.plan = plan.plan || [];
     state.events = events.events || [];
     state.error = "";
-    if (force || !isTyping()) render();
+    if ((force || !isTyping()) && !gesture?.dragging) render();
   } catch (error) {
     if (error.status === 401) {
       state.authed = false;
@@ -606,10 +615,14 @@ function groceriesHtml() {
 function groceryRow(item) {
   const checking = state.checking === item.id;
   const done = item.checked || checking;
-  return `<div class="g-row${done ? " is-done" : ""}" data-id="${esc(item.id)}">
-      <button class="check${done ? " is-on" : ""} g-check" type="button" data-action="toggle-item" data-id="${esc(item.id)}" aria-label="${done ? "Put back" : "Mark bought"} ${esc(item.name)}">${done ? checkIcon() : ""}</button>
-      <span class="g-name">${esc(item.name)}</span>
-      <span class="qty">${esc(qtyOf(item))}</span>
+  const open = state.swipeId === item.id;
+  return `<div class="g-swipe${open ? " is-open" : ""}" data-id="${esc(item.id)}">
+      <button class="g-delete" type="button" data-action="delete-item" data-id="${esc(item.id)}">Delete</button>
+      <div class="g-row${done ? " is-done" : ""}" data-id="${esc(item.id)}">
+        <button class="check${done ? " is-on" : ""} g-check" type="button" data-action="toggle-item" data-id="${esc(item.id)}" aria-label="${done ? "Put back" : "Mark bought"} ${esc(item.name)}">${done ? checkIcon() : ""}</button>
+        <span class="g-name">${esc(item.name)}</span>
+        <span class="qty">${esc(qtyOf(item))}</span>
+      </div>
     </div>`;
 }
 
@@ -817,6 +830,7 @@ function sheetHtml() {
         <label class="field-label">Name<input class="field-box" name="name" required maxlength="80" value="${esc(item.name)}"></label>
         <label class="field-label">Quantity<input class="field-box" name="quantityNote" maxlength="140" value="${esc(qtyOf(item))}"></label>
         <label class="field-label">Section<span class="select-wrap"><select class="box" name="section">${SECTIONS.map(([id, label]) => `<option value="${id}" ${(item.section || "other") === id ? "selected" : ""}>${label}</option>`).join("")}</select></span></label>
+        <button class="sheet-delete" type="button" data-action="delete-item" data-id="${esc(item.id)}">Delete item</button>
       </form></div>`;
   }
   if (state.sheet?.kind === "recipe-menu") {
@@ -851,15 +865,44 @@ function onPointerDown(event) {
     return;
   }
   const row = event.target.closest(".g-row");
-  if (!row || event.target.closest(".g-check")) return;
+  if (!row || event.target.closest(".g-check") || event.target.closest(".g-delete")) return;
   clearGesture();
-  gesture = { id: row.dataset.id, x: event.clientX, y: event.clientY, long: false };
+  gesture = { id: row.dataset.id, x: event.clientX, y: event.clientY, long: false, dragging: false, pointerId: event.pointerId };
   gesture.timer = setTimeout(() => {
-    if (!gesture) return;
+    if (!gesture || gesture.dragging) return;
     gesture.long = true;
+    state.swipeId = null;
     state.sheet = { kind: "edit-item", id: gesture.id };
     render();
   }, 520);
+}
+
+function onPointerMove(event) {
+  if (!gesture || gesture.kind === "cal" || gesture.pointerId !== event.pointerId) return;
+  const dx = event.clientX - gesture.x;
+  const dy = event.clientY - gesture.y;
+  if (!gesture.dragging) {
+    if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+    if (Math.abs(dy) > Math.abs(dx)) {
+      if (gesture.timer) clearTimeout(gesture.timer);
+      gesture.timer = null;
+      gesture.scroll = true;
+      return;
+    }
+    gesture.dragging = true;
+    if (gesture.timer) clearTimeout(gesture.timer);
+    gesture.timer = null;
+    event.target.closest(".g-row")?.setPointerCapture?.(event.pointerId);
+  }
+  if (gesture.scroll) return;
+  const base = state.swipeId === gesture.id ? -96 : 0;
+  const next = Math.max(-120, Math.min(0, base + dx));
+  const row = document.querySelector(`.g-swipe[data-id="${cssEscape(gesture.id)}"] .g-row`);
+  if (row) {
+    row.style.transition = "none";
+    row.style.transform = `translateX(${next}px)`;
+  }
+  gesture.offset = next;
 }
 
 function onPointerUp(event) {
@@ -869,20 +912,48 @@ function onPointerUp(event) {
   if (gesture.kind === "cal") {
     clearGesture();
     if (Math.abs(dx) > 56 && Math.abs(dx) > Math.abs(dy)) {
-      swallowClick = true;
+      swallowNextClick();
       shiftCalendar(dx < 0 ? 1 : -1);
     }
     return;
   }
   const id = gesture.id;
   const long = gesture.long;
+  const dragging = gesture.dragging;
+  const offset = gesture.offset;
+  const scrolled = gesture.scroll;
   clearGesture();
-  if (long) return;
+  if (long || scrolled) return;
+  if (dragging) {
+    swallowNextClick();
+    state.swipeId = (offset ?? 0) < -48 ? id : null;
+    render();
+    return;
+  }
+  if (state.swipeId === id) {
+    state.swipeId = null;
+    swallowNextClick();
+    render();
+    return;
+  }
   if (dx > 48 && Math.abs(dx) > Math.abs(dy)) {
     openItem(id);
     return;
   }
   if (Math.abs(dx) < 10 && Math.abs(dy) < 10) openItem(id);
+}
+
+function onPointerCancel() {
+  if (!gesture) return;
+  if (gesture.dragging) {
+    const id = gesture.id;
+    const offset = gesture.offset ?? 0;
+    clearGesture();
+    state.swipeId = offset < -48 ? id : null;
+    render();
+    return;
+  }
+  clearGesture();
 }
 
 function clearGesture() {
@@ -911,6 +982,7 @@ async function onClick(event) {
     state.tab = button.dataset.tab;
     state.page = null;
     state.sheet = null;
+    state.swipeId = null;
     render();
     return;
   }
@@ -1144,9 +1216,11 @@ async function onClick(event) {
   }
   if (action === "quick-add") return addGrocery(button.dataset.name);
   if (action === "edit-item") {
+    state.swipeId = null;
     state.sheet = { kind: "edit-item", id: button.dataset.id };
     render();
   }
+  if (action === "delete-item") return deleteGrocery(button.dataset.id);
 }
 
 async function onSubmit(event) {
@@ -1346,19 +1420,13 @@ async function toggleItem(id) {
   render();
   await wait(700);
   if (generation !== checkGeneration) return;
-  document.querySelector(`.g-row[data-id="${cssEscape(id)}"]`)?.classList.add("is-leaving");
+  document.querySelector(`.g-swipe[data-id="${cssEscape(id)}"]`)?.classList.add("is-leaving");
   await wait(220);
   if (generation !== checkGeneration) return;
   try {
     await api(`/api/items/${id}`, { method: "PATCH", body: { checked: true } });
     state.checking = null;
-    state.undo = { id, name: item.name };
-    if (undoTimer) clearTimeout(undoTimer);
-    undoTimer = setTimeout(() => {
-      state.undo = null;
-      undoTimer = null;
-      render();
-    }, 5000);
+    showUndo({ id, name: item.name, kind: "check" });
     await refresh(true);
   } catch (error) {
     state.checking = null;
@@ -1374,7 +1442,8 @@ async function undoCheck() {
   clearUndo();
   state.checking = null;
   try {
-    await api(`/api/items/${undo.id}`, { method: "PATCH", body: { checked: false } });
+    const body = undo.kind === "delete" ? { deleted: false } : { checked: false };
+    await api(`/api/items/${undo.id}`, { method: "PATCH", body });
     await refresh(true);
   } catch (error) {
     state.error = error.message;
@@ -1388,9 +1457,40 @@ function clearUndo() {
   state.undo = null;
 }
 
+function showUndo(undo) {
+  state.undo = undo;
+  if (undoTimer) clearTimeout(undoTimer);
+  undoTimer = setTimeout(() => {
+    state.undo = null;
+    undoTimer = null;
+    render();
+  }, 5000);
+}
+
+async function deleteGrocery(id) {
+  const item = state.items.find((entry) => entry.id === id);
+  if (!item) return;
+  state.sheet = null;
+  state.swipeId = null;
+  if (state.page?.kind === "item" && state.page.id === id) state.page = null;
+  render();
+  const row = document.querySelector(`.g-swipe[data-id="${cssEscape(id)}"]`);
+  row?.classList.add("is-leaving");
+  if (row) await wait(180);
+  try {
+    await api(`/api/items/${id}`, { method: "PATCH", body: { deleted: true } });
+    showUndo({ id, name: item.name, kind: "delete" });
+    await refresh(true);
+  } catch (error) {
+    state.error = error.message;
+    render();
+  }
+}
+
 function toastHtml() {
   if (!state.undo) return "";
-  return `<div class="toast" role="status"><span>${esc(state.undo.name)} checked off</span><button type="button" data-action="undo-check">Undo</button></div>`;
+  const verb = state.undo.kind === "delete" ? "deleted" : "checked off";
+  return `<div class="toast" role="status"><span>${esc(state.undo.name)} ${verb}</span><button type="button" data-action="undo-check">Undo</button></div>`;
 }
 
 async function markAll() {
@@ -1461,6 +1561,7 @@ async function fetchRecipe(url) {
 function openItem(id) {
   state.page = { kind: "item", id };
   state.tab = "groceries";
+  state.swipeId = null;
   render();
 }
 

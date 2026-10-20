@@ -40,6 +40,7 @@ export type ItemPatch = {
   imageUrl?: string | null;
   substitute?: string | null;
   notes?: string | null;
+  deleted?: boolean;
 };
 
 export type StapleInput = {
@@ -173,6 +174,7 @@ export function parseItemPatch(body: Record<string, unknown>): ItemPatch {
   if ("imageUrl" in body) patch.imageUrl = cleanOptional(body.imageUrl, "The photo", 500);
   if ("substitute" in body) patch.substitute = cleanOptional(body.substitute, "The substitute", 280);
   if ("notes" in body) patch.notes = cleanOptional(body.notes, "The note", 500);
+  if ("deleted" in body) patch.deleted = cleanBool(body.deleted, "Deleted");
   if (Object.keys(patch).length === 0) {
     throw new HttpError(400, "Nothing to change.");
   }

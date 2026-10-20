@@ -137,7 +137,9 @@ function barcodeClause(code: string): { sql: string; keys: string[] } {
 }
 
 export async function listItems(db: D1Database): Promise<Item[]> {
-  const result = await db.prepare(`SELECT ${ITEM_COLUMNS} FROM items ORDER BY created_at ASC`).all<ItemRow>();
+  const result = await db
+    .prepare(`SELECT ${ITEM_COLUMNS} FROM items WHERE deleted_at IS NULL ORDER BY created_at ASC`)
+    .all<ItemRow>();
   return result.results.map(toItem);
 }
 
@@ -166,7 +168,7 @@ async function findStapleByBarcode(db: D1Database, code: string): Promise<Staple
 
 async function openItemForStaple(db: D1Database, stapleId: string): Promise<Item | null> {
   const row = await db
-    .prepare(`SELECT ${ITEM_COLUMNS} FROM items WHERE staple_id = ? AND checked = 0 LIMIT 1`)
+    .prepare(`SELECT ${ITEM_COLUMNS} FROM items WHERE staple_id = ? AND checked = 0 AND deleted_at IS NULL LIMIT 1`)
     .bind(stapleId)
     .first<ItemRow>();
   return row ? toItem(row) : null;
@@ -175,7 +177,7 @@ async function openItemForStaple(db: D1Database, stapleId: string): Promise<Item
 async function openItemForBarcode(db: D1Database, code: string): Promise<Item | null> {
   const { sql, keys } = barcodeClause(code);
   const row = await db
-    .prepare(`SELECT ${ITEM_COLUMNS} FROM items WHERE ${sql} AND checked = 0 LIMIT 1`)
+    .prepare(`SELECT ${ITEM_COLUMNS} FROM items WHERE ${sql} AND checked = 0 AND deleted_at IS NULL LIMIT 1`)
     .bind(...keys)
     .first<ItemRow>();
   return row ? toItem(row) : null;
@@ -396,7 +398,18 @@ export async function updateItem(db: D1Database, id: string, patch: ItemPatch): 
       ),
   );
 
-  await db.batch(statements);
+  if (patch.deleted !== undefined) {
+    statements.push(
+      db.prepare(`UPDATE items SET deleted_at = ?, updated_at = ? WHERE id = ?`).bind(patch.deleted ? now : null, now, id),
+    );
+  }
+
+  try {
+    await db.batch(statements);
+  } catch (error) {
+    if (patch.deleted === false) throw new HttpError(409, "That item is already on the list.");
+    throw error;
+  }
   const updated = await getItem(db, id);
   if (!updated) throw new HttpError(500, "Something went wrong. Try again.");
   return updated;

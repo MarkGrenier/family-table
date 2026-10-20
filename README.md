@@ -72,7 +72,7 @@ A browser window opens. Sign in to Cloudflare and approve the question it asks. 
 
 The phones already have the grocery list. This step adds recipes, the week plan, and family events. It does not erase anything already on the list.
 
-New files are `migrations/0003_food.sql`, `migrations/0004_recipe_sections.sql`, and `migrations/0005_mealime.sql`. Older migration files stay as they are. The command below applies every one that is not on the live list yet. `0005_mealime.sql` adds grocery sections, cookware, cooked days, and feedback. It does not change rows that are already there.
+New files are `migrations/0003_food.sql`, `migrations/0004_recipe_sections.sql`, `migrations/0005_mealime.sql`, and `migrations/0006_item_deleted.sql`. Older migration files stay as they are. The command below applies every one that is not on the live list yet. `0005_mealime.sql` adds grocery sections, cookware, cooked days, and feedback. `0006_item_deleted.sql` lets a grocery line be hidden and put back. Neither one changes rows that are already there.
 
 ```bash
 npx wrangler d1 migrations apply grocery --remote
@@ -138,7 +138,7 @@ Four tabs sit at the bottom: Today, Week, Recipes, and Groceries. The Groceries 
 - **Today** is tonight's recipe: the photo, the dish name, the time, the servings, and the Cookware, Ingredients, and Instructions tabs. The steps stay inside Instructions. **Mark cooked** and **Start cooking** sit at the bottom. **Start cooking** walks through today's prep and cook steps, then kids' plates and reheating when those notes exist. Night-before steps are not part of cooking. If tomorrow has night-before prep, a tag on the photo says **Prep for tomorrow · 1 step**. Tap it for a short list with a checkbox on each step. Leftovers use that recipe's photo and show a Leftovers label. A recipe with no photo gets a green band with its initial, and the tag sits on that band. Reheating stays in Instructions. Family events for today are listed under the recipe. If nothing is planned, you get a short note and a button to plan dinner. The dots on the photo open **Swap meal** and **Edit recipe**. Swap meal picks another saved recipe, or leftovers, for tonight. The grocery list drops the old meal's unchecked items and adds the new one's.
 - **Week** is the next seven days, with today at the top. Earlier days are not listed. Each day shows its meals (dinner, and breakfast or lunch when those are planned) and that day's family events. A leftover night links back to the recipe it came from. Tap a meal to open that day's recipe, where the same dots can swap that meal or edit the recipe. Tap a day to pick a recipe, leftovers, or a short note such as eating out. The calendar icon in the header opens a simple month view for jumping further ahead. Today starts selected, and that day's meals and events sit under the grid. Tap another day to switch. Edit opens the planner. Choosing a recipe puts the things you need to buy on the grocery list. Salt, pepper, oil, water, and spices stay off the list. An optional ingredient is skipped unless you set `buy` to true. Taking that recipe off the day takes those unchecked items back off. Leftovers and notes don't add anything. Checking an item off offers Undo for a few seconds. In Show completed items, tap the filled circle to put it back.
 - **Recipes** is the cookbook. **Favorites**, **Recent**, and **A-Z** sort the list. A recipe shows **Last made Oct 12** when it has been planned before. Open one for the photo, a heart, **Cookware**, **Ingredients**, and **Instructions**. Tap the servings to scale the amounts. **Cooked?** records that you made it. **Start cooking** walks through the steps. Opened from this list, the dots only edit the recipe: title, servings, time, photo, ingredients, and steps. Sending a new week does not remove recipes.
-- **Groceries** is grouped by food type, not by store. Tap the circle to mark something bought. Tap the row, or swipe it right, for details. Hold the row to edit the name, amount, and section. The green **+** adds something. The green dots share the list, show completed items, or mark them all complete.
+- **Groceries** is grouped by food type, not by store. Tap the circle to mark something bought. Tap the row, or swipe it right, for details. Hold the row to edit the name, amount, and section, or tap **Delete item**. Swipe the row left and tap **Delete**. Either way, Undo puts that same line back for a few seconds. The green **+** adds something. The green dots share the list, show completed items, or mark them all complete.
 
 ## If something goes wrong
 
@@ -192,7 +192,7 @@ Returns `{ "items": [ ... ] }`.
 
 `PATCH /api/items/ID`
 
-Send only what changed. Example: `{ "checked": true }`. Leaving `barcode` out keeps the one already saved. Sending a barcode here does not, by itself, turn the item into a staple.
+Send only what changed. Example: `{ "checked": true }`. `{ "deleted": true }` hides the line, and `{ "deleted": false }` puts that same line back. `GET /api/items` leaves hidden lines out. Leaving `barcode` out keeps the one already saved. Sending a barcode here does not, by itself, turn the item into a staple.
 
 `DELETE /api/items/ID`
 
