@@ -22,6 +22,7 @@ export type Recipe = {
   totalTime: string | null;
   sourceUrl: string | null;
   favorite: boolean;
+  needsReview: boolean;
   lastMade: string | null;
   timesMade: number;
   cookedToday: boolean;
@@ -78,6 +79,7 @@ type RecipeRow = {
   total_time: string | null;
   source_url: string | null;
   favorite: number;
+  needs_review: number;
   external_id: string | null;
   covers_nights: number | null;
   night_before_json: string;
@@ -91,7 +93,7 @@ type RecipeRow = {
 };
 
 const RECIPE_COLUMNS =
-  "id, name, image_url, servings, ingredients_json, steps_json, total_time, source_url, favorite, external_id, covers_nights, night_before_json, prep_steps_json, cook_steps_json, kids_plates, reheating, cookware_json, created_at, updated_at";
+  "id, name, image_url, servings, ingredients_json, steps_json, total_time, source_url, favorite, external_id, covers_nights, night_before_json, prep_steps_json, cook_steps_json, kids_plates, reheating, cookware_json, needs_review, created_at, updated_at";
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -128,6 +130,7 @@ function recipeFromRow(row: RecipeRow): Recipe {
     totalTime: row.total_time,
     sourceUrl: row.source_url,
     favorite: Boolean(row.favorite),
+    needsReview: Number(row.needs_review) === 1,
     lastMade: null,
     timesMade: 0,
     externalId: row.external_id,
@@ -225,7 +228,7 @@ function withMeta(recipe: Recipe, stats: Map<string, RecipeMeta>): Recipe {
   return { ...recipe, ...made };
 }
 
-export async function listRecipes(db: D1Database, query = "", favoriteOnly = false): Promise<Recipe[]> {
+export async function listRecipes(db: D1Database, query = "", favoriteOnly = false, needsReviewOnly = false): Promise<Recipe[]> {
   const needle = query.trim().toLowerCase();
   const where: string[] = [];
   const binds: string[] = [];
@@ -234,6 +237,7 @@ export async function listRecipes(db: D1Database, query = "", favoriteOnly = fal
     binds.push(`%${needle.replace(/[\\%_]/g, (char) => `\\${char}`)}%`);
   }
   if (favoriteOnly) where.push("favorite = 1");
+  if (needsReviewOnly) where.push("needs_review = 1");
   const sql = `SELECT ${RECIPE_COLUMNS} FROM recipes${where.length ? ` WHERE ${where.join(" AND ")}` : ""} ORDER BY favorite DESC, name COLLATE NOCASE`;
   const rows = await db.prepare(sql).bind(...binds).all<RecipeRow>();
   const stats = await recipeMeta(db);
@@ -280,9 +284,23 @@ export async function createRecipe(db: D1Database, input: RecipeInput): Promise<
       now,
     )
     .run();
+  if (input.needsReview) {
+    await db.prepare(`UPDATE recipes SET needs_review = 1 WHERE id = ?`).bind(id).run();
+  }
   const recipe = await getRecipe(db, id);
   if (!recipe) throw new HttpError(500, "Something went wrong. Try again.");
   return recipe;
+}
+
+function reviewAfterEdit(
+  existing: Recipe,
+  patch: RecipePatch,
+  next: { name: string; ingredients: Ingredient[]; steps: string[]; cookSteps: CookStep[] },
+): boolean {
+  const edited = patch.ingredients !== undefined || patch.steps !== undefined || patch.cookSteps !== undefined;
+  if (!edited) return existing.needsReview;
+  const hasSteps = next.steps.some((step) => step.trim()) || next.cookSteps.some((step) => step.text.trim());
+  return !(next.name.trim() && next.ingredients.length > 0 && hasSteps);
 }
 
 export async function updateRecipe(db: D1Database, id: string, patch: RecipePatch): Promise<Recipe> {
@@ -306,6 +324,12 @@ export async function updateRecipe(db: D1Database, id: string, patch: RecipePatc
     kidsPlates: patch.kidsPlates === undefined ? existing.kidsPlates : patch.kidsPlates,
     reheating: patch.reheating === undefined ? existing.reheating : patch.reheating,
     cookware: patch.cookware ?? existing.cookware,
+    needsReview: reviewAfterEdit(existing, patch, {
+      name: patch.name ?? existing.name,
+      ingredients: patch.ingredients ?? existing.ingredients,
+      steps: patch.steps ?? existing.steps,
+      cookSteps: patch.cookSteps ?? existing.cookSteps,
+    }),
     updatedAt: nowIso(),
   };
   await db
@@ -313,7 +337,7 @@ export async function updateRecipe(db: D1Database, id: string, patch: RecipePatc
       `UPDATE recipes
        SET name = ?, image_url = ?, servings = ?, ingredients_json = ?, steps_json = ?, total_time = ?, source_url = ?, favorite = ?,
            external_id = ?, covers_nights = ?, night_before_json = ?, prep_steps_json = ?, cook_steps_json = ?, kids_plates = ?, reheating = ?, cookware_json = ?,
-           updated_at = ?
+           needs_review = ?, updated_at = ?
        WHERE id = ?`,
     )
     .bind(
@@ -333,6 +357,7 @@ export async function updateRecipe(db: D1Database, id: string, patch: RecipePatc
       next.kidsPlates,
       next.reheating,
       JSON.stringify(next.cookware),
+      next.needsReview ? 1 : 0,
       next.updatedAt,
       id,
     )

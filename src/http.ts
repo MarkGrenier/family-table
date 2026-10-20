@@ -8,6 +8,19 @@ export class HttpError extends Error {
   }
 }
 
+export function text(body: string, status = 200): Response {
+  return new Response(body, {
+    status,
+    headers: {
+      "Content-Type": "text/plain; charset=utf-8",
+      "Cache-Control": "no-store",
+      "X-Content-Type-Options": "nosniff",
+      "Referrer-Policy": "strict-origin-when-cross-origin",
+      "X-Robots-Tag": "noindex",
+    },
+  });
+}
+
 export function json(data: unknown, status = 200, extra?: HeadersInit): Response {
   const headers = new Headers(extra);
   headers.set("Content-Type", "application/json; charset=utf-8");

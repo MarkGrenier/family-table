@@ -1,4 +1,4 @@
-import { clearSessionCookie, passcodeMatches, requestAuthed, rollingSessionCookie, sessionCookie, sessionOk, sessionToken } from "./auth";
+import { bearerOk, clearSessionCookie, passcodeMatches, requestAuthed, rollingSessionCookie, sessionCookie, sessionOk, sessionToken } from "./auth";
 import { addOnHand, addStapleToList, clearChecked, createItem, createStaple, deleteItem, deleteOnHand, deleteOnHandByName, deleteStaple, listItems, listOnHand, listStaples, lookupBarcode, updateItem } from "./db";
 import {
   addPlanGroceries,
@@ -28,7 +28,8 @@ import {
   withGroceryRecipes,
 } from "./food";
 import { cleanWeekStart, dateRange, parseEvent, parseEventList, parsePlan, parsePlanAlternates, parseRecipe, parseRecipePatch, parseServingsOverride, parseWeek } from "./food-validate";
-import { HttpError, json, readJson } from "./http";
+import { HttpError, json, readJson, text } from "./http";
+import { ensureShareKeys, importSharedRecipe, personForShareKey, shareNotice } from "./share";
 import { importRecipeFromUrl } from "./import-recipe";
 import { cleanBarcode, cleanStore, parseItemPatch, parseNewItem, parseStaple } from "./validate";
 
@@ -124,6 +125,44 @@ function logout(request: Request): Response {
   return json({ ok: true }, 200, { "Set-Cookie": clearSessionCookie(request) });
 }
 
+async function shareImport(request: Request, env: Env): Promise<Response> {
+  try {
+    if (request.method.toUpperCase() !== "POST") return text("That action isn't available.", 405);
+    if (!env.PASSCODE) return text("The list isn't ready yet.", 503);
+    const header = request.headers.get("Authorization") ?? "";
+    const match = /^Bearer\s+(\S+)\s*$/i.exec(header);
+    if (!match || bearerOk(request, env.API_TOKEN)) return text("That share key didn't work.", 401);
+    const person = await personForShareKey(env.DB, env.PASSCODE, match[1]);
+    if (!person) return text("That share key didn't work.", 401);
+    const saved = await importSharedRecipe(env.DB, await readShareUrl(request));
+    return text(shareNotice(saved.title, saved.needsReview));
+  } catch (error) {
+    if (error instanceof HttpError) return text(error.message, error.status);
+    console.error(error);
+    return text("Something went wrong. Try again.", 500);
+  }
+}
+
+async function readShareUrl(request: Request): Promise<string> {
+  const raw = (await request.text()).trim();
+  if (!raw) throw new HttpError(400, "Paste a recipe link.");
+  if (raw.startsWith("{") || raw.startsWith("[")) {
+    let value: unknown;
+    try {
+      value = JSON.parse(raw);
+    } catch {
+      throw new HttpError(400, "Paste a recipe link.");
+    }
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      const body = value as Record<string, unknown>;
+      const url = body.url ?? body.URL;
+      if (typeof url === "string" && url.trim()) return url.trim();
+    }
+    throw new HttpError(400, "Paste a recipe link.");
+  }
+  return raw.split(/\s+/)[0] || raw;
+}
+
 async function handleApi(request: Request, env: Env, path: string): Promise<Response> {
   const method = request.method.toUpperCase();
 
@@ -135,6 +174,7 @@ async function handleApi(request: Request, env: Env, path: string): Promise<Resp
     if (method !== "POST") throw new HttpError(405, "That action isn't available.");
     return logout(request);
   }
+  if (path === "/api/share") return shareImport(request, env);
 
   const allowed = await requestAuthed(request, env.PASSCODE, env.API_TOKEN);
   if (!allowed) throw new HttpError(401, "Sign in, or send the helper password.");
@@ -264,9 +304,17 @@ async function handleFood(request: Request, env: Env, path: string, method: stri
     const recipe = await createRecipe(env.DB, { ...imported, favorite: false });
     return json({ recipe }, 201);
   }
+  if (path === "/api/share-setup" && method === "GET") {
+    if (!env.PASSCODE) throw new HttpError(503, "The list isn't ready yet. The passcode hasn't been set.");
+    return json({ people: await ensureShareKeys(env.DB, env.PASSCODE) });
+  }
+  if (path === "/api/share-setup") throw new HttpError(405, "That action isn't available.");
+
   if (path === "/api/recipes" && method === "GET") {
     const params = new URL(request.url).searchParams;
-    return json({ recipes: await listRecipes(env.DB, params.get("q") ?? "", params.get("favorite") === "true") });
+    return json({
+      recipes: await listRecipes(env.DB, params.get("q") ?? "", params.get("favorite") === "true", params.get("needsReview") === "true"),
+    });
   }
   if (path === "/api/recipes" && method === "POST") {
     const recipe = await createRecipe(env.DB, parseRecipe(await readJson(request)));

@@ -20,6 +20,7 @@ export type RecipeInput = {
   totalTime: string | null;
   sourceUrl: string | null;
   favorite: boolean;
+  needsReview?: boolean;
   externalId?: string | null;
   cookware?: string[];
   coversNights?: number | null;

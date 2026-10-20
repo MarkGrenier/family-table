@@ -29,6 +29,17 @@ export async function sessionToken(passcode: string): Promise<string> {
   return hmacHex(passcode, SESSION_MESSAGE);
 }
 
+export async function deriveShareKey(passcode: string, person: string): Promise<string> {
+  const digest = await hmacHex(passcode, `family-share-v1:${person}`);
+  const slug = person.toLowerCase().replace(/[^a-z]/g, "") || "person";
+  return `ft_${slug}_${digest.slice(0, 32)}`;
+}
+
+export async function sha256Hex(value: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
 export function readCookie(header: string | null, name = COOKIE): string | null {
   if (!header) return null;
   for (const part of header.split(";")) {

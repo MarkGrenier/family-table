@@ -44,7 +44,7 @@ function isPrivateHost(host: string): boolean {
   return a === 10 || a === 127 || a === 0 || (a === 192 && b === 168) || (a === 172 && b >= 16 && b <= 31) || (a === 169 && b === 254);
 }
 
-export async function importRecipeFromUrl(rawUrl: string): Promise<ImportedRecipe> {
+export async function fetchPublicPage(rawUrl: string): Promise<{ finalUrl: string; html: string }> {
   const url = assertPublicHttpsUrl(rawUrl);
   let response: Response;
   try {
@@ -67,11 +67,39 @@ export async function importRecipeFromUrl(rawUrl: string): Promise<ImportedRecip
   if (html.length > MAX_HTML) {
     throw new HttpError(422, "That page was too large to read. You can type the recipe in instead.");
   }
-  const recipe = recipeFromDocument(html);
+  return { finalUrl, html };
+}
+
+export function pageTitle(html: string): string | null {
+  const match = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(html);
+  if (!match) return null;
+  const text = decodeBasic(match[1] ?? "").slice(0, 120);
+  return text || null;
+}
+
+function decodeBasic(value: string): string {
+  return value
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;|&apos;/g, "'")
+    .replace(/&#(\d+);/g, (_, digits: string) => {
+      const code = Number(digits);
+      return code > 0 && code < 0x110000 ? String.fromCodePoint(code) : "";
+    })
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+export async function importRecipeFromUrl(rawUrl: string): Promise<ImportedRecipe> {
+  const page = await fetchPublicPage(rawUrl);
+  const recipe = recipeFromDocument(page.html);
   if (!recipe) {
     throw new HttpError(422, "Couldn't find a recipe on that page. You can type it in instead.");
   }
-  return { ...recipe, sourceUrl: finalUrl };
+  return { ...recipe, sourceUrl: page.finalUrl };
 }
 
 export function recipeFromDocument(html: string): Omit<ImportedRecipe, "sourceUrl"> | null {

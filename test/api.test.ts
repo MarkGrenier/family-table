@@ -24,6 +24,21 @@ async function call(
   return { status: response.status, json, setCookie: response.headers.get("Set-Cookie") };
 }
 
+async function shareText(token: string, body: string, contentType = "application/json") {
+  const response = await exports.default.fetch(
+    new Request("https://grocery.test/api/share", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": contentType },
+      body,
+    }),
+  );
+  return {
+    status: response.status,
+    text: await response.text(),
+    type: response.headers.get("Content-Type") ?? "",
+  };
+}
+
 async function signIn(): Promise<string> {
   const response = await call("/api/login", { method: "POST", body: { passcode: env.PASSCODE } });
   expect(response.status).toBe(200);
@@ -42,6 +57,7 @@ describe("grocery API", () => {
     await env.DB.prepare("DELETE FROM items").run();
     await env.DB.prepare("DELETE FROM staples").run();
     await env.DB.prepare("DELETE FROM on_hand").run();
+    await env.DB.prepare("DELETE FROM share_keys").run();
   });
 
   it("starts empty, with no practice items from the seed file", async () => {
@@ -1384,6 +1400,115 @@ describe("grocery API", () => {
     expect(restored.find((item) => item.id === (manual.json?.item as Json).id)?.quantityNote).toBe("2 cartons");
   });
 
+  it("imports from a share key without shopping or opening the rest of the list", async () => {
+    const token = env.API_TOKEN;
+    const setup = await call("/api/share-setup", { token });
+    expect(setup.status).toBe(200);
+    const people = (setup.json?.people ?? []) as Json[];
+    expect(people.map((person) => person.person)).toEqual(["Mark", "Emma"]);
+    const mark = people[0];
+    const emma = people[1];
+    expect(String(mark.key)).toMatch(/^ft_mark_[a-f0-9]{32}$/);
+    expect(String(emma.key)).toMatch(/^ft_emma_[a-f0-9]{32}$/);
+    expect(mark.key).not.toBe(emma.key);
+    const stored = await env.DB.prepare(`SELECT key_hash FROM share_keys WHERE person = ?`).bind("Mark").first<{ key_hash: string }>();
+    expect(stored?.key_hash).toMatch(/^[a-f0-9]{64}$/);
+    expect(stored?.key_hash).not.toBe(mark.key);
+
+    const again = await call("/api/share-setup", { token });
+    expect((again.json?.people as Json[])[0].key).toBe(mark.key);
+    const rows = await env.DB.prepare(`SELECT COUNT(*) AS n FROM share_keys`).first<{ n: number }>();
+    expect(Number(rows?.n)).toBe(2);
+
+    expect((await call("/api/share-setup", { token: String(mark.key) })).status).toBe(401);
+    expect((await call("/api/items", { token: String(mark.key) })).status).toBe(401);
+    expect((await call("/api/recipes", { token: String(mark.key) })).status).toBe(401);
+    expect((await call("/api/recipes/import", { method: "POST", token: String(mark.key), body: { url: "https://recipes.example/pasta" } })).status).toBe(401);
+    expect((await call("/api/plan", { method: "POST", token: String(mark.key), body: { date: "2026-12-16", meal: "dinner", type: "note", note: "nope" } })).status).toBe(401);
+
+    const blocked = await shareText(token, JSON.stringify({ url: "https://recipes.example/chili" }));
+    expect(blocked.status).toBe(401);
+    expect(blocked.type).toContain("text/plain");
+    expect(blocked.text).toBe("That share key didn't work.");
+    expect((await call("/api/recipes", { token })).json).toEqual({ recipes: [] });
+
+    const full = `<!doctype html><title>Ignored</title><script type="application/ld+json">${JSON.stringify({
+      "@type": "Recipe",
+      name: "Lemon pasta",
+      recipeYield: "4 servings",
+      recipeIngredient: ["1 lemon", "1/2 lb spaghetti"],
+      recipeInstructions: ["Boil the pasta."],
+    })}</script>`;
+    const partial = `<!doctype html><title>Half a soup</title><script type="application/ld+json">${JSON.stringify({
+      "@type": "Recipe",
+      name: "Half a soup",
+    })}</script>`;
+    const notes = `<!doctype html><title>Tuesday notes</title><p>Not a recipe.</p>`;
+    const original = globalThis.fetch;
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const href = String(input);
+      if (href.startsWith("https://recipes.example/pasta")) return new Response(full, { status: 200, headers: { "Content-Type": "text/html" } });
+      if (href.startsWith("https://recipes.example/half")) return new Response(partial, { status: 200, headers: { "Content-Type": "text/html" } });
+      if (href.startsWith("https://recipes.example/notes")) return new Response(notes, { status: 200, headers: { "Content-Type": "text/html" } });
+      if (href.startsWith("https://recipes.example/down")) return new Response("nope", { status: 500 });
+      return original(input, init);
+    }) as typeof fetch;
+    try {
+      const added = await shareText(String(mark.key), JSON.stringify({ URL: "https://recipes.example/pasta" }));
+      expect(added.status).toBe(200);
+      expect(added.type).toContain("text/plain");
+      expect(added.text).toBe("Added: Lemon pasta");
+      const half = await shareText(String(emma.key), "https://recipes.example/half extra words", "text/plain");
+      expect(half.status).toBe(200);
+      expect(half.type).toContain("text/plain");
+      expect(half.text).toBe("Saved for Chef to finish: Half a soup");
+      const stub = await shareText(String(mark.key), JSON.stringify({ url: "https://recipes.example/notes" }));
+      expect(stub.status).toBe(200);
+      expect(stub.text).toBe("Saved for Chef to finish: Tuesday notes");
+      const missed = await shareText(String(mark.key), JSON.stringify({ url: "https://recipes.example/down" }));
+      expect(missed.text).toBe("Saved for Chef to finish: Recipe");
+      const bad = await shareText(String(mark.key), JSON.stringify({ url: "http://recipes.example/pasta" }));
+      expect(bad.status).toBe(400);
+      expect(bad.text).toBe("Paste a full https link.");
+    } finally {
+      globalThis.fetch = original;
+    }
+
+    const recipes = ((await call("/api/recipes", { token })).json?.recipes ?? []) as Json[];
+    const pasta = recipes.find((recipe) => recipe.name === "Lemon pasta");
+    expect(pasta?.needsReview).toBe(false);
+    expect(pasta?.sourceUrl).toBe("https://recipes.example/pasta");
+    expect(((await call("/api/items", { token })).json?.items as Json[])).toEqual([]);
+    const review = ((await call("/api/recipes?needsReview=true", { token })).json?.recipes ?? []) as Json[];
+    expect(review.map((recipe) => recipe.name).sort()).toEqual(["Half a soup", "Recipe", "Tuesday notes"]);
+    expect(review.every((recipe) => recipe.needsReview === true)).toBe(true);
+    expect(String(review.find((recipe) => recipe.name === "Tuesday notes")?.sourceUrl)).toBe("https://recipes.example/notes");
+    const starred = await call(`/api/recipes/${review.find((recipe) => recipe.name === "Tuesday notes")?.id}`, {
+      method: "PATCH",
+      token,
+      body: { favorite: true },
+    });
+    expect((starred.json?.recipe as Json).needsReview).toBe(true);
+
+    const finished = await call(`/api/recipes/${review.find((recipe) => recipe.name === "Half a soup")?.id}`, {
+      method: "PATCH",
+      token,
+      body: { ingredients: ["1 onion"], steps: ["Simmer."] },
+    });
+    expect((finished.json?.recipe as Json).needsReview).toBe(false);
+    const still = ((await call("/api/recipes?needsReview=true", { token })).json?.recipes ?? []) as Json[];
+    expect(still.map((recipe) => recipe.name).sort()).toEqual(["Recipe", "Tuesday notes"]);
+
+    const planned = await call("/api/plan", {
+      method: "POST",
+      token,
+      body: { date: "2026-12-15", meal: "dinner", type: "recipe", recipeId: pasta?.id },
+    });
+    expect(planned.status).toBe(200);
+    const shopped = ((await call("/api/items", { token })).json?.items ?? []) as Json[];
+    expect(shopped.map((item) => item.name).sort()).toEqual(["Lemon", "Spaghetti"]);
+  });
+
   it("serves the phone page", async () => {
     const response = await exports.default.fetch("https://grocery.test/");
     expect(response.status).toBe(200);
@@ -1412,6 +1537,10 @@ describe("grocery API", () => {
     expect(js).toContain('class="lo-pill"');
     expect(js).toContain("mealLabel(entry.meal)");
     expect(js).toContain("Night off. Enjoy the leftovers.");
+    expect(js).toContain("Share button");
+    expect(js).toContain('data-action="copy-share-key"');
+    expect(js).toContain("Needs a look");
+    expect(js).not.toContain("sourceUrl");
     expect(js).toContain("/photos/leftovers-hero.jpg");
     expect(js).toContain("Tomorrow: leftovers");
     const hero = await exports.default.fetch("https://grocery.test/photos/leftovers-hero.jpg");
