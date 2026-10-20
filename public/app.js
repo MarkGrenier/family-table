@@ -82,7 +82,6 @@ boot();
 setInterval(() => refresh(false), 5000);
 
 async function boot() {
-  if (!app.querySelector(".splash")) app.innerHTML = splashHtml();
   if (app.dataset.session === "0") state.authed = false;
   const me = await fetch("/api/items");
   const typed = document.getElementById("passcode");
@@ -175,6 +174,10 @@ function render() {
   const finish = () => {
     if (moved) scrollToTop();
   };
+  if (state.loading) {
+    finish();
+    return;
+  }
   if (!state.authed) {
     const input = document.getElementById("passcode");
     const error = document.getElementById("login-error");
@@ -188,11 +191,6 @@ function render() {
     app.innerHTML = loginHtml();
     const fresh = document.getElementById("passcode");
     if (fresh && state.passcode) fresh.value = state.passcode;
-    finish();
-    return;
-  }
-  if (state.loading) {
-    app.innerHTML = splashHtml();
     finish();
     return;
   }
@@ -212,10 +210,6 @@ function render() {
   const focus = document.getElementById("add-search");
   if (focus && state.page?.kind === "add-item") focus.focus();
   finish();
-}
-
-function splashHtml() {
-  return `<main class="splash">${markImg(72)}</main>`;
 }
 
 function loginHtml() {

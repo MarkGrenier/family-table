@@ -4,6 +4,35 @@ import { deriveShareKey, sha256Hex } from "../src/auth";
 
 type Json = Record<string, unknown>;
 
+function pngUint32(bytes: Uint8Array, offset: number) {
+  return (bytes[offset] << 24) | (bytes[offset + 1] << 16) | (bytes[offset + 2] << 8) | bytes[offset + 3];
+}
+
+async function pngPixel(bytes: Uint8Array, x: number, y: number) {
+  let offset = 8;
+  let width = 0;
+  const parts: Uint8Array[] = [];
+  while (offset + 8 <= bytes.length) {
+    const length = pngUint32(bytes, offset);
+    const type = String.fromCharCode(bytes[offset + 4], bytes[offset + 5], bytes[offset + 6], bytes[offset + 7]);
+    const data = bytes.subarray(offset + 8, offset + 8 + length);
+    if (type === "IHDR") width = pngUint32(data, 0);
+    if (type === "IDAT") parts.push(data);
+    if (type === "IEND") break;
+    offset += 12 + length;
+  }
+  const packed = new Uint8Array(parts.reduce((sum, part) => sum + part.length, 0));
+  let cursor = 0;
+  for (const part of parts) {
+    packed.set(part, cursor);
+    cursor += part.length;
+  }
+  const stream = new Blob([packed]).stream().pipeThrough(new DecompressionStream("deflate"));
+  const raw = new Uint8Array(await new Response(stream).arrayBuffer());
+  const index = y * (width * 3 + 1) + 1 + x * 3;
+  return [raw[index], raw[index + 1], raw[index + 2]];
+}
+
 async function call(
   path: string,
   opts: { method?: string; body?: unknown; token?: string; cookie?: string } = {},
@@ -103,15 +132,16 @@ describe("grocery API", () => {
     const home = await exports.default.fetch(new Request("https://grocery.test/", { headers: { Cookie: cookie } }));
     const page = await home.text();
     expect(page).toContain('data-session="1"');
-    expect(page).toContain('class="splash"');
+    expect(page).not.toContain('class="splash"');
+    expect(page).not.toContain('src="/mark.svg"');
     expect(page).not.toContain("passcode");
     expect(home.headers.get("Set-Cookie") ?? "").toContain("Max-Age=34560000");
 
     const anon = await exports.default.fetch("https://grocery.test/");
     const anonHtml = await anon.text();
     expect(anonHtml).toContain('data-session="0"');
-    expect(anonHtml).toContain('class="splash"');
-    expect(anonHtml).toContain('src="/mark.svg"');
+    expect(anonHtml).not.toContain('class="splash"');
+    expect(anonHtml).not.toContain('src="/mark.svg"');
     expect(anonHtml).not.toContain("passcode");
     expect(anon.headers.get("Set-Cookie")).toBeNull();
 
@@ -1685,7 +1715,10 @@ describe("grocery API", () => {
     expect(js).not.toContain("Reheating");
     expect(js).toContain("showRecipes");
     expect(js).toContain("dataset.session");
-    expect(js).toContain('class="splash"');
+    expect(js).toContain("login-brand");
+    expect(js).toContain("markImg(88)");
+    expect(js).not.toContain('class="splash"');
+    expect(js).not.toContain("splashHtml");
     expect(js).not.toContain("Loading…");
     const html = await (await exports.default.fetch("https://grocery.test/")).text();
     expect(html).toContain("apple-touch-startup-image");
@@ -1699,6 +1732,10 @@ describe("grocery API", () => {
     const startupHeight = (startupBytes[20] << 24) | (startupBytes[21] << 16) | (startupBytes[22] << 8) | startupBytes[23];
     expect(startupWidth).toBe(1170);
     expect(startupHeight).toBe(2532);
+    const center = await pngPixel(startupBytes, Math.floor(startupWidth / 2), Math.floor(startupHeight / 2));
+    const corner = await pngPixel(startupBytes, 0, 0);
+    expect(center).toEqual([247, 247, 245]);
+    expect(corner).toEqual([247, 247, 245]);
     expect(js).not.toContain("meal-letter");
     expect(js).not.toContain("style=");
     expect(js).not.toContain("Open source");
