@@ -80,7 +80,14 @@ boot();
 setInterval(() => refresh(false), 5000);
 
 async function boot() {
-  render();
+  const hinted = app.dataset.session;
+  if (hinted === "0") {
+    state.authed = false;
+    state.loading = false;
+    render();
+  } else if (!app.querySelector(".splash")) {
+    app.innerHTML = splashHtml();
+  }
   const me = await fetch("/api/items");
   const typed = document.getElementById("passcode");
   if (typed) state.passcode = typed.value;
@@ -165,10 +172,17 @@ function render() {
     return;
   }
   const bare = ["recipe", "feedback", "item", "add-item"].includes(state.page?.kind);
-  const todayCook = state.tab === "today" && !state.page && Boolean(tonightRecipe());
-  app.innerHTML = `<main class="${bare ? "bare" : todayCook ? "screen today-screen" : "screen"}">${bodyHtml()}</main>${bare ? "" : tabsHtml()}${sheetHtml()}${toastHtml()}`;
+  const dinnerTonight = state.tab === "today" && !state.page ? mealOn(nyToday(), "dinner") : null;
+  const todayCook = dinnerTonight?.type === "recipe" && Boolean(recipeForEntry(dinnerTonight));
+  const todayLeft = dinnerTonight?.type === "leftovers";
+  const mainClass = bare ? "bare" : todayCook ? "screen today-screen" : todayLeft ? "screen today-screen no-dock" : "screen";
+  app.innerHTML = `<main class="${mainClass}">${bodyHtml()}</main>${bare ? "" : tabsHtml()}${sheetHtml()}${toastHtml()}`;
   const focus = document.getElementById("add-search");
   if (focus && state.page?.kind === "add-item") focus.focus();
+}
+
+function splashHtml() {
+  return `<main class="splash">${markImg(72)}</main>`;
 }
 
 function loginHtml() {
@@ -212,6 +226,7 @@ function todayHtml() {
   const dinner = mealOn(today, "dinner");
   const recipe = recipeForEntry(dinner);
   const events = eventsOn(today);
+  if (dinner?.type === "leftovers") return `${leftoversCard(dinner, recipe)}${eventsHtml(events)}`;
   if (recipe && dinner) {
     if (state.todayId !== recipe.id) {
       state.todayId = recipe.id;
@@ -220,9 +235,44 @@ function todayHtml() {
       state.todayServingsOpen = false;
     }
   }
-  return `${recipe && dinner ? recipeView(recipe, dinner.type === "leftovers" ? "leftovers" : "today") : emptyTonight()}
+  return `${recipe && dinner ? recipeView(recipe, "today") : emptyTonight()}
     ${eventsHtml(events)}
     ${recipe ? cookDock(recipe, true) : ""}`;
+}
+
+function leftoversCard(entry, recipe) {
+  const image = recipe?.imageUrl || entry?.imageUrl || "";
+  const visual = image
+    ? `<img src="${esc(safeSrc(image))}" alt="">`
+    : `<span class="hero-mark" aria-hidden="true">${plateIcon()}</span>`;
+  const reheating = recipe?.reheating ? `<p class="note-block"><span class="kicker">Reheating</span><br>${esc(recipe.reheating)}</p>` : "";
+  return `<article class="leftover-card">
+      <div class="hero${image ? "" : " hero-empty"}">${visual}
+        <button class="float right" type="button" data-action="recipe-menu" data-date="${esc(entry.date)}" data-meal="${esc(entry.meal)}" aria-label="More">${dots()}</button>
+      </div>
+      <div class="pad">
+        <p class="kicker">Leftovers</p>
+        <h1>${esc(dishName(entry, recipe))}</h1>
+        ${reheating}
+      </div>
+    </article>`;
+}
+
+function leftoversRow(entry, recipe) {
+  const thumb = recipe ? recipeThumb(recipe) : `<span class="thumb-tile" aria-hidden="true">${plateIcon()}</span>`;
+  const reheating = recipe?.reheating ? `<p class="reheat-line">${esc(recipe.reheating)}</p>` : "";
+  return `<div class="leftover-row">${thumb}
+      <button class="copy" type="button" data-action="open-day" data-date="${esc(entry.date)}">
+        <p class="kicker">Leftovers</p>
+        <strong>${esc(dishName(entry, recipe))}</strong>
+        ${reheating}
+      </button>
+      <button class="icon-btn" type="button" data-action="recipe-menu" data-date="${esc(entry.date)}" data-meal="${esc(entry.meal)}" aria-label="More">${dots()}</button>
+    </div>`;
+}
+
+function dishName(entry, recipe) {
+  return recipe?.name || entry?.recipeName || entry?.note || "Dinner";
 }
 
 function emptyTonight() {
@@ -359,6 +409,7 @@ function weekDay(date) {
 
 function mealRow(entry) {
   const recipe = recipeForEntry(entry);
+  if (entry.type === "leftovers") return leftoversRow(entry, recipe);
   const title = planTitle(entry);
   const meal = mealLabel(entry.meal);
   if (!recipe) {
@@ -408,10 +459,15 @@ function mealsOn(date) {
 function dayHtml(date) {
   const dinner = mealOn(date, "dinner");
   const recipe = recipeForEntry(dinner);
+  const planned = !dinner
+    ? ""
+    : dinner.type === "leftovers"
+      ? `${leftoversCard(dinner, recipe)}<button class="text-green" type="button" data-action="clear-meal" data-id="${esc(dinner.id)}">Remove</button>`
+      : `<p class="title day-title">${recipe ? `<button type="button" class="text-link" data-action="open-recipe" data-id="${esc(recipe.id)}" data-date="${esc(date)}" data-meal="dinner">${esc(planTitle(dinner))}</button>` : esc(planTitle(dinner))}</p><button class="text-green" type="button" data-action="clear-meal" data-id="${esc(dinner.id)}">Remove</button>`;
   return `<button class="text-green" type="button" data-action="back">Week</button>
     <h1>${esc(longDate(date))}</h1>
     <section><p class="kicker">Dinner</p>
-      ${dinner ? `<p class="title day-title">${recipe ? `<button type="button" class="text-link" data-action="open-recipe" data-id="${esc(recipe.id)}" data-date="${esc(date)}" data-meal="dinner">${esc(planTitle(dinner))}</button>` : esc(planTitle(dinner))}</p><button class="text-green" type="button" data-action="clear-meal" data-id="${esc(dinner.id)}">Remove</button>` : ""}
+      ${planned}
       ${pickerHtml(date, "dinner")}
     </section>`;
 }
@@ -476,6 +532,8 @@ function recipeList(recipes) {
 function recipeHtml(id) {
   const recipe = recipeById(id);
   if (!recipe) return `<div class="pad"><button class="text-green" type="button" data-action="back">Recipes</button><p>That recipe isn't here anymore.</p></div>`;
+  const entry = state.page?.planDate ? mealOn(state.page.planDate, state.page.planMeal) : null;
+  if (entry?.type === "leftovers") return leftoversCard(entry, recipeForEntry(entry) || recipe);
   return `${recipeView(recipe, "page")}${cookDock(recipe, false)}`;
 }
 
@@ -669,9 +727,14 @@ function newRecipeHtml() {
 }
 
 function mealContext() {
+  const sheet = state.sheet;
+  if (sheet?.date && sheet?.meal && (sheet.kind === "recipe-menu" || sheet.kind === "change-meal" || sheet.kind === "edit-recipe")) {
+    return { date: sheet.date, meal: sheet.meal };
+  }
   if (state.page?.kind === "recipe" && state.page.planDate && state.page.planMeal) {
     return { date: state.page.planDate, meal: state.page.planMeal };
   }
+  if (state.page?.kind === "day") return { date: state.page.date, meal: "dinner" };
   if (!state.page && state.tab === "today") {
     const dinner = mealOn(nyToday(), "dinner");
     if (dinner) return { date: dinner.date, meal: dinner.meal };
@@ -681,6 +744,11 @@ function mealContext() {
 
 function activeRecipe() {
   if (state.page?.kind === "recipe") return recipeById(state.page.id) || null;
+  const context = mealContext();
+  if (context) {
+    const planned = recipeForEntry(mealOn(context.date, context.meal));
+    if (planned) return recipeById(planned.id) || planned;
+  }
   if (!state.page && state.tab === "today") {
     const recipe = tonightRecipe();
     if (!recipe) return null;
@@ -1251,20 +1319,20 @@ async function onClick(event) {
     return;
   }
   if (action === "recipe-menu") {
-    state.sheet = { kind: "recipe-menu" };
+    state.sheet = { kind: "recipe-menu", date: button.dataset.date || null, meal: button.dataset.meal || null };
     render();
     return;
   }
   if (action === "change-meal") {
     state.mealQuery = "";
-    state.sheet = { kind: "change-meal", error: "" };
+    state.sheet = { kind: "change-meal", error: "", date: state.sheet?.date || null, meal: state.sheet?.meal || null };
     render();
     return;
   }
   if (action === "edit-recipe") {
     const recipe = activeRecipe();
     if (!recipe) return;
-    state.sheet = { kind: "edit-recipe", id: recipe.id, error: "" };
+    state.sheet = { kind: "edit-recipe", id: recipe.id, error: "", date: state.sheet?.date || null, meal: state.sheet?.meal || null };
     render();
     return;
   }

@@ -79,6 +79,25 @@ describe("grocery API", () => {
 
     const items = await call("/api/items", { cookie });
     expect(items.status).toBe(200);
+    expect(items.setCookie ?? "").toContain("grocery_session=");
+    expect(items.setCookie ?? "").toContain("Max-Age=34560000");
+
+    const home = await exports.default.fetch(new Request("https://grocery.test/", { headers: { Cookie: cookie } }));
+    const page = await home.text();
+    expect(page).toContain('data-session="1"');
+    expect(page).toContain('class="splash"');
+    expect(page).not.toContain("passcode");
+    expect(home.headers.get("Set-Cookie") ?? "").toContain("Max-Age=34560000");
+
+    const anon = await exports.default.fetch("https://grocery.test/");
+    const anonHtml = await anon.text();
+    expect(anonHtml).toContain('data-session="0"');
+    expect(anonHtml).not.toContain("passcode");
+    expect(anon.headers.get("Set-Cookie")).toBeNull();
+
+    const stale = await exports.default.fetch(new Request("https://grocery.test/", { headers: { Cookie: "grocery_session=nope" } }));
+    expect(await stale.text()).toContain('data-session="0"');
+    expect(stale.headers.get("Set-Cookie")).toBeNull();
 
     const loggedOut = await call("/api/logout", { method: "POST", cookie });
     expect(loggedOut.setCookie).toContain("Max-Age=0");
@@ -1205,6 +1224,9 @@ describe("grocery API", () => {
     expect(js).toContain("raised && cooked");
     expect(js).toContain("recipeThumb(recipe)");
     expect(js).toContain("Chef's picks");
+    expect(js).toContain("leftover-card");
+    expect(js).toContain("dataset.session");
+    expect(js).toContain('class="splash"');
     expect(js).not.toContain("meal-letter");
     expect(js).not.toContain("style=");
     expect(js).not.toContain("Open source");

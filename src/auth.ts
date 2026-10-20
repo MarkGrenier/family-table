@@ -40,6 +40,13 @@ export function readCookie(header: string | null, name = COOKIE): string | null 
   return null;
 }
 
+export async function rollingSessionCookie(request: Request, passcode: string | undefined): Promise<string | null> {
+  if (!(await sessionOk(request, passcode))) return null;
+  const token = readCookie(request.headers.get("Cookie"));
+  if (!token) return null;
+  return sessionCookie(token, request);
+}
+
 export async function sessionOk(request: Request, passcode: string | undefined): Promise<boolean> {
   if (!passcode) return false;
   const token = readCookie(request.headers.get("Cookie"));

@@ -1,4 +1,4 @@
-import { clearSessionCookie, passcodeMatches, requestAuthed, sessionCookie, sessionToken } from "./auth";
+import { clearSessionCookie, passcodeMatches, requestAuthed, rollingSessionCookie, sessionCookie, sessionOk, sessionToken } from "./auth";
 import { addStapleToList, clearChecked, createItem, createStaple, deleteItem, deleteStaple, listItems, listStaples, lookupBarcode, updateItem } from "./db";
 import {
   addPlanGroceries,
@@ -80,7 +80,27 @@ async function serveAsset(request: Request, env: Env): Promise<Response> {
   ) {
     headers.set("Cache-Control", "no-cache");
   }
-  return new Response(upstream.body, { status: upstream.status, statusText: upstream.statusText, headers });
+  const document = request.method.toUpperCase() === "GET" && (type.includes("text/html") || assetPath === "/" || assetPath === "/index.html");
+  if (!document) {
+    return new Response(upstream.body, { status: upstream.status, statusText: upstream.statusText, headers });
+  }
+  headers.set("Cache-Control", "private, no-cache");
+  headers.set("Vary", "Cookie");
+  const authed = await sessionOk(request, env.PASSCODE);
+  const shell = authed
+    ? `<div id="app" data-session="1"><main class="splash"><img class="app-mark" src="/mark.svg" alt="" width="72" height="72"></main></div>`
+    : `<div id="app" data-session="0"></div>`;
+  const html = (await upstream.text()).replace("<div id=\"app\"></div>", shell);
+  return new Response(html, { status: upstream.status, statusText: upstream.statusText, headers });
+}
+
+async function withRollingSession(request: Request, env: Env, response: Response): Promise<Response> {
+  if (response.headers.has("Set-Cookie")) return response;
+  const cookie = await rollingSessionCookie(request, env.PASSCODE);
+  if (!cookie) return response;
+  const headers = new Headers(response.headers);
+  headers.append("Set-Cookie", cookie);
+  return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
 }
 
 async function login(request: Request, env: Env): Promise<Response> {
@@ -343,11 +363,11 @@ const handler: ExportedHandler<Env> = {
   async fetch(request, env): Promise<Response> {
     const path = pathOf(request);
     try {
-      if (path.startsWith("/api/")) return await handleApi(request, env, path);
+      if (path.startsWith("/api/")) return await withRollingSession(request, env, await handleApi(request, env, path));
       if (request.method.toUpperCase() !== "GET" && request.method.toUpperCase() !== "HEAD") {
         throw new HttpError(405, "That action isn't available.");
       }
-      return await serveAsset(request, env);
+      return await withRollingSession(request, env, await serveAsset(request, env));
     } catch (error) {
       if (error instanceof HttpError) return json({ error: error.message }, error.status);
       console.error(error);

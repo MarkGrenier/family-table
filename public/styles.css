@@ -59,6 +59,10 @@ a { color: var(--green-dark); }
   padding-bottom: calc(var(--tab-bar) + var(--dock-pad) + var(--dock-btn) + 1.15rem);
 }
 
+.today-screen.no-dock {
+  padding-bottom: calc(var(--tab-bar) + 1.2rem);
+}
+
 .today-screen .pad,
 .today-screen .today-events,
 .today-screen .empty-night { padding-left: 1.15rem; padding-right: 1.15rem; }
@@ -198,6 +202,15 @@ h1, .title {
 .pass-box button { color: var(--green-dark); font-weight: 700; min-height: 44px; }
 .login .error { color: var(--danger); min-height: 1.3rem; margin: 0.6rem 0; }
 .login .primary { width: 100%; }
+
+.splash {
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+}
+
+.splash .app-mark { width: 72px; height: 72px; border-radius: 16px; }
 
 .hero {
   position: relative;
@@ -719,6 +732,31 @@ select.box { appearance: none; padding-right: 2.2rem; }
   text-transform: uppercase;
   font-size: 0.78rem;
 }
+
+.screen .leftover-card .hero { border-radius: 16px; overflow: hidden; }
+.today-screen .leftover-card .hero { border-radius: 0; }
+.leftover-card .pad { padding-top: 1.05rem; }
+.screen .leftover-card .pad { padding-left: 0; padding-right: 0; }
+.today-screen .leftover-card .pad { padding-left: 1.15rem; padding-right: 1.15rem; }
+.leftover-card h1 { margin-top: 0.15rem; }
+
+.leftover-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+  padding: 0.35rem 0 0.7rem;
+}
+
+.leftover-row .copy {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+}
+
+.leftover-row .kicker { margin: 0; }
+.leftover-row strong { display: block; font-size: 1.05rem; font-weight: 750; line-height: 1.25; }
+.leftover-row .reheat-line { margin: 0.15rem 0 0; color: var(--muted); font-size: 0.88rem; }
 
 .reheat { margin: 0.6rem 0; }
 
