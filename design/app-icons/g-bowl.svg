@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- G. A bowl and one steam line, same stroke, on flat app green. Full-bleed 512. Wire sized/g over public/icons when chosen. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <rect width="512" height="512" fill="#5dbb24"/>
+  <g fill="none" stroke="#ffffff" stroke-width="46" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M256 132c28 36 28 64 0 96"/>
+    <path d="M156 292c28 108 172 108 200 0"/>
+  </g>
+</svg>

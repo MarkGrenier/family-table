@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- F. One bold rounded fork on flat app green. Full-bleed 512. Wire sized/f over public/icons when chosen. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <rect width="512" height="512" fill="#5dbb24"/>
+  <g fill="#ffffff">
+    <rect x="158" y="124" width="48" height="132" rx="24"/>
+    <rect x="306" y="124" width="48" height="132" rx="24"/>
+    <rect x="232" y="124" width="48" height="272" rx="24"/>
+  </g>
+</svg>

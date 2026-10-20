@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- H. A geometric F on flat app green. Full-bleed 512. Wire sized/h over public/icons when chosen. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <rect width="512" height="512" fill="#5dbb24"/>
+  <g fill="#ffffff">
+    <rect x="156" y="124" width="64" height="264" rx="14"/>
+    <rect x="156" y="124" width="196" height="64" rx="14"/>
+    <rect x="156" y="224" width="148" height="64" rx="14"/>
+  </g>
+</svg>

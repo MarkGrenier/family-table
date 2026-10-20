@@ -17,6 +17,10 @@ const designs = [
   ["b", "b-monogram.svg"],
   ["c", "c-pot.svg"],
   ["d", "d-house.svg"],
+  ["e", "e-sprig.svg"],
+  ["f", "f-fork.svg"],
+  ["g", "g-bowl.svg"],
+  ["h", "h-f.svg"],
 ];
 
 for (const [letter, file] of designs) {
