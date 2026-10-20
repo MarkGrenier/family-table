@@ -1,7 +1,7 @@
 {
   "id": "/",
-  "name": "Family food",
-  "short_name": "Food",
+  "name": "Family Table",
+  "short_name": "Family Table",
   "description": "Dinners, recipes, and the grocery list for Mark and Emma.",
   "start_url": "/",
   "scope": "/",

@@ -1,4 +1,4 @@
-# Family food
+# Family Table
 
 Dinners, recipes, and one grocery list for Mark and Emma.
 
@@ -127,7 +127,7 @@ Do this in Safari. The Chrome app on an iPhone will not add it to the home scree
 5. Tap **Add to Home Screen**.
 6. Tap **Add**.
 
-The icon is still the little cart. A newly added icon is named Food. An icon you already added can keep its old name. Do the same on the other phone.
+The icon is still the little cart. A newly added icon is named Family Table. An icon you already added can keep its old name. Do the same on the other phone.
 
 Open the app on both phones. When one of you changes dinner, a recipe, or the groceries, the other phone updates within a few seconds, as long as the app is open.
 
@@ -334,11 +334,11 @@ A recipe's ingredients can be plain lines, or objects. Old lines still work. Wat
 
 `GET /api/recipes/ID`
 
-`PATCH /api/recipes/ID` with only what changed. `{ "favorite": true }` stars it, and `{ "favorite": false }` clears the star.
+`PATCH /api/recipes/ID` with only what changed. `{ "favorite": true }` stars it, and `{ "favorite": false }` clears the star. `{ "imageUrl": "https://..." }` sets the photo. `{ "imageUrl": null }` clears it. A path that starts with `/` is also allowed.
 
 `DELETE /api/recipes/ID` removes the recipe. Days that used it become a note with the recipe's name.
 
-`POST /api/recipes/import` with `{ "url": "https://..." }` fetches the page and reads the schema.org Recipe block (including one inside `@graph`). The reply is the saved recipe, including `sourceUrl`. If the page has no recipe, the reply is `422` and nothing is saved.
+`POST /api/recipes/import` with `{ "url": "https://..." }` fetches the page and reads the schema.org Recipe block (including one inside `@graph`). The photo comes from that block. If the block has none, the page's `og:image` is used. The reply is the saved recipe, including `sourceUrl`. If the page has no recipe, the reply is `422` and nothing is saved.
 
 `POST /api/recipes/ID/groceries` with optional `{ "servings": 8 }` adds that recipe's ingredients. Amounts scale from the recipe's own servings when you send a different number. The same recipe is not added twice.
 
@@ -415,7 +415,7 @@ Planning and removing meals here follows the same grocery rules as `POST /api/pl
 }
 ```
 
-`coversNights` is how many nights the recipe feeds, including a leftovers night. A leftovers day can send `recipeId` for the original recipe. If it doesn't, a note that matches the recipe name, or the previous dinner that still covers that night, is used. `nightBefore`, `prepSteps`, and `cookSteps` show on the recipe page in that order, inside Instructions. Cook mode walks today's prep and cook steps, then kids' plates and reheating when those notes exist. Night-before steps stay out of cook mode. On Today they show up as a tag on the photo, **Prep for tomorrow · 1 step**, when tomorrow's recipe has them. Leftovers use the source recipe's photo. A recipe with no photo shows a green band instead, and the tag sits on that band. The Ingredients button in cook mode lists every ingredient at the current serving size. The screen stays awake while you cook.
+`coversNights` is how many nights the recipe feeds, including a leftovers night. A leftovers day can send `recipeId` for the original recipe. If it doesn't, a note that matches the recipe name, or the previous dinner that still covers that night, is used. `nightBefore`, `prepSteps`, and `cookSteps` show on the recipe page in that order, inside Instructions. Cook mode walks today's prep and cook steps, then kids' plates and reheating when those notes exist. Night-before steps stay out of cook mode. On Today they show up as a tag on the photo, **Prep for tomorrow · 1 step**, when tomorrow's recipe has them. Leftovers use the source recipe's photo. A recipe with no photo shows a plate icon on a green band instead, and the tag sits on that band. The Ingredients button in cook mode lists every ingredient at the current serving size. The screen stays awake while you cook.
 
 A cook step timer is `minutes` as a number (`8`), a range (`"4-5"`), or `seconds` (`30`). The words "4-5 min" or "30 sec" inside the step also start a timer. `kidsPlates` and `reheating` are short notes. Leave a section out when it doesn't apply.
 

@@ -76,16 +76,44 @@ export async function importRecipeFromUrl(rawUrl: string): Promise<ImportedRecip
 
 export function recipeFromDocument(html: string): Omit<ImportedRecipe, "sourceUrl"> | null {
   const blocks = [...html.matchAll(/<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)];
+  let recipe: Omit<ImportedRecipe, "sourceUrl"> | null = null;
   for (const block of blocks) {
     const parsed = parseLd(block[1] ?? "");
     if (!parsed) continue;
     const found = findRecipes(parsed)[0];
-    if (found) return normalizeRecipe(found);
+    if (found) {
+      recipe = normalizeRecipe(found);
+      break;
+    }
   }
-  const asJson = parseLd(html.trim());
-  if (asJson) {
-    const found = findRecipes(asJson)[0];
-    if (found) return normalizeRecipe(found);
+  if (!recipe) {
+    const asJson = parseLd(html.trim());
+    if (asJson) {
+      const found = findRecipes(asJson)[0];
+      if (found) recipe = normalizeRecipe(found);
+    }
+  }
+  if (!recipe) return null;
+  if (!recipe.imageUrl) {
+    const imageUrl = ogImage(html);
+    if (imageUrl) return { ...recipe, imageUrl };
+  }
+  return recipe;
+}
+
+function ogImage(html: string): string | null {
+  const patterns = [
+    /<meta[^>]+property=["']og:image(?::secure_url|:url)?["'][^>]*content=["']([^"']+)["']/i,
+    /<meta[^>]+content=["']([^"']+)["'][^>]*property=["']og:image(?::secure_url|:url)?["']/i,
+    /<meta[^>]+name=["']twitter:image(?::src)?["'][^>]*content=["']([^"']+)["']/i,
+    /<meta[^>]+content=["']([^"']+)["'][^>]*name=["']twitter:image(?::src)?["']/i,
+  ];
+  for (const pattern of patterns) {
+    const match = pattern.exec(html);
+    const raw = match?.[1]?.replace(/&amp;/g, "&").trim();
+    if (!raw) continue;
+    const image = httpsImage(raw);
+    if (image) return image;
   }
   return null;
 }

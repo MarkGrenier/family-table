@@ -533,6 +533,38 @@ describe("grocery API", () => {
       globalThis.fetch = original;
     }
 
+    const ogHtml = `<!doctype html><meta property="og:image" content="https://images.example/shrimp.jpg"><script type="application/ld+json">${JSON.stringify({
+      "@type": "Recipe",
+      name: "Garlic shrimp",
+      recipeIngredient: ["1 lb shrimp"],
+      recipeInstructions: ["Cook the shrimp."],
+    })}</script>`;
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).startsWith("https://recipes.example/shrimp")) {
+        return new Response(ogHtml, { status: 200, headers: { "Content-Type": "text/html" } });
+      }
+      return original(input, init);
+    }) as typeof fetch;
+    try {
+      const fromOg = await call("/api/recipes/import", {
+        method: "POST",
+        token,
+        body: { url: "https://recipes.example/shrimp" },
+      });
+      expect(fromOg.status).toBe(201);
+      const shrimp = fromOg.json?.recipe as Json;
+      expect(shrimp.imageUrl).toBe("https://images.example/shrimp.jpg");
+      const photo = await call(`/api/recipes/${shrimp.id}`, {
+        method: "PATCH",
+        token,
+        body: { imageUrl: "https://images.example/shrimp-2.jpg" },
+      });
+      expect(photo.status).toBe(200);
+      expect((photo.json?.recipe as Json).imageUrl).toBe("https://images.example/shrimp-2.jpg");
+    } finally {
+      globalThis.fetch = original;
+    }
+
     const missed = await call("/api/recipes/import", { method: "POST", token, body: { url: "http://recipes.example/nope" } });
     expect(missed.status).toBe(400);
 
@@ -928,7 +960,7 @@ describe("grocery API", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("Content-Type") ?? "").toContain("text/html");
     const html = await response.text();
-    expect(html).toContain("Food");
+    expect(html).toContain("Family Table");
     expect(html).toContain("/manifest.json");
     expect(response.headers.get("Content-Security-Policy")).toContain("default-src 'self'");
   });

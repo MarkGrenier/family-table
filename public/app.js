@@ -163,7 +163,7 @@ function render() {
 
 function loginHtml() {
   return `<main class="login">
-    <h1>Food</h1>
+    <h1>Family Table</h1>
     <p class="lede">Dinners, the week, and the grocery list for Mark and Emma.</p>
     <form id="login-form">
       <div class="pass-box">
@@ -460,7 +460,7 @@ function recipeList(recipes) {
   if (!recipes.length) return `<p class="empty">${state.recipeQuery ? "Nothing matches that." : "No recipes yet."}</p>`;
   return recipes.map((recipe) => `<div class="recipe-row">
       <button type="button" data-action="open-recipe" data-id="${esc(recipe.id)}" class="recipe-open">
-        ${recipe.imageUrl ? `<img class="thumb" src="${esc(safeSrc(recipe.imageUrl))}" alt="">` : ""}
+        ${recipeThumb(recipe)}
         <span class="recipe-copy"><span>${esc(recipe.name)}</span>${lastMadeText(recipe) ? `<span class="small">${esc(lastMadeText(recipe))}</span>` : ""}</span>
       </button>
       <button class="heart${recipe.favorite ? " is-on" : ""}" type="button" data-action="favorite" data-id="${esc(recipe.id)}" aria-label="${recipe.favorite ? "Unfavorite" : "Favorite"}">${heart(recipe.favorite)}</button>
@@ -509,8 +509,7 @@ function hero(recipe, showBack, prepTag = "") {
   const menu = `<button class="float right" type="button" data-action="recipe-menu" aria-label="More">${dots()}</button>`;
   const back = showBack ? `<button class="float left" type="button" data-action="back" aria-label="Back">${chevLeft()}</button>` : "";
   if (!recipe.imageUrl) {
-    const letter = esc((recipe.name || "?").trim().slice(0, 1).toUpperCase());
-    return `<div class="hero hero-empty">${back}<span class="hero-initial" aria-hidden="true">${letter}</span>${prepTag}${menu}</div>`;
+    return `<div class="hero hero-empty">${back}<span class="hero-mark" aria-hidden="true">${plateIcon()}</span>${prepTag}${menu}</div>`;
   }
   return `<div class="hero"><img src="${esc(safeSrc(recipe.imageUrl))}" alt="">
       ${back}
@@ -1590,6 +1589,15 @@ function safeSrc(value) {
   if (text.startsWith("/") || text.startsWith("https://")) return text;
   return "";
 }
+function recipeThumb(recipe) {
+  if (recipe.imageUrl) return `<img class="thumb" src="${esc(safeSrc(recipe.imageUrl))}" alt="">`;
+  return `<span class="thumb-tile" aria-hidden="true">${plateIcon()}</span>`;
+}
+
+function plateIcon() {
+  return `<svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 8v12M5.5 8v7M10.5 8v7M8 20v16"/><path d="M38 8c2.4 1.6 3.6 4.2 3.6 7.2 0 3.2-1.6 5.4-3.6 6.4V36"/><ellipse cx="24" cy="30" rx="11" ry="7"/><ellipse cx="24" cy="30" rx="6" ry="3.4"/></svg>`;
+}
+
 function heart(on) {
   return `<svg viewBox="0 0 24 24" width="28" height="28" fill="${on ? "currentColor" : "none"}" stroke="currentColor" stroke-width="1.8"><path d="M12 20s-7-4.4-7-9a4 4 0 0 1 7-2 4 4 0 0 1 7 2c0 4.6-7 9-7 9z"/></svg>`;
 }
