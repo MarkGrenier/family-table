@@ -211,9 +211,7 @@ function todayHtml() {
       state.todayServingsOpen = false;
     }
   }
-  const tag = recipe?.imageUrl ? "" : prepPhotoTag(false);
-  return `${tag}
-    ${recipe && dinner ? recipeView(recipe, dinner.type === "leftovers" ? "leftovers" : "today") : emptyTonight()}
+  return `${recipe && dinner ? recipeView(recipe, dinner.type === "leftovers" ? "leftovers" : "today") : emptyTonight()}
     ${eventsHtml(events)}
     ${recipe ? cookDock(recipe, true) : ""}`;
 }
@@ -252,11 +250,11 @@ function duePrepSteps() {
   return steps;
 }
 
-function prepPhotoTag(onPhoto = true) {
+function prepPhotoTag() {
   const count = duePrepSteps().length;
   if (!count) return "";
   const label = `Prep for tomorrow · ${count} ${count === 1 ? "step" : "steps"}`;
-  return `<button class="prep-tag${onPhoto ? "" : " is-fallback"}" type="button" data-action="open-prep">${esc(label)}</button>`;
+  return `<button class="prep-tag" type="button" data-action="open-prep">${esc(label)}</button>`;
 }
 
 function prepSheet() {
@@ -481,7 +479,7 @@ function recipeView(recipe, mode) {
   const factor = servings / (recipe.servings || 1);
   const panel = embedded ? state.todayPanel || "ingredients" : state.page.panel || "ingredients";
   const open = embedded ? state.todayServingsOpen : state.page.servingsOpen;
-  const tag = embedded && recipe.imageUrl ? prepPhotoTag() : "";
+  const tag = embedded ? prepPhotoTag() : "";
   return `${hero(recipe, !embedded, tag)}
     <div class="pad">
       ${mode === "leftovers" ? `<p class="leftover-flag">Leftovers</p>` : ""}
@@ -509,11 +507,13 @@ function cookDock(recipe, raised) {
 
 function hero(recipe, showBack, prepTag = "") {
   const menu = `<button class="float right" type="button" data-action="recipe-menu" aria-label="More">${dots()}</button>`;
+  const back = showBack ? `<button class="float left" type="button" data-action="back" aria-label="Back">${chevLeft()}</button>` : "";
   if (!recipe.imageUrl) {
-    return `<div class="topbar">${showBack ? `<button class="back" type="button" data-action="back" aria-label="Back">${chevLeft()}</button>` : "<span></span>"}<span></span>${menu.replace("float right", "text-btn")}</div>`;
+    const letter = esc((recipe.name || "?").trim().slice(0, 1).toUpperCase());
+    return `<div class="hero hero-empty">${back}<span class="hero-initial" aria-hidden="true">${letter}</span>${prepTag}${menu}</div>`;
   }
   return `<div class="hero"><img src="${esc(safeSrc(recipe.imageUrl))}" alt="">
-      ${showBack ? `<button class="float left" type="button" data-action="back" aria-label="Back">${chevLeft()}</button>` : ""}
+      ${back}
       ${prepTag}
       ${menu}
     </div>`;
@@ -1400,12 +1400,23 @@ function planTitle(entry) {
 
 function recipeForEntry(entry) {
   if (!entry) return null;
-  if (entry.recipeId) return recipeById(entry.recipeId) || { id: entry.recipeId, name: entry.recipeName || "Recipe", imageUrl: entry.imageUrl, servings: 4, ingredients: [], cookSteps: [], prepSteps: [], nightBefore: [] };
+  if (entry.recipeId) {
+    return withPhoto(recipeById(entry.recipeId), entry) || {
+      id: entry.recipeId,
+      name: entry.recipeName || "Recipe",
+      imageUrl: entry.imageUrl || null,
+      servings: 4,
+      ingredients: [],
+      cookSteps: [],
+      prepSteps: [],
+      nightBefore: [],
+    };
+  }
   if (entry.type !== "leftovers") return null;
   const note = (entry.note || "").trim().toLowerCase();
   if (note) {
     const named = state.recipes.find((recipe) => recipe.name.toLowerCase() === note);
-    if (named) return named;
+    if (named) return withPhoto(named, entry);
   }
   const earlier = state.plan
     .filter((other) => other.type === "recipe" && other.recipeId && other.meal === entry.meal && other.date < entry.date)
@@ -1415,7 +1426,13 @@ function recipeForEntry(entry) {
   const recipe = recipeById(previous.recipeId);
   const gap = daysBetween(previous.date, entry.date);
   const cover = recipe?.coversNights > 1 ? recipe.coversNights - 1 : 6;
-  return gap >= 1 && gap <= cover ? recipe : null;
+  return gap >= 1 && gap <= cover ? withPhoto(recipe, previous) : null;
+}
+
+function withPhoto(recipe, entry) {
+  if (!recipe) return null;
+  const imageUrl = recipe.imageUrl || entry?.imageUrl || null;
+  return imageUrl && imageUrl !== recipe.imageUrl ? { ...recipe, imageUrl } : recipe;
 }
 
 function tonightRecipe() {
