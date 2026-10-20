@@ -756,9 +756,6 @@ select.box { appearance: none; padding-right: 2.2rem; }
 
 .leftover-row .kicker { margin: 0; }
 .leftover-row strong { display: block; font-size: 1.05rem; font-weight: 750; line-height: 1.25; }
-.leftover-row .reheat-line { margin: 0.15rem 0 0; color: var(--muted); font-size: 0.88rem; }
-
-.reheat { margin: 0.6rem 0; }
 
 .empty-night { padding-top: 1.5rem; }
 .empty-art { width: min(100%, 280px); height: auto; margin: 0 0 1rem; border-radius: 16px; }

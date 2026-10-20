@@ -245,7 +245,6 @@ function leftoversCard(entry, recipe) {
   const visual = image
     ? `<img src="${esc(safeSrc(image))}" alt="">`
     : `<span class="hero-mark" aria-hidden="true">${plateIcon()}</span>`;
-  const reheating = recipe?.reheating ? `<p class="note-block"><span class="kicker">Reheating</span><br>${esc(recipe.reheating)}</p>` : "";
   return `<article class="leftover-card">
       <div class="hero${image ? "" : " hero-empty"}">${visual}
         <button class="float right" type="button" data-action="recipe-menu" data-date="${esc(entry.date)}" data-meal="${esc(entry.meal)}" aria-label="More">${dots()}</button>
@@ -253,19 +252,16 @@ function leftoversCard(entry, recipe) {
       <div class="pad">
         <p class="kicker">Leftovers</p>
         <h1>${esc(dishName(entry, recipe))}</h1>
-        ${reheating}
       </div>
     </article>`;
 }
 
 function leftoversRow(entry, recipe) {
   const thumb = recipe ? recipeThumb(recipe) : `<span class="thumb-tile" aria-hidden="true">${plateIcon()}</span>`;
-  const reheating = recipe?.reheating ? `<p class="reheat-line">${esc(recipe.reheating)}</p>` : "";
   return `<div class="leftover-row">${thumb}
       <button class="copy" type="button" data-action="open-day" data-date="${esc(entry.date)}">
         <p class="kicker">Leftovers</p>
         <strong>${esc(dishName(entry, recipe))}</strong>
-        ${reheating}
       </button>
       <button class="icon-btn" type="button" data-action="recipe-menu" data-date="${esc(entry.date)}" data-meal="${esc(entry.meal)}" aria-label="More">${dots()}</button>
     </div>`;
@@ -468,17 +464,18 @@ function dayHtml(date) {
     <h1>${esc(longDate(date))}</h1>
     <section><p class="kicker">Dinner</p>
       ${planned}
-      ${pickerHtml(date, "dinner")}
+      ${pickerHtml(date, "dinner", dinner?.type !== "leftovers")}
     </section>`;
 }
 
-function pickerHtml(date, meal) {
+function pickerHtml(date, meal, showRecipes = true) {
   const query = state.dayQuery.trim().toLowerCase();
   const recipes = (query ? state.recipes.filter((recipe) => recipe.name.toLowerCase().includes(query)) : state.recipes).slice(0, 8);
-  return `<label class="search">Search recipes
+  const finder = showRecipes ? `<label class="search">Search recipes
       <input class="field-box day-search" type="search" value="${esc(state.dayQuery)}" placeholder="Chili, pasta…" data-date="${esc(date)}" data-meal="${meal}">
     </label>
-    ${recipes.map((recipe) => `<button class="link-row" type="button" data-action="pick-recipe" data-id="${esc(recipe.id)}" data-date="${esc(date)}" data-meal="${meal}">${esc(recipe.name)}</button>`).join("")}
+    ${recipes.map((recipe) => `<button class="link-row" type="button" data-action="pick-recipe" data-id="${esc(recipe.id)}" data-date="${esc(date)}" data-meal="${meal}">${esc(recipe.name)}</button>`).join("")}` : "";
+  return `${finder}
     <button class="gray-btn" type="button" data-action="leftovers" data-date="${esc(date)}" data-meal="${meal}">Leftovers</button>
     <form data-form="day-note" class="stack day-note">
       <input class="field-box" name="note" maxlength="140" placeholder="Eating out" aria-label="Short note" data-date="${esc(date)}" data-meal="${meal}">
@@ -616,8 +613,7 @@ function stepBits(recipe, step, factor) {
 }
 
 function notesHtml(recipe) {
-  return `${recipe.kidsPlates ? `<p class="note-block"><span class="kicker">Kids' plates</span><br>${esc(recipe.kidsPlates)}</p>` : ""}
-    ${recipe.reheating ? `<p class="note-block"><span class="kicker">Reheating</span><br>${esc(recipe.reheating)}</p>` : ""}`;
+  return recipe.kidsPlates ? `<p class="note-block"><span class="kicker">Kids' plates</span><br>${esc(recipe.kidsPlates)}</p>` : "";
 }
 
 function feedbackHtml(id) {
@@ -1825,7 +1821,6 @@ function cookSequence(recipe) {
   }));
   const steps = [...prep, ...cook];
   if (recipe.kidsPlates) steps.push({ text: recipe.kidsPlates, label: "Kids' plates", minutes: null, seconds: null, ingredients: [] });
-  if (recipe.reheating) steps.push({ text: recipe.reheating, label: "Reheating", minutes: null, seconds: null, ingredients: [] });
   if (steps.length) return steps;
   return (recipe.steps || []).filter(Boolean).map((text) => ({ text, label: "", minutes: null, seconds: null, ingredients: [] }));
 }

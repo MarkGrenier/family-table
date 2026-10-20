@@ -1225,6 +1225,8 @@ describe("grocery API", () => {
     expect(js).toContain("recipeThumb(recipe)");
     expect(js).toContain("Chef's picks");
     expect(js).toContain("leftover-card");
+    expect(js).not.toContain("Reheating");
+    expect(js).toContain("showRecipes");
     expect(js).toContain("dataset.session");
     expect(js).toContain('class="splash"');
     expect(js).not.toContain("meal-letter");
