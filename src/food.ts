@@ -45,6 +45,7 @@ export type WeekDay = {
   type: PlanEntry["type"];
   recipeId: string | null;
   note: string | null;
+  alternates: string[];
   recipe: Recipe | null;
 };
 
@@ -57,6 +58,7 @@ export type PlanEntry = {
   recipeName: string | null;
   imageUrl: string | null;
   note: string | null;
+  alternates: string[];
 };
 
 export type FamilyEvent = {
@@ -366,6 +368,7 @@ type PlanRow = {
   entry_type: PlanEntry["type"];
   recipe_id: string | null;
   note: string | null;
+  alternates_json: string | null;
   recipe_name: string | null;
   image_url: string | null;
 };
@@ -417,11 +420,33 @@ function planFromRow(row: PlanRow): PlanEntry {
     recipeName: row.recipe_name,
     imageUrl: row.image_url,
     note: row.note,
+    alternates: parseAlternateIds(row.alternates_json),
   };
 }
 
+function parseAlternateIds(value: string | null): string[] {
+  try {
+    const parsed = JSON.parse(value || "[]") as unknown;
+    return Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+async function resolveAlternateIds(db: D1Database, raw: string[], chosenId: string | null): Promise<string[]> {
+  const resolved: string[] = [];
+  for (const token of raw) {
+    const recipe = (await getRecipe(db, token)) ?? (await findRecipeByExternalId(db, token));
+    if (!recipe) throw new HttpError(400, "That alternate isn't in the cookbook.");
+    if (recipe.id === chosenId || resolved.includes(recipe.id)) continue;
+    resolved.push(recipe.id);
+  }
+  if (resolved.length > 3) throw new HttpError(400, "A meal can have up to 3 alternates.");
+  return resolved;
+}
+
 const PLAN_SELECT = `
-  SELECT p.id, p.plan_date, p.meal, p.entry_type, p.recipe_id, p.note, r.name AS recipe_name, r.image_url
+  SELECT p.id, p.plan_date, p.meal, p.entry_type, p.recipe_id, p.note, p.alternates_json, r.name AS recipe_name, r.image_url
   FROM plan_entries p
   LEFT JOIN recipes r ON r.id = p.recipe_id
 `;
@@ -462,17 +487,22 @@ export async function savePlan(db: D1Database, input: PlanInput): Promise<PlanEn
     if (!note && previous.note) note = previous.note;
     if (!recipeId && previous.recipeId) recipeId = previous.recipeId;
   }
+  const alternates =
+    input.alternates !== undefined
+      ? await resolveAlternateIds(db, input.alternates, recipeId)
+      : (previous?.alternates ?? []).filter((alternateId) => alternateId !== recipeId);
   await db
     .prepare(
-      `INSERT INTO plan_entries (id, plan_date, meal, entry_type, recipe_id, note, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO plan_entries (id, plan_date, meal, entry_type, recipe_id, note, alternates_json, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (plan_date, meal) DO UPDATE SET
          entry_type = excluded.entry_type,
          recipe_id = excluded.recipe_id,
          note = excluded.note,
+         alternates_json = excluded.alternates_json,
          updated_at = excluded.updated_at`,
     )
-    .bind(id, input.date, input.meal, input.type, recipeId, note, now, now)
+    .bind(id, input.date, input.meal, input.type, recipeId, note, JSON.stringify(alternates), now, now)
     .run();
   const saved = await planOn(db, input.date, input.meal);
   if (!saved) throw new HttpError(500, "Something went wrong. Try again.");
@@ -493,6 +523,19 @@ export async function listAllPlan(db: D1Database): Promise<PlanEntry[]> {
     )
     .all<PlanRow>();
   return linkLeftovers(db, (rows.results ?? []).map(planFromRow));
+}
+
+export async function setPlanAlternates(db: D1Database, id: string, raw: string[]): Promise<PlanEntry> {
+  const existing = await getPlan(db, id);
+  if (!existing) throw new HttpError(404, "That meal isn't planned anymore.");
+  const alternates = await resolveAlternateIds(db, raw, existing.recipeId);
+  await db
+    .prepare(`UPDATE plan_entries SET alternates_json = ?, updated_at = ? WHERE id = ?`)
+    .bind(JSON.stringify(alternates), nowIso(), id)
+    .run();
+  const saved = await getPlan(db, id);
+  if (!saved) throw new HttpError(500, "Something went wrong. Try again.");
+  return saved;
 }
 
 export async function deletePlan(db: D1Database, id: string): Promise<void> {
@@ -677,6 +720,7 @@ export async function getWeek(db: D1Database, weekStart: string): Promise<{ week
       type: entry.type,
       recipeId: entry.recipeId,
       note: entry.note,
+      alternates: entry.alternates,
       recipe: entry.recipeId ? await getRecipe(db, entry.recipeId) : null,
     });
   }
@@ -699,12 +743,14 @@ export async function replaceWeek(db: D1Database, input: WeekInput): Promise<{ w
       const recipe = await getRecipe(db, recipeId);
       if (!recipe) throw new HttpError(400, "That recipe isn't here anymore.");
     }
+    const chosenId = day.type === "note" ? null : recipeId;
+    const alternates = await resolveAlternateIds(db, day.alternates, chosenId);
     await db
       .prepare(
-        `INSERT INTO plan_entries (id, plan_date, meal, entry_type, recipe_id, note, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO plan_entries (id, plan_date, meal, entry_type, recipe_id, note, alternates_json, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
-      .bind(crypto.randomUUID(), day.date, day.meal, day.type, day.type === "note" ? null : recipeId, day.note, now, now)
+      .bind(crypto.randomUUID(), day.date, day.meal, day.type, chosenId, day.note, JSON.stringify(alternates), now, now)
       .run();
   }
   const saved = await listPlan(db, input.weekStart, end);

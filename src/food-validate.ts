@@ -37,6 +37,7 @@ export type WeekDayInput = {
   recipeId: string | null;
   recipe: RecipeInput | null;
   note: string | null;
+  alternates: string[];
 };
 
 export type WeekInput = {
@@ -52,6 +53,7 @@ export type PlanInput = {
   type: PlanType;
   recipeId: string | null;
   note: string | null;
+  alternates?: string[];
 };
 
 export type EventInput = {
@@ -378,13 +380,34 @@ export function parsePlan(body: Record<string, unknown>): PlanInput {
   const note = optionalText(body.note, "The note", 140);
   if (type === "recipe" && !recipeId) throw new HttpError(400, "Choose a recipe.");
   if (type === "note" && !note) throw new HttpError(400, "Write a short note.");
-  return {
+  const plan: PlanInput = {
     date: cleanDate(body.date),
     meal: meal as Meal,
     type: type as PlanType,
     recipeId: type === "note" ? null : recipeId,
     note: type === "recipe" ? null : note,
   };
+  if ("alternates" in body) plan.alternates = cleanAlternateIds(body.alternates);
+  return plan;
+}
+
+export function parsePlanAlternates(body: Record<string, unknown>): string[] {
+  if (!("alternates" in body)) throw new HttpError(400, "Send alternates.");
+  return cleanAlternateIds(body.alternates);
+}
+
+export function cleanAlternateIds(value: unknown): string[] {
+  if (value == null) return [];
+  if (!Array.isArray(value)) throw new HttpError(400, "Alternates should be a list of recipes.");
+  if (value.length > 3) throw new HttpError(400, "A meal can have up to 3 alternates.");
+  const ids: string[] = [];
+  for (const entry of value) {
+    if (typeof entry !== "string") throw new HttpError(400, "Each alternate should be a recipe id.");
+    const id = optionalText(entry, "An alternate", 80);
+    if (!id || ids.includes(id)) continue;
+    ids.push(id);
+  }
+  return ids;
 }
 
 export function parseEvent(body: Record<string, unknown>): EventInput {
@@ -482,6 +505,7 @@ export function parseWeek(body: Record<string, unknown>): WeekInput {
       recipeId,
       recipe,
       note: type === "recipe" ? null : note,
+      alternates: "alternates" in day ? cleanAlternateIds(day.alternates) : [],
     };
   });
   return { weekStart, days };

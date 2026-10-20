@@ -72,7 +72,7 @@ A browser window opens. Sign in to Cloudflare and approve the question it asks. 
 
 The phones already have the grocery list. This step adds recipes, the week plan, and family events. It does not erase anything already on the list.
 
-New files are `migrations/0003_food.sql`, `migrations/0004_recipe_sections.sql`, `migrations/0005_mealime.sql`, and `migrations/0006_item_deleted.sql`. Older migration files stay as they are. The command below applies every one that is not on the live list yet. `0005_mealime.sql` adds grocery sections, cookware, cooked days, and feedback. `0006_item_deleted.sql` lets a grocery line be hidden and put back. Neither one changes rows that are already there.
+New files are `migrations/0003_food.sql`, `migrations/0004_recipe_sections.sql`, `migrations/0005_mealime.sql`, `migrations/0006_item_deleted.sql`, and `migrations/0007_plan_alternates.sql`. Older migration files stay as they are. The command below applies every one that is not on the live list yet. `0005_mealime.sql` adds grocery sections, cookware, cooked days, and feedback. `0006_item_deleted.sql` lets a grocery line be hidden and put back. `0007_plan_alternates.sql` adds an empty list of alternate recipes to each planned meal. None of them change rows that are already there.
 
 ```bash
 npx wrangler d1 migrations apply grocery --remote
@@ -356,6 +356,10 @@ Dates are `YYYY-MM-DD`. Meals are `breakfast`, `lunch`, or `dinner`. A day has o
 
 `type` may also be `leftovers`, or `note` with a `note` string.
 
+`alternates` is up to 3 other recipes for that same meal. Each entry is a `recipeId` or an `externalId`. The saved list is recipe ids, and `GET /api/plan` returns it on the meal as `alternates`. Leave the field out and the ones already saved stay. Send `[]` to clear them. The chosen recipe is not kept in its own alternate list. Alternates do not add groceries. Only the chosen recipe does.
+
+`PATCH /api/plan/ID` with `{ "alternates": ["RECIPE_ID", "external-id"] }` changes that list and nothing else. The meal and its groceries stay as they are.
+
 `DELETE /api/plan/ID` removes that meal and, when it was a recipe, the unchecked groceries that belonged only to it.
 
 `POST /api/plan/groceries` with `{ "from": "2026-10-19", "to": "2026-10-25" }` adds ingredients for recipes planned in that range. The phones already do this when a recipe is planned. This endpoint is for a helper that wants to run it again. Two dinners of the same recipe count twice. Running it again does not add them a second time. Send `"planId"` as well when you only want one planned meal. Matching names are combined, and the grey note lists the recipe.
@@ -364,7 +368,7 @@ Dates are `YYYY-MM-DD`. Meals are `breakfast`, `lunch`, or `dinner`. A day has o
 
 `PUT /api/week` replaces Monday through Sunday, starting on `weekStart` (that date has to be a Monday). It also saves the recipes in the list. Recipes already in the cookbook stay there. Replacing the week does not delete them. A recipe with `externalId` updates the recipe that already has that id. Otherwise the name is used. `recipeId` uses a recipe that is already saved, without changing it.
 
-`GET /api/week?start=2026-10-19` reads that week back in the same shape. Each recipe day includes the full recipe.
+`GET /api/week?start=2026-10-19` reads that week back in the same shape. Each recipe day includes the full recipe. A day may also send `alternates`, the same list of up to 3 recipe ids or external ids. They come back as recipe ids and do not add groceries.
 
 Planning and removing meals here follows the same grocery rules as `POST /api/plan`.
 

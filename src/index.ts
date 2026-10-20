@@ -15,6 +15,7 @@ import {
   listRecipes,
   replaceEvents,
   savePlan,
+  setPlanAlternates,
   updateRecipe,
   getRecipe,
   getWeek,
@@ -25,7 +26,7 @@ import {
   deleteRecipeSourcedItems,
   withGroceryRecipes,
 } from "./food";
-import { cleanWeekStart, dateRange, parseEvent, parseEventList, parsePlan, parseRecipe, parseRecipePatch, parseServingsOverride, parseWeek } from "./food-validate";
+import { cleanWeekStart, dateRange, parseEvent, parseEventList, parsePlan, parsePlanAlternates, parseRecipe, parseRecipePatch, parseServingsOverride, parseWeek } from "./food-validate";
 import { HttpError, json, readJson } from "./http";
 import { importRecipeFromUrl } from "./import-recipe";
 import { cleanBarcode, cleanStore, parseItemPatch, parseNewItem, parseStaple } from "./validate";
@@ -282,6 +283,10 @@ async function handleFood(request: Request, env: Env, path: string, method: stri
   }
   const planMatch = /^\/api\/plan\/([A-Za-z0-9-]{1,80})$/.exec(path);
   if (planMatch) {
+    if (method === "PATCH") {
+      const entry = await setPlanAlternates(env.DB, planMatch[1], parsePlanAlternates(await readJson(request)));
+      return json({ entry });
+    }
     if (method !== "DELETE") throw new HttpError(405, "That action isn't available.");
     await deletePlan(env.DB, planMatch[1]);
     return json({ ok: true });

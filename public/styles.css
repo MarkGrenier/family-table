@@ -484,6 +484,14 @@ h1, .title {
   font-size: 1.05rem;
 }
 
+.pick-label {
+  margin: 0.85rem 0 0.1rem;
+  color: #9a9aa0;
+  font-size: 0.75rem;
+  font-weight: 750;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
 .pick-list { margin: 0.2rem 0 0.6rem; }
 .pick-row {
   display: flex;

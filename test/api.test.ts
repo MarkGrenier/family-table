@@ -1096,6 +1096,90 @@ describe("grocery API", () => {
     expect((renamed.json?.entry as Json).note).toBe("Spicy chili");
   });
 
+  it("stores up to three alternates without adding their groceries", async () => {
+    const token = env.API_TOKEN;
+    const main = await call("/api/recipes", {
+      method: "POST",
+      token,
+      body: { name: "Chosen chili", externalId: "chosen-chili", ingredients: ["1 lb ground beef"], steps: ["Simmer."] },
+    });
+    const salmon = await call("/api/recipes", {
+      method: "POST",
+      token,
+      body: { name: "Sheet salmon", externalId: "sheet-salmon", ingredients: ["1 lb salmon"], steps: ["Roast."] },
+    });
+    const pasta = await call("/api/recipes", {
+      method: "POST",
+      token,
+      body: { name: "Lemon noodles", externalId: "lemon-noodles", ingredients: ["1/2 lb spaghetti"], steps: ["Boil."] },
+    });
+    const extra = await call("/api/recipes", {
+      method: "POST",
+      token,
+      body: { name: "Extra soup", ingredients: ["1 onion"], steps: ["Simmer."] },
+    });
+    const mainId = (main.json?.recipe as Json).id as string;
+    const salmonId = (salmon.json?.recipe as Json).id as string;
+    const pastaId = (pasta.json?.recipe as Json).id as string;
+    const planned = await call("/api/plan", {
+      method: "POST",
+      token,
+      body: { date: "2026-12-08", meal: "dinner", type: "recipe", recipeId: mainId, alternates: ["sheet-salmon", pastaId] },
+    });
+    expect(planned.status).toBe(200);
+    const entry = planned.json?.entry as Json;
+    expect(entry.alternates).toEqual([salmonId, pastaId]);
+    const items = ((await call("/api/items", { token })).json?.items ?? []) as Json[];
+    expect(items.map((item) => item.name)).toEqual(["Ground beef"]);
+
+    const kept = await call("/api/plan", {
+      method: "POST",
+      token,
+      body: { date: "2026-12-08", meal: "dinner", type: "recipe", recipeId: mainId },
+    });
+    expect((kept.json?.entry as Json).alternates).toEqual([salmonId, pastaId]);
+
+    const patched = await call(`/api/plan/${entry.id}`, {
+      method: "PATCH",
+      token,
+      body: { alternates: [salmonId, "lemon-noodles", mainId] },
+    });
+    expect(patched.status).toBe(200);
+    expect((patched.json?.entry as Json).recipeId).toBe(mainId);
+    expect((patched.json?.entry as Json).alternates).toEqual([salmonId, pastaId]);
+    expect(((await call("/api/items", { token })).json?.items as Json[]).map((item) => item.name)).toEqual(["Ground beef"]);
+
+    const swapped = await call("/api/plan", {
+      method: "POST",
+      token,
+      body: { date: "2026-12-08", meal: "dinner", type: "recipe", recipeId: salmonId, alternates: [mainId, pastaId] },
+    });
+    expect((swapped.json?.entry as Json).alternates).toEqual([mainId, pastaId]);
+    const after = ((await call("/api/items", { token })).json?.items ?? []) as Json[];
+    expect(after.map((item) => item.name)).toEqual(["Salmon"]);
+    expect(after.some((item) => item.name === "Ground beef" || item.name === "Spaghetti")).toBe(false);
+
+    expect((await call("/api/plan", {
+      method: "POST",
+      token,
+      body: { date: "2026-12-09", meal: "dinner", type: "recipe", recipeId: mainId, alternates: [salmonId, pastaId, (extra.json?.recipe as Json).id, "nope"] },
+    })).status).toBe(400);
+    expect((await call(`/api/plan/${entry.id}`, { method: "PATCH", token, body: { alternates: ["missing-recipe"] } })).status).toBe(400);
+
+    const week = await call("/api/week", {
+      method: "PUT",
+      token,
+      body: {
+        weekStart: "2026-12-07",
+        days: [{ date: "2026-12-08", meal: "dinner", type: "recipe", recipeId: mainId, alternates: ["sheet-salmon"] }],
+      },
+    });
+    expect(week.status).toBe(200);
+    const day = ((week.json?.days ?? []) as Json[])[0];
+    expect(day.alternates).toEqual([salmonId]);
+    expect(day.recipeId).toBe(mainId);
+  });
+
   it("serves the phone page", async () => {
     const response = await exports.default.fetch("https://grocery.test/");
     expect(response.status).toBe(200);
@@ -1120,6 +1204,7 @@ describe("grocery API", () => {
     expect(js).toContain('name="ing-name"');
     expect(js).toContain("raised && cooked");
     expect(js).toContain("recipeThumb(recipe)");
+    expect(js).toContain("Chef's picks");
     expect(js).not.toContain("meal-letter");
     expect(js).not.toContain("style=");
     expect(js).not.toContain("Open source");

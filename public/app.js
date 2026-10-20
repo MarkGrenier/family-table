@@ -691,18 +691,31 @@ function activeRecipe() {
 
 function changeMealHtml() {
   const query = state.mealQuery.trim().toLowerCase();
-  const recipes = state.recipes
-    .filter((recipe) => !query || recipe.name.toLowerCase().includes(query))
-    .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
+  const matches = (recipe) => !query || recipe.name.toLowerCase().includes(query);
+  const recipes = state.recipes.filter(matches).sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
+  const picks = chefPicks().filter(matches);
   return `<div class="sheet"><div class="sheet-card" role="dialog" aria-label="Swap meal">
       <div class="sheet-head"><button class="text-green" type="button" data-action="close-sheet">Cancel</button><strong>Swap meal</strong><span></span></div>
       ${state.sheet.error ? `<p class="error">${esc(state.sheet.error)}</p>` : ""}
       <label class="search">Search
         <input id="meal-search" class="field-box" type="search" value="${esc(state.mealQuery)}" placeholder="Search recipes" autocomplete="off">
       </label>
+      ${picks.length ? `<p class="pick-label">Chef's picks</p><div class="pick-list">${picks.map((recipe) => pickRow(recipe, "pick-alternate")).join("")}</div>` : ""}
       <button class="menu-row" type="button" data-action="pick-leftovers">Leftovers</button>
-      <div class="pick-list">${recipes.length ? recipes.map((recipe) => `<button class="pick-row" type="button" data-action="pick-change" data-id="${esc(recipe.id)}">${recipeThumb(recipe)}<span>${esc(recipe.name)}</span></button>`).join("") : `<p class="muted">Nothing matches that.</p>`}</div>
+      <div class="pick-list">${recipes.length ? recipes.map((recipe) => pickRow(recipe, "pick-change")).join("") : `<p class="muted">Nothing matches that.</p>`}</div>
     </div></div>`;
+}
+
+function pickRow(recipe, action) {
+  return `<button class="pick-row" type="button" data-action="${action}" data-id="${esc(recipe.id)}">${recipeThumb(recipe)}<span>${esc(recipe.name)}</span></button>`;
+}
+
+function chefPicks() {
+  const context = mealContext();
+  if (!context) return [];
+  const entry = mealOn(context.date, context.meal);
+  const currentId = entry?.recipeId || null;
+  return (entry?.alternates || []).map((id) => recipeById(id)).filter((recipe) => recipe && recipe.id !== currentId);
 }
 
 function editRecipeHtml() {
@@ -755,6 +768,7 @@ async function changeMeal(extra) {
   const body = { date: context.date, meal: context.meal, type: extra.type };
   if (nextId) body.recipeId = nextId;
   if (extra.note) body.note = extra.note;
+  if (Array.isArray(extra.alternates)) body.alternates = extra.alternates;
   try {
     await api("/api/plan", { method: "POST", body });
     if (state.page?.kind === "recipe") {
@@ -1270,6 +1284,12 @@ async function onClick(event) {
     return;
   }
   if (action === "pick-change") return changeMeal({ type: "recipe", recipeId: button.dataset.id });
+  if (action === "pick-alternate") {
+    const context = mealContext();
+    if (!context) return;
+    const nextId = button.dataset.id;
+    return changeMeal({ type: "recipe", recipeId: nextId, alternates: swappedAlternates(mealOn(context.date, context.meal), nextId) });
+  }
   if (action === "pick-leftovers") {
     const context = mealContext();
     if (!context) return;
@@ -1872,6 +1892,15 @@ function withPhoto(recipe, entry) {
 
 function tonightRecipe() {
   return recipeForEntry(mealOn(nyToday(), "dinner"));
+}
+
+function swappedAlternates(entry, nextId) {
+  const previous = (entry?.alternates || []).filter((id) => id && id !== nextId);
+  const oldId = entry?.type === "recipe" ? entry.recipeId : null;
+  const next = [];
+  if (oldId && oldId !== nextId) next.push(oldId);
+  for (const id of previous) if (!next.includes(id)) next.push(id);
+  return next.slice(0, 3);
 }
 
 function leftoversPlan(date, meal) {
