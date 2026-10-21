@@ -437,6 +437,27 @@ h1, .title {
   box-shadow: 0 6px 16px rgba(93, 187, 36, 0.35);
   z-index: 15;
 }
+.fab.is-away { display: none; }
+
+.screen.grocery-screen {
+  padding-bottom: calc(5.3rem + 58px + 1.25rem + var(--safe-b));
+}
+
+.add-form .add-details { margin-top: 0.35rem; }
+.add-form .field-label { margin: 0.4rem 0; }
+.add-form .green-btn { width: 100%; margin: 0.45rem 0 0.9rem; }
+.used-in { margin-top: 0.85rem; }
+.used-line {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.7rem;
+  margin: 0;
+  padding: 0.55rem 0;
+  border-top: 1px solid var(--line);
+  font-size: 0.98rem;
+}
+.used-when { color: var(--muted); font-size: 0.88rem; flex: none; }
 
 .topbar {
   display: flex;

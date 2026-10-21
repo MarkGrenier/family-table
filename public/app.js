@@ -33,6 +33,7 @@ const state = {
   undo: null,
   undoFading: false,
   swipeId: null,
+  addDraft: blankAddDraft(),
   todayPanel: "ingredients",
   todayServings: null,
   todayServingsOpen: false,
@@ -54,6 +55,22 @@ const SECTIONS = [
   ["other", "Other"],
 ];
 
+const STORES = [
+  ["local", "Local store"],
+  ["costco", "Costco"],
+  ["amazon", "Amazon"],
+];
+
+const AISLES = {
+  local: [["produce", "Produce"], ["shelf", "Shelf"], ["refrigerated", "Refrigerated"], ["frozen", "Frozen"]],
+  costco: [["shelf", "Shelf"], ["refrigerated", "Refrigerated"], ["frozen", "Frozen"]],
+  amazon: [["general", "General"]],
+};
+
+function blankAddDraft() {
+  return { quantityNote: "", store: "local", category: "shelf", section: "other", brand: "", notes: "", sectionTouched: false, aisleTouched: false };
+}
+
 const app = document.getElementById("app");
 app.addEventListener("click", onClick);
 app.addEventListener("error", onPhotoError, true);
@@ -66,6 +83,9 @@ app.addEventListener("pointercancel", onPointerCancel);
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible" && state.page?.kind === "cook") lockScreen();
 });
+document.addEventListener("scroll", () => {
+  if (state.swipeId || gesture?.dragging) avoidFab();
+}, true);
 
 let gesture = null;
 let wakeLock = null;
@@ -227,6 +247,7 @@ function render() {
       state.scrollTo = null;
       document.getElementById(id)?.scrollIntoView({ block: "center" });
     }
+    avoidFab();
   };
   if (state.loading) {
     finish();
@@ -261,7 +282,8 @@ function render() {
     (dinnerTonight?.type === "leftovers" && !(dinnerTonight.also || []).length) ||
     (dayDinner?.type === "leftovers" && !(dayDinner.also || []).length);
   const monthOn = state.tab === "calendar" && state.calMode === "month" && !state.page;
-  const mainClass = bare ? "bare" : todayCook ? "screen today-screen" : leftoversNightOn ? "screen today-screen no-dock night-screen" : monthOn ? "screen month-screen" : "screen";
+  const groceryOn = state.tab === "groceries" && !state.page;
+  const mainClass = bare ? "bare" : todayCook ? "screen today-screen" : leftoversNightOn ? "screen today-screen no-dock night-screen" : monthOn ? "screen month-screen" : groceryOn ? "screen grocery-screen" : "screen";
   app.innerHTML = `<main class="${mainClass}">${bodyHtml()}</main>${bare ? "" : tabsHtml()}${sheetHtml()}${toastHtml()}`;
   const focus = document.getElementById("add-search");
   if (focus && state.page?.kind === "add-item") focus.focus();
@@ -898,13 +920,27 @@ function suggestHtml(names) {
 }
 
 function addHtml() {
+  const draft = state.addDraft || blankAddDraft();
   const names = filteredSuggestions();
-  return `<div class="topbar"><button class="back" type="button" data-action="back" aria-label="Close">✕</button><h1>Add</h1>
-      <button class="text-btn" type="button" data-action="add-done">Done</button></div>
-    <div class="pad">
-      <input id="add-search" class="search-box" type="search" placeholder="Add something..." value="${esc(state.addQuery)}" autocomplete="off" enterkeyhint="done">
-      <div id="suggest-list">${suggestHtml(names)}</div>
-    </div>`;
+  const section = draft.sectionTouched ? draft.section : state.addQuery.trim() ? guessSection(state.addQuery) : "other";
+  const category = draft.aisleTouched ? draft.category : aisleFor(draft.store, section);
+  return `<form id="add-form" class="add-form" data-form="add-item">
+      <div class="topbar"><button class="back" type="button" data-action="back" aria-label="Close">✕</button><h1>Add</h1><span></span></div>
+      <div class="pad">
+        <input id="add-search" name="name" class="search-box" type="text" placeholder="Add something..." value="${esc(state.addQuery)}" maxlength="80" autocomplete="off" enterkeyhint="done" aria-label="Name">
+        <div class="add-details">
+          <label class="field-label">Quantity<input class="field-box" name="quantityNote" maxlength="140" value="${esc(draft.quantityNote)}" placeholder="2 lb, a bunch" enterkeyhint="done"></label>
+          <label class="field-label">Store<span class="select-wrap"><select class="box" name="store">${choiceHtml(STORES, draft.store)}</select></span></label>
+          <label class="field-label">Aisle<span class="select-wrap"><select class="box" name="category">${choiceHtml(aisleOptions(draft.store), category)}</select></span></label>
+          <label class="field-label">Section<span class="select-wrap"><select class="box" name="section">${choiceHtml(SECTIONS, section)}</select></span></label>
+          <label class="field-label">Brand<input class="field-box" name="brand" maxlength="80" value="${esc(draft.brand)}" enterkeyhint="done"></label>
+          <label class="field-label">Note<input class="field-box" name="notes" maxlength="500" value="${esc(draft.notes)}" enterkeyhint="done"></label>
+        </div>
+        ${state.error ? `<p class="error">${esc(state.error)}</p>` : ""}
+        <button class="green-btn" type="submit">Add</button>
+        <div id="suggest-list">${suggestHtml(names)}</div>
+      </div>
+    </form>`;
 }
 
 function newRecipeHtml() {
@@ -1176,12 +1212,12 @@ function sheetHtml() {
   if (state.sheet?.kind === "edit-item") {
     const item = state.items.find((entry) => entry.id === state.sheet.id);
     if (!item) return "";
-    return `<div class="sheet"><form class="sheet-card" data-form="item-edit" role="dialog">
+    return `<div class="sheet"><form class="sheet-card" data-form="item-edit" role="dialog" aria-label="Edit item">
         <div class="sheet-head"><button class="text-green" type="button" data-action="close-sheet">Cancel</button><button class="text-green" type="submit">Done</button></div>
         <label class="field-label">Name<input class="field-box" name="name" required maxlength="80" value="${esc(item.name)}"></label>
         <label class="field-label">Quantity<input class="field-box" name="quantityNote" maxlength="140" value="${esc(qtyOf(item))}"></label>
-        <label class="field-label">Section<span class="select-wrap"><select class="box" name="section">${SECTIONS.map(([id, label]) => `<option value="${id}" ${(item.section || "other") === id ? "selected" : ""}>${label}</option>`).join("")}</select></span></label>
-        <button class="sheet-delete" type="button" data-action="delete-item" data-id="${esc(item.id)}">Delete item</button>
+        <label class="field-label">Section<span class="select-wrap"><select class="box" name="section">${choiceHtml(SECTIONS, item.section || "other")}</select></span></label>
+        ${usedInHtml(item)}
       </form></div>`;
   }
   if (state.sheet?.kind === "recipe-menu") {
@@ -1271,13 +1307,6 @@ function onPointerDown(event) {
   if (!row || event.target.closest(".g-check") || event.target.closest(".g-delete")) return;
   clearGesture();
   gesture = { id: row.dataset.id, x: event.clientX, y: event.clientY, long: false, dragging: false, pointerId: event.pointerId };
-  gesture.timer = setTimeout(() => {
-    if (!gesture || gesture.dragging) return;
-    gesture.long = true;
-    state.swipeId = null;
-    state.sheet = { kind: "edit-item", id: gesture.id };
-    render();
-  }, 520);
 }
 
 function onPointerMove(event) {
@@ -1317,6 +1346,21 @@ function onPointerMove(event) {
     row.style.transform = `translateX(${next}px)`;
   }
   gesture.offset = next;
+  avoidFab();
+}
+
+function avoidFab() {
+  const fab = document.querySelector(".fab");
+  if (!fab) return;
+  fab.classList.remove("is-away");
+  const open = document.querySelector(".g-swipe.is-open");
+  const dragging = gesture?.dragging && gesture.id ? document.querySelector(`.g-swipe[data-id="${cssEscape(gesture.id)}"]`) : null;
+  const row = open || dragging;
+  if (!row) return;
+  const d = row.getBoundingClientRect();
+  const f = fab.getBoundingClientRect();
+  const hit = !(d.right - 96 >= f.right || d.right <= f.left || d.bottom <= f.top || d.top >= f.bottom);
+  if (hit) fab.classList.add("is-away");
 }
 
 function onPointerUp(event) {
@@ -1357,10 +1401,14 @@ function onPointerUp(event) {
     return;
   }
   if (dx > 48 && Math.abs(dx) > Math.abs(dy)) {
-    openItem(id);
+    swallowNextClick();
+    openEdit(id);
     return;
   }
-  if (Math.abs(dx) < 10 && Math.abs(dy) < 10) openItem(id);
+  if (Math.abs(dx) < 10 && Math.abs(dy) < 10) {
+    swallowNextClick();
+    openEdit(id);
+  }
 }
 
 function onPointerCancel() {
@@ -1658,13 +1706,9 @@ async function onClick(event) {
   if (action === "add-item") {
     state.page = { kind: "add-item" };
     state.addQuery = "";
-    state.tab = "groceries";
-    render();
-    return;
-  }
-  if (action === "add-done") {
-    if (state.addQuery.trim()) await addGrocery(state.addQuery.trim());
-    state.page = null;
+    state.addDraft = blankAddDraft();
+    state.error = "";
+    state.swipeId = null;
     state.tab = "groceries";
     render();
     return;
@@ -1688,6 +1732,7 @@ async function onSubmit(event) {
     return signIn(state.passcode);
   }
   if (form.dataset.form === "item-edit") return saveItem(new FormData(form));
+  if (form.dataset.form === "add-item") return submitAdd(form);
   if (form.dataset.form === "fetch-recipe") return fetchRecipe(new FormData(form).get("url"));
   if (form.dataset.form === "edit-recipe") return saveRecipeEdit(form);
 }
@@ -1707,8 +1752,17 @@ function onInput(event) {
     state.addQuery = event.target.value;
     const list = document.getElementById("suggest-list");
     if (list) list.innerHTML = suggestHtml(filteredSuggestions());
+    const form = event.target.form;
+    const draft = state.addDraft;
+    if (form && draft && !draft.sectionTouched) {
+      draft.section = state.addQuery.trim() ? guessSection(state.addQuery) : "other";
+      const section = form.querySelector("[name=section]");
+      if (section) section.value = draft.section;
+      if (!draft.aisleTouched) setAddAisle(form, aisleFor(draft.store, draft.section));
+    }
     return;
   }
+  if (onAddField(event)) return;
   if (event.target.id === "feedback-comment") state.comment = event.target.value;
 }
 
@@ -2282,17 +2336,154 @@ async function shareList() {
   }
 }
 
-async function addGrocery(name) {
+function choiceHtml(pairs, selected) {
+  return pairs.map(([id, label]) => `<option value="${id}" ${id === selected ? "selected" : ""}>${esc(label)}</option>`).join("");
+}
+
+function aisleOptions(store) {
+  return AISLES[store] || AISLES.local;
+}
+
+function aisleFor(store, section) {
+  if (store === "amazon") return "general";
+  if (section === "produce") return store === "costco" ? "shelf" : "produce";
+  if (section === "frozen") return "frozen";
+  if (section === "meat" || section === "dairy") return "refrigerated";
+  return "shelf";
+}
+
+function guessSection(name) {
+  const n = String(name || "").trim().toLowerCase();
+  if (!n) return "other";
+  if (/soap|detergent|paper towel|trash bag|foil|sponge|cleaner|bleach/.test(n)) return "household";
+  if (/frozen|ice cream/.test(n)) return "frozen";
+  if (/bread|bagel|bun|roll|tortilla|pita|baguette/.test(n)) return "bakery";
+  if (/milk|cheese|yogurt|butter|cream|egg/.test(n) && !/eggplant|cream of/.test(n)) return "dairy";
+  if (/chicken|beef|pork|turkey|salmon|shrimp|fish|bacon|sausage|steak|lamb|cod|tuna|meat/.test(n)) return "meat";
+  if (/flour|sugar|yeast|baking powder|baking soda|vanilla|cornstarch|cocoa|chocolate chip/.test(n)) return "baking";
+  if (/soy sauce|vinegar|ketchup|mustard|mayonnaise|mayo|salsa|hot sauce|sriracha|dressing|broth|stock/.test(n)) return "oils";
+  if (/\boil\b|sauce|condiment/.test(n)) return "oils";
+  if (/chip|cracker|pretzel|popcorn|cookie|granola bar/.test(n)) return "snacks";
+  if (/juice|soda|coffee|tea|wine|beer|kombucha|sparkling/.test(n)) return "beverages";
+  if (/onion|garlic|tomato|lettuce|cilantro|lime|lemon|avocado|potato|apple|banana|spinach|carrot|celery|cucumber|broccoli|zucchini|pepper|herb|scallion|ginger|mushroom|cabbage|kale|berry|berries|corn|peas|green bean/.test(n)) {
+    if (/powder|flake|seasoning|black pepper|white pepper/.test(n)) return "baking";
+    return "produce";
+  }
+  if (/rice|pasta|bean|lentil|oat|cereal|noodle|spaghetti|canned|can of/.test(n)) return "pantry";
+  return "pantry";
+}
+
+function setAddAisle(form, value) {
+  state.addDraft.category = value;
+  const aisle = form.querySelector("[name=category]");
+  if (aisle) aisle.value = value;
+}
+
+function onAddField(event) {
+  const form = event.target.closest("#add-form");
+  if (!form || !state.addDraft) return false;
+  const draft = state.addDraft;
+  const name = event.target.name;
+  if (name === "quantityNote" || name === "brand" || name === "notes") {
+    draft[name] = event.target.value;
+    return true;
+  }
+  if (name === "section") {
+    draft.section = event.target.value;
+    draft.sectionTouched = true;
+    if (!draft.aisleTouched) setAddAisle(form, aisleFor(draft.store, draft.section));
+    return true;
+  }
+  if (name === "category") {
+    draft.category = event.target.value;
+    draft.aisleTouched = true;
+    return true;
+  }
+  if (name === "store") {
+    draft.store = event.target.value;
+    const allowed = aisleOptions(draft.store).map(([id]) => id);
+    const section = form.querySelector("[name=section]")?.value || draft.section;
+    if (!draft.aisleTouched || !allowed.includes(draft.category)) draft.category = aisleFor(draft.store, section);
+    const aisle = form.querySelector("[name=category]");
+    if (aisle) {
+      aisle.innerHTML = choiceHtml(aisleOptions(draft.store), draft.category);
+      aisle.value = draft.category;
+    }
+    return true;
+  }
+  return false;
+}
+
+async function submitAdd(form) {
+  const data = new FormData(form);
+  const name = String(data.get("name") || "").trim();
+  if (!name) return;
+  const store = String(data.get("store") || "local");
+  const section = String(data.get("section") || guessSection(name));
+  let category = String(data.get("category") || "");
+  const allowed = aisleOptions(store).map(([id]) => id);
+  if (!allowed.includes(category)) category = aisleFor(store, section);
+  const ok = await addGrocery(name, {
+    quantityNote: String(data.get("quantityNote") || "") || null,
+    store,
+    category,
+    section,
+    brand: String(data.get("brand") || "") || null,
+    notes: String(data.get("notes") || "") || null,
+  });
+  if (!ok) return;
+  state.page = null;
+  state.tab = "groceries";
+  state.addDraft = blankAddDraft();
+  render();
+}
+
+async function addGrocery(name, extra) {
   const clean = String(name || "").trim();
-  if (!clean) return;
-  state.addQuery = "";
+  if (!clean) return false;
+  const section = extra?.section || guessSection(clean);
+  const store = extra?.store || "local";
+  let category = extra?.category || aisleFor(store, section);
+  const allowed = aisleOptions(store).map(([id]) => id);
+  if (!allowed.includes(category)) category = aisleFor(store, section);
   try {
-    await api("/api/items", { method: "POST", body: { name: clean, store: "local", category: "shelf", section: "other" } });
+    await api("/api/items", {
+      method: "POST",
+      body: {
+        name: clean,
+        store,
+        category,
+        section,
+        quantityNote: extra?.quantityNote || null,
+        brand: extra?.brand || null,
+        notes: extra?.notes || null,
+      },
+    });
+    state.addQuery = "";
+    state.addDraft = blankAddDraft();
     await refresh(true);
+    return true;
   } catch (error) {
     state.error = error.message;
     render();
+    return false;
   }
+}
+
+function usedInHtml(item) {
+  const rows = (item.recipes || []).filter((recipe) => recipe && recipe.name);
+  if (!rows.length) return "";
+  return `<div class="used-in"><p class="field-label">Used in</p>${rows.map((recipe) => {
+    const when = recipe.date ? formatUtc(recipe.date, { weekday: "short", month: "short", day: "numeric" }) : "";
+    return `<p class="used-line"><span>${esc(recipe.name)}</span>${when ? `<span class="used-when">${esc(when)}</span>` : ""}</p>`;
+  }).join("")}</div>`;
+}
+
+function openEdit(id) {
+  if (!id) return;
+  state.swipeId = null;
+  state.sheet = { kind: "edit-item", id };
+  render();
 }
 
 async function saveItem(form) {

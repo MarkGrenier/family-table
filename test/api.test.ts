@@ -1051,7 +1051,10 @@ describe("grocery API", () => {
     expect(items.some((item) => item.name === "Avocado")).toBe(false);
     expect(items.find((item) => item.name === "Lettuce")?.section).toBe("produce");
     expect(items.find((item) => item.name === "Chicken thighs")).toMatchObject({ quantityNote: "1 lb", section: "meat" });
-    expect((items.find((item) => item.name === "Chicken thighs")?.recipes as Json[])[0].name).toBe("Salsa chicken");
+    expect((items.find((item) => item.name === "Chicken thighs")?.recipes as Json[])[0]).toMatchObject({
+      name: "Salsa chicken",
+      date: shopWindow().from,
+    });
 
     const cooked = await call(`/api/recipes/${id}/cooked`, { method: "POST", token, body: {} });
     expect(cooked.status).toBe(200);
@@ -2060,7 +2063,30 @@ describe("grocery API", () => {
     expect(detailHero).toContain("showBack && !entry");
     expect(detailHero).toContain('data-action="add-to-date"');
     expect(js).toContain("Edit recipe");
-    expect(js).toContain("Delete item");
+    expect(js).not.toContain("Delete item");
+    expect(js).toContain("Used in");
+    expect(js).toContain('data-form="add-item"');
+    expect(js).toContain(">Add</button>");
+    expect(js).not.toContain("add-done");
+    expect(js).toContain("guessSection");
+    expect(js).toContain("grocery-screen");
+    expect(js).toContain("is-away");
+    expect(js).toContain("function openEdit");
+    const groceryDown = js.slice(js.indexOf('const row = event.target.closest(".g-row")'), js.indexOf("function onPointerMove"));
+    expect(groceryDown).not.toContain("setTimeout");
+    const pointerUp = js.slice(js.indexOf("function onPointerUp"), js.indexOf("function onPointerCancel"));
+    expect(pointerUp).toContain("openEdit(id)");
+    expect(pointerUp).not.toContain("openItem(id)");
+    const addForm = js.slice(js.indexOf("function addHtml"), js.indexOf("function newRecipeHtml"));
+    expect(addForm.match(/type="submit"/g)).toHaveLength(1);
+    expect(addForm).toContain('name="quantityNote"');
+    expect(addForm).toContain('name="store"');
+    expect(addForm).toContain('name="brand"');
+    expect(addForm).toContain('name="notes"');
+    expect(addForm).not.toContain("checkIcon");
+    const editItem = js.slice(js.indexOf('state.sheet?.kind === "edit-item"'), js.indexOf('state.sheet?.kind === "recipe-menu"'));
+    expect(editItem).toContain("usedInHtml");
+    expect(editItem).not.toContain("sheet-delete");
     expect(js).toContain('data-action="delete-item"');
     expect(js).toContain('name="ing-name"');
     expect(js).toContain("raised && cooked");
@@ -2141,9 +2167,9 @@ describe("grocery API", () => {
     expect(css).toContain("opacity 300ms");
     expect(css).toContain(".month-panel-head.is-today .week-date");
     const shell = await (await exports.default.fetch("https://grocery.test/sw.js")).text();
-    expect(shell).toContain("grocery-shell-v55");
-    expect(shell).toContain("/styles.css?v=48");
-    expect(shell).toContain("/app.js?v=52");
+    expect(shell).toContain("grocery-shell-v56");
+    expect(shell).toContain("/styles.css?v=49");
+    expect(shell).toContain("/app.js?v=53");
     const monthGrid = js.slice(js.indexOf("function monthGrid"), js.indexOf("function monthCell"));
     expect(monthGrid).toContain('["S", "M", "T", "W", "T", "F", "S"]');
     expect(monthGrid).toContain("sundayOf(first)");

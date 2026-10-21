@@ -1428,32 +1428,53 @@ async function addOneIngredient(
   return "updated";
 }
 
-export type ItemRecipe = { id: string; name: string; imageUrl: string | null };
+export type ItemRecipe = { id: string; name: string; imageUrl: string | null; date: string | null };
 
 export async function recipesForGroceries(db: D1Database): Promise<Record<string, ItemRecipe[]>> {
   const sources = await db.prepare(`SELECT item_id, source_key FROM grocery_sources`).all<{ item_id: string; source_key: string }>();
   const plans = await db
-    .prepare(`SELECT id, recipe_id FROM plan_entries WHERE recipe_id IS NOT NULL`)
-    .all<{ id: string; recipe_id: string }>();
+    .prepare(`SELECT id, recipe_id, plan_date FROM plan_entries`)
+    .all<{ id: string; recipe_id: string | null; plan_date: string }>();
   const recipes = await db.prepare(`SELECT id, name, image_url FROM recipes`).all<{ id: string; name: string; image_url: string | null }>();
-  const planRecipe = new Map((plans.results ?? []).map((row) => [row.id, row.recipe_id]));
+  const planById = new Map((plans.results ?? []).map((row) => [row.id, row]));
   const recipeById = new Map((recipes.results ?? []).map((row) => [row.id, row]));
   const linked: Record<string, ItemRecipe[]> = {};
+  const seen: Record<string, Set<string>> = {};
   for (const source of sources.results ?? []) {
-    const parts = source.source_key.split(":");
-    let recipeId: string | null = null;
-    if (parts[0] === "recipe") recipeId = parts[1] ?? null;
-    if (parts[0] === "plan") recipeId = planRecipe.get(parts[1] ?? "") ?? null;
-    if (!recipeId) continue;
-    const recipe = recipeById.get(recipeId);
+    const use = recipeUse(source.source_key, planById);
+    if (!use) continue;
+    const recipe = recipeById.get(use.recipeId);
     if (!recipe) continue;
+    const key = `${use.recipeId}:${use.date ?? ""}`;
+    const keys = seen[source.item_id] ?? new Set<string>();
+    if (keys.has(key)) continue;
+    keys.add(key);
+    seen[source.item_id] = keys;
     const list = linked[source.item_id] ?? [];
-    if (!list.some((entry) => entry.id === recipe.id)) {
-      list.push({ id: recipe.id, name: recipe.name, imageUrl: recipe.image_url });
-    }
+    list.push({ id: recipe.id, name: recipe.name, imageUrl: recipe.image_url, date: use.date });
     linked[source.item_id] = list;
   }
+  for (const [itemId, list] of Object.entries(linked)) {
+    const dated = new Set(list.filter((entry) => entry.date).map((entry) => entry.id));
+    linked[itemId] = list
+      .filter((entry) => entry.date || !dated.has(entry.id))
+      .sort((a, b) => (a.date ?? "9999").localeCompare(b.date ?? "9999") || a.name.localeCompare(b.name));
+  }
   return linked;
+}
+
+function recipeUse(
+  sourceKey: string,
+  planById: Map<string, { recipe_id: string | null; plan_date: string }>,
+): { recipeId: string; date: string | null } | null {
+  const parts = sourceKey.split(":");
+  if (parts[0] === "recipe" && parts[1]) return { recipeId: parts[1], date: null };
+  if (parts[0] !== "plan" || !parts[1]) return null;
+  const plan = planById.get(parts[1]);
+  const date = plan?.plan_date ?? null;
+  if (parts[2] === "also" && parts[3]) return { recipeId: parts[3], date };
+  if (!plan?.recipe_id) return null;
+  return { recipeId: plan.recipe_id, date };
 }
 
 export async function deleteRecipeSourcedItems(db: D1Database): Promise<number> {
