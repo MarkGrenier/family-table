@@ -578,14 +578,14 @@ select.box { appearance: none; padding-right: 2.2rem; }
 .recipe-row, .day-row {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
+  gap: 0.55rem;
   width: 100%;
   min-height: 64px;
   border-bottom: 1px solid var(--line);
   text-align: left;
 }
 
-.recipe-open { display: flex; gap: 0.75rem; align-items: center; flex: 1; text-align: left; min-width: 0; min-height: 64px; }
+.recipe-open { display: flex; gap: 0.7rem; align-items: center; flex: 1; text-align: left; min-width: 0; min-height: 64px; }
 .thumb, .round-thumb, .thumb-tile {
   width: 52px;
   height: 52px;
@@ -601,8 +601,32 @@ select.box { appearance: none; padding-right: 2.2rem; }
   background: #5dbb24;
 }
 .thumb-tile .app-mark { width: 52px; height: 52px; border-radius: 12px; }
-.recipe-copy { display: flex; flex-direction: column; min-width: 0; text-align: left; }
+.recipe-copy { display: flex; flex-direction: column; flex: 1; min-width: 0; text-align: left; gap: 0.05rem; }
+.recipe-name {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  font-weight: 650;
+  line-height: 1.25;
+  letter-spacing: -0.015em;
+}
 .recipe-copy .small { font-size: 0.85rem; }
+.recipe-actions { display: flex; align-items: center; flex: none; gap: 0; margin-left: 0.1rem; }
+.recipe-actions .icon-btn,
+.recipe-actions .heart { width: 34px; height: 34px; min-width: 34px; min-height: 34px; }
+.recipe-actions .add-plus {
+  width: 30px;
+  height: 30px;
+  min-width: 30px;
+  min-height: 30px;
+  margin-right: 0.1rem;
+  border-radius: 50%;
+}
+.recipe-actions .icon-btn svg { width: 18px; height: 18px; }
+.recipe-actions .add-plus svg { width: 16px; height: 16px; }
+.recipe-actions .heart svg { width: 18px; height: 18px; }
 
 .cook {
   min-height: 100vh;
@@ -1031,6 +1055,7 @@ body:has(.night-screen),
 .week-day-head .week-date { flex: 1; width: auto; }
 
 .week-day { padding: 0.85rem 0 0.45rem; border-top: 1px solid var(--line); }
+.week-day.is-picked .week-date { color: var(--green-dark); }
 .week-day:first-child { border-top: 0; }
 
 .week-date, .week-empty {
@@ -1215,6 +1240,7 @@ body:has(.month-screen),
 }
 
 .toast button { color: #b6e38a; font-weight: 800; min-height: 44px; min-width: 64px; }
+.toast-note { justify-content: center; padding: 0.85rem 1rem; font-weight: 650; text-align: center; }
 
 .cook-label { margin-top: 2.4rem; }
 .text-link { font: inherit; font-weight: 800; text-align: left; }

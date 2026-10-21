@@ -159,6 +159,24 @@ export function easternToday(now = new Date()): string {
   }).format(now);
 }
 
+/** Monday of the week that contains `iso`. Weeks run Monday–Sunday. */
+export function mondayOf(iso: string): string {
+  const [year, month, day] = iso.split("-").map(Number);
+  const weekday = new Date(Date.UTC(year, month - 1, day)).getUTCDay();
+  return addDays(iso, weekday === 0 ? -6 : 1 - weekday);
+}
+
+/** This week and next week, Monday through Sunday, in Eastern time. */
+export function groceryWindow(today = easternToday()): { from: string; to: string } {
+  const from = mondayOf(today);
+  return { from, to: addDays(from, 13) };
+}
+
+export function inGroceryWindow(date: string, today = easternToday()): boolean {
+  const window = groceryWindow(today);
+  return date >= window.from && date <= window.to;
+}
+
 type RecipeMeta = {
   lastMade: string | null;
   timesMade: number;
@@ -550,14 +568,15 @@ export async function savePlan(db: D1Database, input: PlanInput): Promise<PlanEn
   if (!saved) throw new HttpError(500, "Something went wrong. Try again.");
   const sameRecipe =
     previous?.type === "recipe" && saved.type === "recipe" && previous.recipeId === saved.recipeId && Boolean(saved.recipeId);
-  if (previous) {
+  const inWindow = inGroceryWindow(saved.date);
+  if (previous && inWindow) {
     for (const extraId of previous.also) {
       await removePlanGroceries(db, { ...previous, id: alsoPlanId(previous.id, extraId) });
     }
   }
   if (!sameRecipe) {
-    if (previous?.type === "recipe") await removePlanGroceries(db, previous);
-    if (saved.type === "recipe" && saved.recipeId) await addEntryGroceries(db, saved);
+    if (previous?.type === "recipe" && inWindow) await removePlanGroceries(db, previous);
+    if (saved.type === "recipe" && saved.recipeId && inWindow) await addEntryGroceries(db, saved);
   }
   return saved;
 }
@@ -597,7 +616,9 @@ async function addPlanAlso(db: D1Database, date: string, meal: string, recipeId:
     .run();
   const saved = await planOn(db, date, meal);
   if (!saved) throw new HttpError(500, "Something went wrong. Try again.");
-  await addEntryGroceries(db, { ...saved, id: alsoPlanId(saved.id, recipeId), type: "recipe", recipeId });
+  if (inGroceryWindow(saved.date)) {
+    await addEntryGroceries(db, { ...saved, id: alsoPlanId(saved.id, recipeId), type: "recipe", recipeId });
+  }
   return saved;
 }
 
@@ -609,7 +630,7 @@ export async function removePlanAlso(db: D1Database, id: string, recipeId: strin
     .prepare(`UPDATE plan_entries SET also_json = ?, updated_at = ? WHERE id = ?`)
     .bind(JSON.stringify(also), nowIso(), id)
     .run();
-  await removePlanGroceries(db, { ...existing, id: alsoPlanId(id, recipeId) });
+  if (inGroceryWindow(existing.date)) await removePlanGroceries(db, { ...existing, id: alsoPlanId(id, recipeId) });
 }
 
 function alsoPlanId(planId: string, recipeId: string): string {
@@ -619,7 +640,7 @@ function alsoPlanId(planId: string, recipeId: string): string {
 export async function deletePlan(db: D1Database, id: string): Promise<void> {
   const existing = await getPlan(db, id);
   if (!existing) throw new HttpError(404, "That meal isn't planned anymore.");
-  if (existing.type === "recipe") await removePlanGroceries(db, existing);
+  if (existing.type === "recipe" && inGroceryWindow(existing.date)) await removePlanGroceries(db, existing);
   await db.prepare(`DELETE FROM plan_entries WHERE id = ?`).bind(id).run();
 }
 
@@ -719,6 +740,39 @@ export async function addRecipeToGroceries(db: D1Database, recipeId: string, ser
   return totals;
 }
 
+function planSourcePresent(keys: Set<string>, entryId: string): boolean {
+  const prefix = `plan:${entryId}:`;
+  const alsoPrefix = entryId.includes(":also:") ? null : `plan:${entryId}:also:`;
+  for (const key of keys) {
+    if (!key.startsWith(prefix)) continue;
+    if (alsoPrefix && key.startsWith(alsoPrefix)) continue;
+    return true;
+  }
+  return false;
+}
+
+/** Add groceries for in-window meals that do not have them yet. Safe to run on every list fetch. */
+export async function syncWindowGroceries(db: D1Database): Promise<void> {
+  const window = groceryWindow();
+  const planned = await listPlan(db, window.from, window.to);
+  const targets: PlanEntry[] = [];
+  for (const entry of planned) {
+    if (entry.type === "recipe" && entry.recipeId) targets.push(entry);
+    for (const recipeId of entry.also) {
+      targets.push({ ...entry, id: alsoPlanId(entry.id, recipeId), type: "recipe", recipeId });
+    }
+  }
+  if (!targets.length) return;
+  const rows = await db
+    .prepare(`SELECT source_key FROM grocery_sources WHERE source_key LIKE 'plan:%'`)
+    .all<{ source_key: string }>();
+  const keys = new Set((rows.results ?? []).map((row) => row.source_key));
+  const missing = targets.filter((entry) => !planSourcePresent(keys, entry.id));
+  if (!missing.length) return;
+  const onHand = await onHandKeys(db);
+  for (const entry of missing) await addEntryGroceries(db, entry, onHand);
+}
+
 async function addEntryGroceries(db: D1Database, entry: PlanEntry, onHand?: Set<string>): Promise<GroceryChange> {
   const totals = { added: 0, updated: 0, skipped: 0 };
   if (entry.type !== "recipe" || !entry.recipeId) return totals;
@@ -735,7 +789,7 @@ async function addEntryGroceries(db: D1Database, entry: PlanEntry, onHand?: Set<
 
 export async function addPlanGroceries(db: D1Database, from: string, to: string, planId: string | null): Promise<GroceryChange> {
   const planned = await listPlan(db, from, to);
-  const entries = planId ? planned.filter((entry) => entry.id === planId) : planned;
+  const entries = (planId ? planned.filter((entry) => entry.id === planId) : planned).filter((entry) => inGroceryWindow(entry.date));
   const onHand = await onHandKeys(db);
   const totals = { added: 0, updated: 0, skipped: 0 };
   for (const entry of entries) {
@@ -833,10 +887,12 @@ export async function rebuildPlanGroceries(
   for (const row of planRows) {
     if (row.recipe_id) planRecipe.set(row.id, row.recipe_id);
   }
+  const window = groceryWindow();
   const entries = planRows.filter((row) => {
     const isRecipe = row.entry_type === "recipe" && Boolean(row.recipe_id);
     const hasAlso = parseAlsoIds(row.also_json).length > 0;
     if (!isRecipe && !hasAlso) return false;
+    if (row.plan_date < window.from || row.plan_date > window.to) return false;
     if (!range) return true;
     return row.plan_date >= range.from && row.plan_date <= range.to;
   });
@@ -1110,7 +1166,7 @@ export async function replaceWeek(db: D1Database, input: WeekInput): Promise<{ w
   const end = addDays(input.weekStart, 6);
   const existing = await listPlan(db, input.weekStart, end);
   for (const entry of existing) {
-    if (entry.type === "recipe") await removePlanGroceries(db, entry);
+    if (entry.type === "recipe" && inGroceryWindow(entry.date)) await removePlanGroceries(db, entry);
   }
   // Recipes stay in the cookbook. Replacing a week only changes that week's meals.
   await db.prepare(`DELETE FROM plan_entries WHERE plan_date >= ? AND plan_date <= ?`).bind(input.weekStart, end).run();
@@ -1134,7 +1190,7 @@ export async function replaceWeek(db: D1Database, input: WeekInput): Promise<{ w
   }
   const saved = await listPlan(db, input.weekStart, end);
   for (const entry of saved) {
-    if (entry.type === "recipe") await addEntryGroceries(db, entry);
+    if (entry.type === "recipe" && inGroceryWindow(entry.date)) await addEntryGroceries(db, entry);
   }
   return getWeek(db, input.weekStart);
 }

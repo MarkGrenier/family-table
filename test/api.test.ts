@@ -101,6 +101,34 @@ async function shareText(token: string, body: string, contentType = "application
   };
 }
 
+function easternDay(now = new Date()) {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/New_York",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(now);
+}
+
+function shiftDay(iso: string, count: number) {
+  const [year, month, day] = iso.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  date.setUTCDate(date.getUTCDate() + count);
+  return date.toISOString().slice(0, 10);
+}
+
+function mondayOfDay(iso: string) {
+  const [year, month, day] = iso.split("-").map(Number);
+  const weekday = new Date(Date.UTC(year, month - 1, day)).getUTCDay();
+  return shiftDay(iso, weekday === 0 ? -6 : 1 - weekday);
+}
+
+/** Monday of this week through Sunday of next week. Matches src/food.ts groceryWindow. */
+function shopWindow() {
+  const from = mondayOfDay(easternDay());
+  return { from, to: shiftDay(from, 13) };
+}
+
 async function signIn(): Promise<string> {
   const response = await call("/api/login", { method: "POST", body: { passcode: env.PASSCODE } });
   expect(response.status).toBe(200);
@@ -1016,7 +1044,7 @@ describe("grocery API", () => {
     expect((recipe.cookSteps as Json[])[0].ingredients).toEqual([1]);
 
     const id = recipe.id as string;
-    await call("/api/plan", { method: "POST", token, body: { date: "2026-10-12", meal: "dinner", type: "recipe", recipeId: id } });
+    await call("/api/plan", { method: "POST", token, body: { date: shopWindow().from, meal: "dinner", type: "recipe", recipeId: id } });
     const items = ((await call("/api/items", { token })).json?.items ?? []) as Json[];
     expect(items.some((item) => item.name === "Water")).toBe(false);
     expect(items.some((item) => item.name === "Black pepper")).toBe(false);
@@ -1046,7 +1074,7 @@ describe("grocery API", () => {
     expect(cleared.status).toBe(200);
     expect(Number(cleared.json?.deleted)).toBeGreaterThan(0);
     const left = ((await call("/api/items", { token })).json?.items ?? []) as Json[];
-    expect(left.some((item) => item.name === "Chicken thighs")).toBe(false);
+    expect(left.find((item) => item.name === "Chicken thighs")?.quantityNote).toBe("1 lb");
   });
 
   it("keeps an explicit buy on an optional ingredient and accepts timer ranges", async () => {
@@ -1082,7 +1110,8 @@ describe("grocery API", () => {
       { text: "Rest.", minutes: null, seconds: 30, ingredients: [] },
     ]);
     const id = recipe.id as string;
-    await call("/api/plan", { method: "POST", token, body: { date: "2026-11-02", meal: "dinner", type: "recipe", recipeId: id } });
+    const shrimpDay = shiftDay(shopWindow().from, 4);
+    await call("/api/plan", { method: "POST", token, body: { date: shrimpDay, meal: "dinner", type: "recipe", recipeId: id } });
     const items = ((await call("/api/items", { token })).json?.items ?? []) as Json[];
     expect(items.find((item) => item.name === "Rice")?.quantityNote ?? null).toBeNull();
     expect(items.some((item) => item.name === "Shrimp")).toBe(true);
@@ -1090,11 +1119,12 @@ describe("grocery API", () => {
     const leftover = await call("/api/plan", {
       method: "POST",
       token,
-      body: { date: "2026-11-03", meal: "dinner", type: "leftovers", recipeId: id },
+      body: { date: shiftDay(shrimpDay, 1), meal: "dinner", type: "leftovers", recipeId: id },
     });
     expect(leftover.status).toBe(200);
     expect((leftover.json?.entry as Json).recipeId).toBe(id);
-    const linked = ((await call("/api/plan?from=2026-11-03&to=2026-11-03", { token })).json?.plan ?? []) as Json[];
+    const leftoverDay = shiftDay(shrimpDay, 1);
+    const linked = ((await call(`/api/plan?from=${leftoverDay}&to=${leftoverDay}`, { token })).json?.plan ?? []) as Json[];
     expect(linked[0]).toMatchObject({ type: "leftovers", recipeId: id, recipeName: "Shrimp tacos" });
   });
 
@@ -1226,10 +1256,11 @@ describe("grocery API", () => {
     const mainId = (main.json?.recipe as Json).id as string;
     const salmonId = (salmon.json?.recipe as Json).id as string;
     const pastaId = (pasta.json?.recipe as Json).id as string;
+    const chosenDay = shiftDay(shopWindow().from, 2);
     const planned = await call("/api/plan", {
       method: "POST",
       token,
-      body: { date: "2026-12-08", meal: "dinner", type: "recipe", recipeId: mainId, alternates: ["sheet-salmon", pastaId] },
+      body: { date: chosenDay, meal: "dinner", type: "recipe", recipeId: mainId, alternates: ["sheet-salmon", pastaId] },
     });
     expect(planned.status).toBe(200);
     const entry = planned.json?.entry as Json;
@@ -1240,7 +1271,7 @@ describe("grocery API", () => {
     const kept = await call("/api/plan", {
       method: "POST",
       token,
-      body: { date: "2026-12-08", meal: "dinner", type: "recipe", recipeId: mainId },
+      body: { date: chosenDay, meal: "dinner", type: "recipe", recipeId: mainId },
     });
     expect((kept.json?.entry as Json).alternates).toEqual([salmonId, pastaId]);
 
@@ -1257,7 +1288,7 @@ describe("grocery API", () => {
     const swapped = await call("/api/plan", {
       method: "POST",
       token,
-      body: { date: "2026-12-08", meal: "dinner", type: "recipe", recipeId: salmonId, alternates: [mainId, pastaId] },
+      body: { date: chosenDay, meal: "dinner", type: "recipe", recipeId: salmonId, alternates: [mainId, pastaId] },
     });
     expect((swapped.json?.entry as Json).alternates).toEqual([mainId, pastaId]);
     const after = ((await call("/api/items", { token })).json?.items ?? []) as Json[];
@@ -1323,7 +1354,7 @@ describe("grocery API", () => {
     expect(first.status).toBe(201);
     expect(second.status).toBe(201);
     const ids = [first, second, jarred].map((response) => (response.json?.recipe as Json).id as string);
-    const dates = ["2026-12-01", "2026-12-02", "2026-12-03"];
+    const dates = [0, 1, 2].map((offset) => shiftDay(shopWindow().from, offset));
     for (let index = 0; index < ids.length; index += 1) {
       const planned = await call("/api/plan", {
         method: "POST",
@@ -1384,7 +1415,7 @@ describe("grocery API", () => {
     await call("/api/plan", {
       method: "POST",
       token,
-      body: { date: "2026-12-08", meal: "dinner", type: "recipe", recipeId: lemonId },
+      body: { date: shiftDay(shopWindow().from, 3), meal: "dinner", type: "recipe", recipeId: lemonId },
     });
     const skipped = ((await call("/api/items", { token })).json?.items ?? []) as Json[];
     const lemons = skipped.filter((item) => /lemon/i.test(String(item.name)));
@@ -1397,7 +1428,7 @@ describe("grocery API", () => {
     const shopped = await call("/api/plan/groceries", {
       method: "POST",
       token,
-      body: { from: "2026-12-08", to: "2026-12-08" },
+      body: { from: shiftDay(shopWindow().from, 3), to: shiftDay(shopWindow().from, 3) },
     });
     expect(shopped.json).toMatchObject({ added: 1 });
     const bought = ((await call("/api/items", { token })).json?.items ?? []) as Json[];
@@ -1422,7 +1453,7 @@ describe("grocery API", () => {
     await call("/api/plan", {
       method: "POST",
       token,
-      body: { date: "2026-12-09", meal: "dinner", type: "recipe", recipeId: dinnerId },
+      body: { date: shiftDay(shopWindow().from, 4), meal: "dinner", type: "recipe", recipeId: dinnerId },
     });
     const before = ((await call("/api/items", { token })).json?.items ?? []) as Json[];
     const beef = before.find((item) => item.name === "Beef");
@@ -1459,7 +1490,7 @@ describe("grocery API", () => {
     const roast = await call("/api/plan", {
       method: "POST",
       token,
-      body: { date: "2026-12-10", meal: "dinner", type: "recipe", recipeId: roastId },
+      body: { date: shiftDay(shopWindow().from, 5), meal: "dinner", type: "recipe", recipeId: roastId },
     });
     const merged = ((await call("/api/items", { token })).json?.items ?? []) as Json[];
     const garlic = merged.find((item) => item.id === (manual.json?.item as Json).id);
@@ -1482,8 +1513,9 @@ describe("grocery API", () => {
     });
     const id = (created.json?.recipe as Json).id as string;
     expect((created.json?.recipe as Json).ingredients).toHaveLength(3);
-    for (let day = 1; day <= 10; day += 1) {
-      const date = `2027-03-${String(day).padStart(2, "0")}`;
+    const starchStart = shopWindow().from;
+    for (let day = 0; day < 10; day += 1) {
+      const date = shiftDay(starchStart, day);
       const planned = await call("/api/plan", {
         method: "POST",
         token,
@@ -1501,7 +1533,7 @@ describe("grocery API", () => {
     expect(starch[0]?.quantityNote).toBe("for 10 recipes");
     expect(items.filter((item) => /chicken thigh/i.test(String(item.name)))).toHaveLength(1);
     expect(items.filter((item) => item.name === "Dish soap")).toHaveLength(1);
-    const plan = ((await call("/api/plan?from=2027-03-01&to=2027-03-01", { token })).json?.plan ?? []) as Json[];
+    const plan = ((await call(`/api/plan?from=${starchStart}&to=${starchStart}`, { token })).json?.plan ?? []) as Json[];
     expect((await call(`/api/plan/${plan[0]?.id}`, { method: "DELETE", token })).status).toBe(200);
     const still = await call(`/api/recipes/${id}`, { token });
     expect(still.status).toBe(200);
@@ -1679,7 +1711,7 @@ describe("grocery API", () => {
     const planned = await call("/api/plan", {
       method: "POST",
       token,
-      body: { date: "2026-12-15", meal: "dinner", type: "recipe", recipeId: pasta?.id },
+      body: { date: shiftDay(shopWindow().from, 6), meal: "dinner", type: "recipe", recipeId: pasta?.id },
     });
     expect(planned.status).toBe(200);
     const shopped = ((await call("/api/items", { token })).json?.items ?? []) as Json[];
@@ -1706,46 +1738,120 @@ describe("grocery API", () => {
     const barleyId = (barley.json?.recipe as Json).id as string;
     const pearId = (pear.json?.recipe as Json).id as string;
     const lentilId = (lentil.json?.recipe as Json).id as string;
+    const alsoDay = shiftDay(shopWindow().from, 8);
     const first = await call("/api/plan", {
       method: "POST",
       token,
-      body: { date: "2027-04-08", meal: "dinner", type: "recipe", recipeId: barleyId },
+      body: { date: alsoDay, meal: "dinner", type: "recipe", recipeId: barleyId },
     });
     expect(first.status).toBe(200);
     const planId = (first.json?.entry as Json).id as string;
     const second = await call("/api/plan", {
       method: "POST",
       token,
-      body: { date: "2027-04-08", meal: "dinner", type: "recipe", recipeId: pearId, keep: true },
+      body: { date: alsoDay, meal: "dinner", type: "recipe", recipeId: pearId, keep: true },
     });
     expect(second.status).toBe(200);
     expect((second.json?.entry as Json).recipeId).toBe(barleyId);
     expect((second.json?.entry as Json).also).toEqual([pearId]);
     const names = async () => ((await call("/api/items", { token })).json?.items ?? []) as Json[];
     expect((await names()).map((item) => item.name).sort()).toEqual(["Zzalso barley", "Zzalso pears"]);
-    const rebuilt = await call("/api/groceries/rebuild", { method: "POST", token, body: { from: "2027-04-01", to: "2027-04-30" } });
+    const window = shopWindow();
+    const rebuilt = await call("/api/groceries/rebuild", { method: "POST", token, body: { from: window.from, to: window.to } });
     expect(rebuilt.status).toBe(200);
     expect((await names()).map((item) => item.name).sort()).toEqual(["Zzalso barley", "Zzalso pears"]);
     expect((await call(`/api/plan/${planId}/also/${pearId}`, { method: "DELETE", token })).status).toBe(200);
-    const afterDrop = ((await call("/api/plan?from=2027-04-08&to=2027-04-08", { token })).json?.plan ?? []) as Json[];
+    const afterDrop = ((await call(`/api/plan?from=${alsoDay}&to=${alsoDay}`, { token })).json?.plan ?? []) as Json[];
     expect(afterDrop).toHaveLength(1);
     expect(afterDrop[0]?.also).toEqual([]);
     expect((await names()).map((item) => item.name)).toEqual(["Zzalso barley"]);
     const again = await call("/api/plan", {
       method: "POST",
       token,
-      body: { date: "2027-04-08", meal: "dinner", type: "recipe", recipeId: pearId, keep: true },
+      body: { date: alsoDay, meal: "dinner", type: "recipe", recipeId: pearId, keep: true },
     });
     expect((again.json?.entry as Json).also).toEqual([pearId]);
     const replaced = await call("/api/plan", {
       method: "POST",
       token,
-      body: { date: "2027-04-08", meal: "dinner", type: "recipe", recipeId: lentilId },
+      body: { date: alsoDay, meal: "dinner", type: "recipe", recipeId: lentilId },
     });
     expect(replaced.status).toBe(200);
     expect((replaced.json?.entry as Json).recipeId).toBe(lentilId);
     expect((replaced.json?.entry as Json).also).toEqual([]);
     expect((await names()).map((item) => item.name)).toEqual(["Zzalso lentils"]);
+  });
+
+  it("shops this week and next week only, then adds groceries when a meal enters the window", async () => {
+    const token = env.API_TOKEN;
+    const span = shopWindow();
+    const inside = span.from;
+    const outside = shiftDay(span.to, 10);
+    const created = await call("/api/recipes", {
+      method: "POST",
+      token,
+      body: { name: "Window rice bowl", ingredients: ["1 lb window rice"], steps: ["Simmer."] },
+    });
+    const id = (created.json?.recipe as Json).id as string;
+    const manual = await call("/api/items", {
+      method: "POST",
+      token,
+      body: { name: "Window paper", store: "local", category: "shelf" },
+    });
+    const paperId = (manual.json?.item as Json).id as string;
+    await call(`/api/items/${paperId}`, { method: "PATCH", token, body: { checked: true } });
+    const names = async () => ((await call("/api/items", { token })).json?.items ?? []) as Json[];
+
+    const far = await call("/api/plan", {
+      method: "POST",
+      token,
+      body: { date: outside, meal: "dinner", type: "recipe", recipeId: id },
+    });
+    expect(far.status).toBe(200);
+    const farId = (far.json?.entry as Json).id as string;
+    expect((await names()).some((item) => item.name === "Window rice")).toBe(false);
+    const blocked = await call("/api/plan/groceries", { method: "POST", token, body: { from: outside, to: outside } });
+    expect(blocked.json).toMatchObject({ added: 0, updated: 0 });
+    const beforeDelete = await names();
+    expect((await call(`/api/plan/${farId}`, { method: "DELETE", token })).status).toBe(200);
+    const afterDelete = await names();
+    expect(afterDelete.map((item) => [item.id, item.quantityNote, item.checked])).toEqual(
+      beforeDelete.map((item) => [item.id, item.quantityNote, item.checked]),
+    );
+
+    await call("/api/plan", {
+      method: "POST",
+      token,
+      body: { date: outside, meal: "dinner", type: "recipe", recipeId: id },
+    });
+    const parked = ((await call(`/api/plan?from=${outside}&to=${outside}`, { token })).json?.plan ?? []) as Json[];
+    expect(parked).toHaveLength(1);
+    await env.DB.prepare(`UPDATE plan_entries SET plan_date = ? WHERE id = ?`).bind(inside, parked[0].id).run();
+    const arrived = await names();
+    expect(arrived.find((item) => item.name === "Window rice")?.quantityNote).toBe("1 lb");
+    expect(arrived.find((item) => item.id === paperId)?.checked).toBe(true);
+    const again = await names();
+    expect(again.find((item) => item.name === "Window rice")?.quantityNote).toBe("1 lb");
+    const sources = await env.DB.prepare(`SELECT COUNT(*) AS n FROM grocery_sources WHERE instr(source_key, ?) = 1`)
+      .bind(`plan:${parked[0].id}:`)
+      .first<{ n: number }>();
+    expect(Number(sources?.n)).toBe(1);
+
+    const near = await call("/api/plan", {
+      method: "POST",
+      token,
+      body: { date: shiftDay(inside, 1), meal: "dinner", type: "recipe", recipeId: id },
+    });
+    expect(near.status).toBe(200);
+    expect((await names()).find((item) => item.name === "Window rice")?.quantityNote).toBe("2 lb");
+    expect((await names()).find((item) => item.name === "Window rice")?.quantityNote).toBe("2 lb");
+    const outsideRebuild = await call("/api/groceries/rebuild", {
+      method: "POST",
+      token,
+      body: { from: outside, to: outside },
+    });
+    expect(outsideRebuild.json).toMatchObject({ added: 0, removed: 0 });
+    expect((await names()).find((item) => item.name === "Window rice")?.quantityNote).toBe("2 lb");
   });
 
   it("serves the phone page", async () => {
@@ -1795,7 +1901,8 @@ describe("grocery API", () => {
     expect(removeFn.indexOf("showUndo")).toBeLessThan(removeFn.indexOf('method: "DELETE"'));
     expect(removeFn).toContain(", 3000)");
     const planFn = js.slice(js.indexOf("async function planRecipe"), js.indexOf("function confirmRemove"));
-    expect(planFn.indexOf("showPlannedDay(date)")).toBeLessThan(planFn.indexOf('method: "POST"'));
+    expect(planFn.indexOf("finishAdd(date)")).toBeLessThan(planFn.indexOf('method: "POST"'));
+    expect(planFn).not.toContain('kind: "day"');
     expect(js).toContain("pendingDeletes");
     expect(js).toContain('data-action="confirm-remove"');
     expect(js).toContain('kind: "remove-choice"');
@@ -1826,7 +1933,10 @@ describe("grocery API", () => {
     expect(js).toContain('name="ing-name"');
     expect(js).toContain("raised && cooked");
     expect(js).toContain("recipeThumb(recipe)");
-    expect(js).toContain("Chef's picks");
+    expect(js).toContain("Pick ${esc(mealName)} for ");
+    expect(js).toContain("Added to ");
+    expect(js).toContain("focusCalendarDate");
+    expect(js).not.toContain('kind: "day"');
     expect(js).toContain('class="lo-pill"');
     const night = js.slice(js.indexOf("function leftoversNight"), js.indexOf("function foodPhoto"));
     expect(night.indexOf('class="lo-pill"')).toBeGreaterThan(-1);
@@ -1871,7 +1981,10 @@ describe("grocery API", () => {
     expect(hero.headers.get("Content-Type") ?? "").toContain("image/");
     expect(js).not.toContain("Reheating");
     expect(js).toContain('data-action="cancel-pick"');
-    expect(js).toContain("Chef's picks");
+    expect(js).toContain("Pick ${esc(mealName)} for ");
+    expect(js).toContain("Added to ");
+    expect(js).toContain("focusCalendarDate");
+    expect(js).not.toContain('kind: "day"');
     expect(js).toContain("dataset.session");
     expect(js).toContain("login-brand");
     expect(js).toContain("markImg(88)");
@@ -1890,12 +2003,15 @@ describe("grocery API", () => {
     expect(js).toContain(">Replace</button>");
     expect(js).toContain(">Cancel</button>");
     const css = await (await exports.default.fetch("https://grocery.test/styles.css")).text();
+    expect(css).toContain(".recipe-name");
+    expect(css).toContain("line-clamp: 2");
+    expect(css).toContain("border-radius: 50%");
     expect(css).toContain("opacity 300ms");
     expect(css).toContain(".month-panel-head.is-today .week-date");
     const shell = await (await exports.default.fetch("https://grocery.test/sw.js")).text();
-    expect(shell).toContain("grocery-shell-v51");
-    expect(shell).toContain("/styles.css?v=46");
-    expect(shell).toContain("/app.js?v=49");
+    expect(shell).toContain("grocery-shell-v52");
+    expect(shell).toContain("/styles.css?v=47");
+    expect(shell).toContain("/app.js?v=50");
     expect(js).toContain('getElementById("splash")');
     expect(js).not.toContain("Loading…");
     const html = await (await exports.default.fetch("https://grocery.test/")).text();

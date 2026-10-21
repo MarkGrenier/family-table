@@ -12,6 +12,7 @@ const state = {
   recipeSort: "favorites",
   addQuery: "",
   pickBack: null,
+  addOrigin: null,
   notice: "",
   error: "",
   loginError: "",
@@ -26,6 +27,8 @@ const state = {
   calMode: "week",
   calStart: null,
   monthPick: null,
+  weekPick: null,
+  scrollTo: null,
   prepDone: {},
   undo: null,
   swipeId: null,
@@ -66,6 +69,7 @@ document.addEventListener("visibilitychange", () => {
 let gesture = null;
 let wakeLock = null;
 let undoTimer = null;
+let noticeTimer = null;
 let checkGeneration = 0;
 let refreshSerial = 0;
 let planSerial = 0;
@@ -195,7 +199,6 @@ function viewKey() {
   }
   if (page.kind === "cook") return `cook:${page.id}:${page.step || 0}`;
   if (page.kind === "recipe") return `recipe:${page.id}:${page.planDate || ""}:${page.planMeal || ""}`;
-  if (page.kind === "day") return `day:${page.date}`;
   if (page.kind === "pick") return `pick:${page.date}:${page.meal || "dinner"}`;
   if (page.kind === "feedback") return `feedback:${page.id}`;
   if (page.kind === "item") return `item:${page.id}`;
@@ -215,6 +218,11 @@ function render() {
   viewKeySeen = key;
   const finish = () => {
     if (moved) scrollToTop();
+    if (state.scrollTo) {
+      const id = state.scrollTo;
+      state.scrollTo = null;
+      document.getElementById(id)?.scrollIntoView({ block: "center" });
+    }
   };
   if (state.loading) {
     finish();
@@ -271,7 +279,6 @@ function loginHtml() {
 }
 
 function bodyHtml() {
-  if (state.page?.kind === "day") return dayHtml(state.page.date);
   if (state.page?.kind === "pick") return pickHtml();
   if (state.page?.kind === "recipe") return recipeHtml(state.page.id);
   if (state.page?.kind === "feedback") return feedbackHtml(state.page.id);
@@ -487,7 +494,7 @@ function monthPanel(date) {
   const events = eventsOn(date);
   const today = date === nyToday();
   const label = today ? `Today · ${shortDate(date)}` : shortDate(date);
-  return `<section class="month-panel">
+  return `<section class="month-panel" id="month-panel">
       <div class="month-panel-head${today ? " is-today" : ""}"><p class="week-date">${esc(label)}</p>${addDinnerButton(date)}</div>
       ${meals.length ? meals.map((entry) => mealRow(entry, "calendar")).join("") : `<p class="week-empty">Nothing planned</p>`}
       ${events.map((event) => `<p class="event-line">${event.time ? `<time>${esc(event.time)}</time>` : ""}${esc(event.title)}</p>`).join("")}
@@ -507,7 +514,8 @@ function weekDay(date) {
   const meals = mealsOn(date);
   const events = eventsOn(date);
   const label = today ? `Today · ${shortDate(date)}` : shortDate(date);
-  return `<section class="week-day${today ? " is-today" : ""}">
+  const picked = state.weekPick === date;
+  return `<section class="week-day${today ? " is-today" : ""}${picked ? " is-picked" : ""}" id="week-${esc(date)}">
       <div class="week-day-head"><button class="week-date" type="button" data-action="open-day" data-date="${esc(date)}">${esc(label)}</button>${addDinnerButton(date)}</div>
       ${meals.length ? meals.map((entry) => mealRow(entry, "calendar")).join("") : `<button class="week-empty" type="button" data-action="open-day" data-date="${esc(date)}">Nothing planned</button>`}
       ${events.map((event) => `<p class="event-line">${event.time ? `<time>${esc(event.time)}</time>` : ""}${esc(event.title)}</p>`).join("")}
@@ -605,22 +613,12 @@ function entryById(id) {
   };
 }
 
-function dayHtml(date) {
-  const dinner = mealOn(date, "dinner");
-  if (dinner?.type === "leftovers" && !(dinner.also || []).length) return leftoversNight(dinner, recipeForEntry(dinner), { back: true, remove: true });
-  const meals = mealsOn(date);
-  const body = meals.length
-    ? meals.map(mealRow).join("")
-    : `<p class="week-empty">Nothing planned</p>`;
-  return `<div class="day-head"><button class="text-green" type="button" data-action="back">Week</button>${addDinnerButton(date)}</div>
-    <h1>${esc(longDate(date))}</h1>
-    <section class="day-meals">${body}</section>`;
-}
-
 function pickHtml() {
   const date = state.page.date;
+  const meal = state.page.meal || "dinner";
+  const mealName = meal === "lunch" ? "lunch" : meal === "breakfast" ? "breakfast" : "dinner";
   const label = formatUtc(date, { weekday: "short", month: "short", day: "numeric" });
-  return `<div class="pick-bar"><button class="text-green" type="button" data-action="cancel-pick">Cancel</button><h1>Add to ${esc(label)}</h1></div>
+  return `<div class="pick-bar"><button class="text-green" type="button" data-action="cancel-pick">Cancel</button><h1>Pick ${esc(mealName)} for ${esc(label)}</h1></div>
     ${state.error ? `<p class="error">${esc(state.error)}</p>` : ""}
     <label class="search">
       <input id="recipe-search" class="field-box" type="search" value="${esc(state.recipeQuery)}" placeholder="Search recipes" aria-label="Search recipes" autocomplete="off">
@@ -664,34 +662,25 @@ function visibleRecipes() {
 }
 
 function recipeListHtml() {
-  if (state.page?.kind !== "pick") return recipeList(visibleRecipes());
-  const date = state.page.date;
-  const meal = state.page.meal || "dinner";
-  const query = state.recipeQuery.trim().toLowerCase();
-  const picks = chefPicks().filter((recipe) => !query || recipe.name.toLowerCase().includes(query));
-  const pickIds = new Set(picks.map((recipe) => recipe.id));
-  const rest = visibleRecipes().filter((recipe) => !pickIds.has(recipe.id));
-  if (!picks.length && !rest.length) return `<p class="empty">${query ? "Nothing matches that." : "No recipes yet."}</p>`;
-  const options = { pick: true, date, meal };
-  return `${picks.length ? `<p class="pick-label">Chef's picks</p>${recipeRows(picks, options)}` : ""}${recipeRows(rest, options)}`;
+  const recipes = visibleRecipes();
+  if (state.page?.kind !== "pick") return recipeList(recipes);
+  return recipeList(recipes, { pick: true, date: state.page.date, meal: state.page.meal || "dinner" });
 }
 
-function recipeList(recipes) {
+function recipeList(recipes, options) {
   if (!recipes.length) return `<p class="empty">${state.recipeQuery ? "Nothing matches that." : "No recipes yet."}</p>`;
-  return recipeRows(recipes);
+  return recipeRows(recipes, options);
 }
 
 function recipeRows(recipes, options = {}) {
   const action = options.pick ? "pick-recipe" : "open-recipe";
   const when = options.pick ? ` data-date="${esc(options.date)}" data-meal="${esc(options.meal)}"` : "";
-  return recipes.map((recipe) => `<div class="recipe-row" data-id="${esc(recipe.id)}">
+  return recipes.map((recipe) => `<div class="recipe-row${options.pick ? " is-pick" : ""}" data-id="${esc(recipe.id)}">
       <button type="button" data-action="${action}" data-id="${esc(recipe.id)}"${when} class="recipe-open">
         ${recipeThumb(recipe)}
-        <span class="recipe-copy"><span>${esc(recipe.name)}</span>${recipe.needsReview ? `<span class="review-pill">Needs a look</span>` : ""}${lastMadeText(recipe) ? `<span class="small">${esc(lastMadeText(recipe))}</span>` : ""}</span>
+        <span class="recipe-copy"><span class="recipe-name">${esc(recipe.name)}</span>${recipe.needsReview ? `<span class="review-pill">Needs a look</span>` : ""}${lastMadeText(recipe) ? `<span class="small">${esc(lastMadeText(recipe))}</span>` : ""}</span>
       </button>
-      ${options.pick ? "" : `<button class="icon-btn add-plus" type="button" data-action="add-to-date" data-id="${esc(recipe.id)}" aria-label="Add to date">${plus()}</button>`}
-      ${options.pick ? "" : `<button class="icon-btn" type="button" data-action="recipe-row-menu" data-id="${esc(recipe.id)}" aria-label="More">${dots()}</button>`}
-      <button class="heart${recipe.favorite ? " is-on" : ""}" type="button" data-action="favorite" data-id="${esc(recipe.id)}" aria-label="${recipe.favorite ? "Unfavorite" : "Favorite"}">${heart(recipe.favorite)}</button>
+      ${options.pick ? "" : `<span class="recipe-actions"><button class="icon-btn add-plus" type="button" data-action="add-to-date" data-id="${esc(recipe.id)}" aria-label="Add to date">${plus()}</button><button class="icon-btn" type="button" data-action="recipe-row-menu" data-id="${esc(recipe.id)}" aria-label="More">${dots()}</button><button class="heart${recipe.favorite ? " is-on" : ""}" type="button" data-action="favorite" data-id="${esc(recipe.id)}" aria-label="${recipe.favorite ? "Unfavorite" : "Favorite"}">${heart(recipe.favorite)}</button></span>`}
     </div>`).join("");
 }
 
@@ -953,16 +942,6 @@ function activeRecipe() {
     return recipeById(recipe.id) || recipe;
   }
   return null;
-}
-
-function chefPicks() {
-  const context = state.page?.kind === "pick"
-    ? { date: state.page.date, meal: state.page.meal || "dinner" }
-    : mealContext();
-  if (!context) return [];
-  const entry = mealOn(context.date, context.meal);
-  const currentId = entry?.recipeId || null;
-  return (entry?.alternates || []).map((id) => recipeById(id)).filter((recipe) => recipe && recipe.id !== currentId);
 }
 
 function editRecipeHtml() {
@@ -1440,9 +1419,6 @@ async function onClick(event) {
     } else if (kind === "item" || kind === "add-item") {
       state.page = null;
       state.tab = "groceries";
-    } else if (kind === "day") {
-      state.page = null;
-      state.tab = "calendar";
     } else {
       state.page = null;
       if (kind === "recipe" || kind === "new-recipe") state.tab = "recipes";
@@ -1459,8 +1435,9 @@ async function onClick(event) {
     const date = button.dataset.date || nyToday();
     if (date < nyToday()) return;
     state.tab = "calendar";
-    state.page = { kind: "day", date };
+    state.page = null;
     state.sheet = null;
+    focusCalendarDate(date);
     render();
     return;
   }
@@ -1525,7 +1502,7 @@ async function onClick(event) {
     state.recipeBack = state.page?.kind === "item"
       ? { tab: "groceries", page: state.page }
       : state.tab === "calendar"
-        ? { tab: "calendar", page: state.page?.kind === "day" ? state.page : null }
+        ? { tab: "calendar", page: null }
         : fromToday
           ? { tab: "today", page: null }
           : { tab: "recipes", page: null };
@@ -1756,6 +1733,7 @@ async function signIn(passcode) {
 
 function openAddMeal(date, meal) {
   if (!date || date < nyToday()) return;
+  state.addOrigin = !state.page && state.tab === "today" ? "today" : "calendar";
   state.pickBack = { tab: state.tab, page: state.page ? { ...state.page } : null };
   state.recipeQuery = "";
   state.error = "";
@@ -1767,6 +1745,7 @@ function openAddMeal(date, meal) {
 
 function closePick() {
   const back = state.pickBack;
+  state.addOrigin = null;
   state.recipeQuery = "";
   state.error = "";
   state.sheet = null;
@@ -1778,6 +1757,7 @@ function closePick() {
 
 function openDatePicker(recipeId) {
   if (!recipeId) return;
+  state.addOrigin = "recipe";
   state.error = "";
   state.sheet = { kind: "pick-date", recipeId, month: `${nyToday().slice(0, 7)}-01` };
   render();
@@ -1825,7 +1805,7 @@ function askPlan(date, meal, recipeId) {
   if (!date || !recipeId || date < nyToday()) return;
   const existing = mealOn(date, slot);
   if (!existing) return planRecipe(date, slot, recipeId, false);
-  if (existing.recipeId === recipeId || (existing.also || []).includes(recipeId)) return showPlannedDay(date);
+  if (existing.recipeId === recipeId || (existing.also || []).includes(recipeId)) return finishAdd(date);
   const back = state.sheet?.kind === "pick-date" ? { kind: "pick-date", recipeId: state.sheet.recipeId, month: state.sheet.month } : null;
   state.error = "";
   state.sheet = {
@@ -1840,19 +1820,40 @@ function askPlan(date, meal, recipeId) {
   render();
 }
 
-function showPlannedDay(date) {
+function focusCalendarDate(date) {
+  const today = nyToday();
+  const inRollingWeek = date >= today && date <= addDays(today, 6);
+  if (state.calMode !== "month" && inRollingWeek) {
+    state.weekPick = date;
+    state.scrollTo = `week-${date}`;
+    return;
+  }
+  state.calMode = "month";
+  state.calStart = `${date.slice(0, 7)}-01`;
+  state.monthPick = date;
+  state.scrollTo = "month-panel";
+}
+
+function finishAdd(date) {
+  const origin = state.addOrigin || (state.page?.kind === "pick" ? "calendar" : "recipe");
+  state.addOrigin = null;
   state.recipeQuery = "";
   state.error = "";
-  state.pickBack = null;
   state.sheet = null;
-  if (date === nyToday()) {
-    state.tab = "today";
-    state.page = null;
-  } else {
-    state.tab = "calendar";
-    state.monthPick = date;
-    state.page = { kind: "day", date };
+  state.pickBack = null;
+  if (origin === "recipe") {
+    showNotice(`Added to ${formatUtc(date, { weekday: "short", month: "short", day: "numeric" })}`);
+    render();
+    return;
   }
+  state.page = null;
+  if (origin === "today") {
+    state.tab = "today";
+    render();
+    return;
+  }
+  state.tab = "calendar";
+  focusCalendarDate(date);
   render();
 }
 
@@ -1868,7 +1869,7 @@ async function planRecipe(date, meal, recipeId, keep = false) {
   pendingSlots.set(key, optimistic);
   state.plan = state.plan.filter((entry) => planKey(entry.date, entry.meal) !== key);
   state.plan.push(optimistic);
-  showPlannedDay(date);
+  finishAdd(date);
   try {
     const data = await api("/api/plan", { method: "POST", body });
     if (serial !== planSerial) return;
@@ -1885,6 +1886,7 @@ async function planRecipe(date, meal, recipeId, keep = false) {
     pendingSlots.delete(key);
     state.plan = state.plan.filter((entry) => planKey(entry.date, entry.meal) !== key);
     if (snapshot) state.plan.push(snapshot);
+    state.notice = "";
     state.error = error.message;
     render();
   }
@@ -2222,7 +2224,18 @@ async function deleteGrocery(id) {
   }
 }
 
+function showNotice(text) {
+  state.notice = text;
+  if (noticeTimer) clearTimeout(noticeTimer);
+  noticeTimer = setTimeout(() => {
+    state.notice = "";
+    noticeTimer = null;
+    render();
+  }, 2200);
+}
+
 function toastHtml() {
+  if (state.notice) return `<div class="toast toast-note" role="status"><span>${esc(state.notice)}</span></div>`;
   if (!state.undo) return "";
   const verb = state.undo.kind === "delete" ? "deleted" : state.undo.kind === "plan" || state.undo.kind === "plan-also" ? "removed" : "checked off";
   return `<div class="toast" role="status"><span>${esc(state.undo.name)} ${verb}</span><button type="button" data-action="undo-check">Undo</button></div>`;

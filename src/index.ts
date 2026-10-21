@@ -17,6 +17,7 @@ import {
   listRecipes,
   replaceEvents,
   savePlan,
+  syncWindowGroceries,
   setPlanAlternates,
   updateRecipe,
   getRecipe,
@@ -179,6 +180,7 @@ async function handleApi(request: Request, env: Env, path: string): Promise<Resp
   if (!allowed) throw new HttpError(401, "Sign in, or send the helper password.");
 
   if (path === "/api/items" && method === "GET") {
+    await syncWindowGroceries(env.DB);
     return json({ items: await withGroceryRecipes(env.DB, await listItems(env.DB)) });
   }
   if (path === "/api/items" && method === "DELETE") {
