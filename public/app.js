@@ -31,6 +31,7 @@ const state = {
   scrollTo: null,
   prepDone: {},
   undo: null,
+  undoFading: false,
   swipeId: null,
   todayPanel: "ingredients",
   todayServings: null,
@@ -69,6 +70,9 @@ document.addEventListener("visibilitychange", () => {
 let gesture = null;
 let wakeLock = null;
 let undoTimer = null;
+let undoFadeTimer = null;
+const UNDO_MS = 2000;
+const UNDO_FADE_MS = 400;
 let noticeTimer = null;
 let checkGeneration = 0;
 let refreshSerial = 0;
@@ -1947,7 +1951,7 @@ async function removeMeal(id) {
     const marker = `${also[1]}:${also[2]}`;
     pendingAlso.add(marker);
     state.sheet = null;
-    if (parent) showUndo({ id, name, kind: "plan-also", snapshot: { date: parent.date, meal: parent.meal, recipeId: also[2] } }, 3000);
+    if (parent) showUndo({ id, name, kind: "plan-also", snapshot: { date: parent.date, meal: parent.meal, recipeId: also[2] } });
     render();
     const serial = bumpRemove(id);
     const job = api(`/api/plan/${also[1]}/also/${also[2]}`, { method: "DELETE" })
@@ -1976,7 +1980,7 @@ async function removeMeal(id) {
     pendingDeletes.add(id);
   }
   state.sheet = null;
-  if (snapshot) showUndo({ id, name, kind: "plan", snapshot }, 3000);
+  if (snapshot) showUndo({ id, name, kind: "plan", snapshot });
   render();
   const serial = bumpRemove(id);
   const job = api(`/api/plan/${id}`, { method: "DELETE" })
@@ -2188,20 +2192,35 @@ async function undoCheck() {
   }
 }
 
-function clearUndo() {
+function clearUndoTimers() {
   if (undoTimer) clearTimeout(undoTimer);
+  if (undoFadeTimer) clearTimeout(undoFadeTimer);
   undoTimer = null;
-  state.undo = null;
+  undoFadeTimer = null;
 }
 
-function showUndo(undo, ms = 5000) {
+function clearUndo() {
+  clearUndoTimers();
+  state.undo = null;
+  state.undoFading = false;
+}
+
+function showUndo(undo) {
   state.undo = undo;
-  if (undoTimer) clearTimeout(undoTimer);
+  state.undoFading = false;
+  clearUndoTimers();
+  undoFadeTimer = setTimeout(() => {
+    if (!state.undo) return;
+    state.undoFading = true;
+    document.querySelector(".toast:not(.toast-note)")?.classList.add("is-fading");
+  }, UNDO_MS - UNDO_FADE_MS);
   undoTimer = setTimeout(() => {
     state.undo = null;
+    state.undoFading = false;
     undoTimer = null;
+    undoFadeTimer = null;
     render();
-  }, ms);
+  }, UNDO_MS);
 }
 
 async function deleteGrocery(id) {
@@ -2238,7 +2257,7 @@ function toastHtml() {
   if (state.notice) return `<div class="toast toast-note" role="status"><span>${esc(state.notice)}</span></div>`;
   if (!state.undo) return "";
   const verb = state.undo.kind === "delete" ? "deleted" : state.undo.kind === "plan" || state.undo.kind === "plan-also" ? "removed" : "checked off";
-  return `<div class="toast" role="status"><span>${esc(state.undo.name)} ${verb}</span><button type="button" data-action="undo-check">Undo</button></div>`;
+  return `<div class="toast${state.undoFading ? " is-fading" : ""}" role="status"><span>${esc(state.undo.name)} ${verb}</span><button type="button" data-action="undo-check">Undo</button></div>`;
 }
 
 async function markAll() {

@@ -1237,7 +1237,10 @@ body:has(.month-screen),
   border-radius: 14px;
   background: #1c1c1c;
   color: white;
+  transition: opacity 400ms linear;
 }
+
+.toast.is-fading { opacity: 0; }
 
 .toast button { color: #b6e38a; font-weight: 800; min-height: 44px; min-width: 64px; }
 .toast-note { justify-content: center; padding: 0.85rem 1rem; font-weight: 650; text-align: center; }
