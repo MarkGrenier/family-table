@@ -236,7 +236,6 @@ describe("grocery API", () => {
     expect(item.name).toBe("Oat milk");
     expect(item.checked).toBe(false);
     expect(item.staple).toBe(false);
-    expect(item.storeTag).toBeNull();
 
     const patched = await call(`/api/items/${item.id}`, {
       method: "PATCH",
@@ -246,55 +245,11 @@ describe("grocery API", () => {
     expect(patched.status).toBe(200);
     expect((patched.json?.item as Json).checked).toBe(true);
     expect((patched.json?.item as Json).quantityNote).toBe("1 carton");
-    expect((patched.json?.item as Json).storeTag).toBeNull();
 
     const removed = await call(`/api/items/${item.id}`, { method: "DELETE", token });
     expect(removed.status).toBe(200);
     expect((await call(`/api/items/${item.id}`, { method: "DELETE", token })).status).toBe(404);
     expect((await call("/api/items", { token })).json).toEqual({ items: [] });
-  });
-
-  it("saves a custom store and keeps preset items on their store", async () => {
-    const token = env.API_TOKEN;
-    const blank = await call("/api/stores", { method: "POST", token, body: { name: "   " } });
-    expect(blank.status).toBe(400);
-    const preset = await call("/api/stores", { method: "POST", token, body: { name: "Local store" } });
-    expect(preset.status).toBe(400);
-
-    const created = await call("/api/stores", { method: "POST", token, body: { name: " Target " } });
-    expect(created.status).toBe(201);
-    expect((created.json?.store as Json).name).toBe("Target");
-    const again = await call("/api/stores", { method: "POST", token, body: { name: "target" } });
-    expect(again.status).toBe(200);
-    expect((again.json?.store as Json).name).toBe("Target");
-
-    const tagged = await call("/api/items", {
-      method: "POST",
-      token,
-      body: { name: "Paper plates", store: "local", category: "shelf", section: "household", storeTag: "Trader Joe's" },
-    });
-    expect(tagged.status).toBe(201);
-    expect((tagged.json?.item as Json).store).toBe("local");
-    expect((tagged.json?.item as Json).storeTag).toBe("Trader Joe's");
-
-    const listed = await call("/api/stores", { token });
-    const names = ((listed.json?.stores as Json[]) || []).map((row) => row.name);
-    expect(names).toEqual(["Target", "Trader Joe's"]);
-
-    const cleared = await call(`/api/items/${(tagged.json?.item as Json).id}`, {
-      method: "PATCH",
-      token,
-      body: { storeTag: "", store: "local", category: "shelf" },
-    });
-    expect((cleared.json?.item as Json).storeTag).toBe("");
-    const back = await call(`/api/items/${(tagged.json?.item as Json).id}`, {
-      method: "PATCH",
-      token,
-      body: { store: "costco", category: "shelf", storeTag: null },
-    });
-    expect((back.json?.item as Json).store).toBe("costco");
-    expect((back.json?.item as Json).storeTag).toBeNull();
-    expect((await call(`/api/items/${(tagged.json?.item as Json).id}`, { method: "DELETE", token })).status).toBe(200);
   });
 
   it("hides a grocery item and puts the same one back", async () => {
@@ -335,10 +290,16 @@ describe("grocery API", () => {
     expect((again.json?.item as Json).id).not.toBe(line.id);
   });
 
-  it("only allows aisles that belong to the store", async () => {
+  it("lets every store use produce, shelf, refrigerated, and frozen", async () => {
     const token = env.API_TOKEN;
-    expect((await call("/api/items", { method: "POST", token, body: { name: "Bananas", store: "costco", category: "produce" } })).status).toBe(400);
-    expect((await call("/api/items", { method: "POST", token, body: { name: "Soap", store: "amazon", category: "frozen" } })).status).toBe(400);
+    const costcoProduce = await call("/api/items", { method: "POST", token, body: { name: "Bananas", store: "costco", category: "produce" } });
+    expect(costcoProduce.status).toBe(201);
+    expect((costcoProduce.json?.item as Json).storeName).toBe("Costco");
+    expect((costcoProduce.json?.item as Json).category).toBe("produce");
+    const amazonFrozen = await call("/api/items", { method: "POST", token, body: { name: "Soap", store: "amazon", category: "frozen" } });
+    expect(amazonFrozen.status).toBe(201);
+    expect((amazonFrozen.json?.item as Json).storeName).toBe("Amazon");
+    expect((amazonFrozen.json?.item as Json).category).toBe("frozen");
     expect((await call("/api/items", { method: "POST", token, body: { name: "", store: "local", category: "produce" } })).status).toBe(400);
 
     const local = await call("/api/items", {
@@ -364,7 +325,48 @@ describe("grocery API", () => {
 
     const id = (local.json?.item as Json).id;
     const moved = await call(`/api/items/${id}`, { method: "PATCH", token, body: { store: "amazon" } });
-    expect(moved.status).toBe(400);
+    expect(moved.status).toBe(200);
+    expect((moved.json?.item as Json).storeName).toBe("Amazon");
+    expect((moved.json?.item as Json).category).toBe("produce");
+  });
+
+  it("renames and removes a store without losing the item", async () => {
+    const token = env.API_TOKEN;
+    const listed = await call("/api/stores", { token });
+    expect(((listed.json?.stores as Json[]) || []).map((store) => store.name)).toEqual(["Local store", "Costco", "Amazon"]);
+
+    const created = await call("/api/stores", { method: "POST", token, body: { name: " Target " } });
+    expect(created.status).toBe(201);
+    const id = (created.json?.store as Json).id as string;
+    const again = await call("/api/stores", { method: "POST", token, body: { name: "target" } });
+    expect(again.status).toBe(200);
+    expect((again.json?.store as Json).id).toBe(id);
+    expect((await call("/api/stores", { method: "POST", token, body: { name: " " } })).status).toBe(400);
+
+    const item = await call("/api/items", {
+      method: "POST",
+      token,
+      body: { name: "Paper plates", store: "Target", category: "shelf" },
+    });
+    expect(item.status).toBe(201);
+    expect((item.json?.item as Json).storeName).toBe("Target");
+
+    const renamed = await call(`/api/stores/${id}`, { method: "PATCH", token, body: { name: "Target Plaza" } });
+    expect((renamed.json?.store as Json).name).toBe("Target Plaza");
+    const named = ((await call("/api/items", { token })).json?.items ?? []) as Json[];
+    expect(named.find((entry) => entry.name === "Paper plates")?.storeName).toBe("Target Plaza");
+
+    expect((await call(`/api/stores/${id}`, { method: "DELETE", token })).status).toBe(200);
+    const cleared = ((await call("/api/items", { token })).json?.items ?? []) as Json[];
+    expect(cleared.find((entry) => entry.name === "Paper plates")?.storeName).toBeNull();
+
+    const costco = await call("/api/items", {
+      method: "POST",
+      token,
+      body: { name: "Oat milk", store: "costco", category: "refrigerated" },
+    });
+    expect((costco.json?.item as Json).store).toBe("costco");
+    expect((costco.json?.item as Json).storeName).toBe("Costco");
   });
 
   it("keeps staples and can add a bought one again", async () => {
@@ -2124,17 +2126,15 @@ describe("grocery API", () => {
     expect(pointerUp).not.toContain("openItem(id)");
     const addForm = js.slice(js.indexOf("function addHtml"), js.indexOf("function newRecipeHtml"));
     expect(addForm.match(/type="submit"/g)).toHaveLength(1);
-    expect(addForm).toContain('class="sheet add-sheet"');
-    expect(addForm).toContain("storeOptionsHtml");
     expect(addForm).toContain('name="quantityNote"');
-    expect(addForm).toContain('name="brand"');
-    expect(addForm).toContain('name="notes"');
-    expect(addForm).not.toContain("checkIcon");
-    const storesUi = js.slice(js.indexOf("function storeOptionsHtml"), js.indexOf("function newStoreHtml"));
-    expect(storesUi).toContain('name="store"');
-    expect(storesUi).toContain("No store");
-    expect(storesUi).toContain("Add store…");
-    expect(storesUi).toContain('"__add__"');
+    expect(addForm).toContain("storeOptionsHtml");
+    expect(addForm).toContain('class="sheet add-sheet"');
+    expect(addForm).not.toContain("choiceHtml(STORES");
+    expect(js).toContain("Add store…");
+    expect(js).toContain("Manage stores");
+    expect(js).toContain("Shelf-stable");
+    expect(js).toContain('data-action="confirm-remove-store"');
+    expect(js).toContain("will have no store.");
     const backdrop = js.slice(js.indexOf('contains("sheet")'), js.indexOf('closest("[data-action]")'));
     expect(backdrop).toContain("dismissSheet()");
     expect(backdrop).toContain("closePick()");
@@ -2147,9 +2147,11 @@ describe("grocery API", () => {
     expect(dismiss).not.toContain("confirm-remove");
     expect(dismiss).not.toContain("saveItem");
     expect(js).toContain("storeTag");
+    expect(addForm).toContain('name="brand"');
+    expect(addForm).toContain('name="notes"');
+    expect(addForm).not.toContain("checkIcon");
     const editItem = js.slice(js.indexOf('state.sheet?.kind === "edit-item"'), js.indexOf('state.sheet?.kind === "recipe-menu"'));
     expect(editItem).toContain("usedInHtml");
-    expect(editItem).toContain("storeOptionsHtml");
     expect(editItem).not.toContain("sheet-delete");
     expect(js).toContain('data-action="delete-item"');
     expect(js).toContain('name="ing-name"');
@@ -2231,9 +2233,9 @@ describe("grocery API", () => {
     expect(css).toContain("opacity 300ms");
     expect(css).toContain(".month-panel-head.is-today .week-date");
     const shell = await (await exports.default.fetch("https://grocery.test/sw.js")).text();
-    expect(shell).toContain("grocery-shell-v57");
-    expect(shell).toContain("/styles.css?v=50");
-    expect(shell).toContain("/app.js?v=54");
+    expect(shell).toContain("grocery-shell-v58");
+    expect(shell).toContain("/styles.css?v=51");
+    expect(shell).toContain("/app.js?v=55");
     const monthGrid = js.slice(js.indexOf("function monthGrid"), js.indexOf("function monthCell"));
     expect(monthGrid).toContain('["S", "M", "T", "W", "T", "F", "S"]');
     expect(monthGrid).toContain("sundayOf(first)");

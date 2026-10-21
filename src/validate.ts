@@ -25,6 +25,7 @@ export type ItemInput = {
   substitute?: string | null;
   notes?: string | null;
   storeTag?: string | null;
+  storeRequest?: string;
 };
 
 export type ItemPatch = {
@@ -42,6 +43,7 @@ export type ItemPatch = {
   substitute?: string | null;
   notes?: string | null;
   storeTag?: string | null;
+  storeRequest?: string;
   deleted?: boolean;
 };
 
@@ -71,17 +73,25 @@ export function cleanStore(value: unknown): Store {
   throw new HttpError(400, "Pick Costco, the local store, or Amazon.");
 }
 
-export function cleanStoreTag(value: unknown): string | null {
-  if (value == null) return null;
+const AISLES = ["produce", "shelf", "refrigerated", "frozen", "general"] as const;
+
+export function cleanStoreRequest(value: unknown): string {
   if (typeof value !== "string") throw new HttpError(400, "The store name should be words.");
   const text = value.trim().replace(/\s+/g, " ");
-  if (!text) return "";
+  if (!text) throw new HttpError(400, "Type a store name.");
   if (text.length > 40) throw new HttpError(400, "That store name is too long.");
-  const lower = text.toLowerCase();
-  if (lower === "local" || lower === "costco" || lower === "amazon" || lower === "local store" || lower === "no store") {
-    throw new HttpError(400, "That store is already on the list.");
-  }
   return text;
+}
+
+export function cleanAisle(value: unknown, storeHint?: string): string {
+  if (value == null || value === "") {
+    if (storeHint === "amazon") return "general";
+    throw new HttpError(400, "Pick an aisle for that store.");
+  }
+  if (typeof value !== "string" || !(AISLES as readonly string[]).includes(value)) {
+    throw new HttpError(400, "Pick an aisle for that store.");
+  }
+  return value;
 }
 
 export function cleanCategory(value: unknown, store: Store): string {
@@ -147,12 +157,14 @@ export function cleanAsin(value: unknown): string | null {
 }
 
 export function parseNewItem(body: Record<string, unknown>): ItemInput {
-  const store = cleanStore(body.store);
+  const storeRequest = body.store === "" ? "" : cleanStoreRequest(body.store);
+  const category = cleanAisle(body.category, storeRequest);
   return {
     name: cleanName(body.name),
     quantityNote: cleanOptional(body.quantityNote, "The note", 140),
-    store,
-    category: cleanCategory(body.category, store),
+    store: "local",
+    storeRequest,
+    category,
     checked: body.checked == null ? false : cleanBool(body.checked, "Bought"),
     brand: cleanOptional(body.brand, "Brand", 80),
     asin: cleanAsin(body.asin),
@@ -162,7 +174,6 @@ export function parseNewItem(body: Record<string, unknown>): ItemInput {
     imageUrl: cleanOptional(body.imageUrl, "The photo", 500),
     substitute: cleanOptional(body.substitute, "The substitute", 280),
     notes: cleanOptional(body.notes, "The note", 500),
-    storeTag: body.storeTag === undefined ? null : cleanStoreTag(body.storeTag),
   };
 }
 
@@ -176,11 +187,8 @@ export function parseItemPatch(body: Record<string, unknown>): ItemPatch {
   const patch: ItemPatch = {};
   if ("name" in body) patch.name = cleanName(body.name);
   if ("quantityNote" in body) patch.quantityNote = cleanOptional(body.quantityNote, "The note", 140);
-  if ("store" in body) patch.store = cleanStore(body.store);
-  if ("category" in body) {
-    if (typeof body.category !== "string") throw new HttpError(400, "Pick an aisle for that store.");
-    patch.category = body.category;
-  }
+  if ("store" in body) patch.storeRequest = body.store === "" ? "" : cleanStoreRequest(body.store);
+  if ("category" in body) patch.category = cleanAisle(body.category, typeof body.store === "string" ? body.store : undefined);
   if ("checked" in body) patch.checked = cleanBool(body.checked, "Bought");
   if ("brand" in body) patch.brand = cleanOptional(body.brand, "Brand", 80);
   if ("asin" in body) patch.asin = cleanAsin(body.asin);
@@ -190,7 +198,6 @@ export function parseItemPatch(body: Record<string, unknown>): ItemPatch {
   if ("imageUrl" in body) patch.imageUrl = cleanOptional(body.imageUrl, "The photo", 500);
   if ("substitute" in body) patch.substitute = cleanOptional(body.substitute, "The substitute", 280);
   if ("notes" in body) patch.notes = cleanOptional(body.notes, "The note", 500);
-  if ("storeTag" in body) patch.storeTag = cleanStoreTag(body.storeTag);
   if ("deleted" in body) patch.deleted = cleanBool(body.deleted, "Deleted");
   if (Object.keys(patch).length === 0) {
     throw new HttpError(400, "Nothing to change.");

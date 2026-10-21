@@ -448,6 +448,7 @@ h1, .title {
 .add-form .green-btn { width: 100%; margin: 0.45rem 0 0.9rem; }
 .add-sheet .sheet-card,
 .pick-sheet .sheet-card { max-height: calc(100dvh - 4.25rem); }
+.aisle-head { margin: 0.45rem 0 0.1rem; color: #9a9aa0; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }
 .store-options { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.15rem 0 0.35rem; }
 .store-choice {
   min-height: 36px;
@@ -459,9 +460,9 @@ h1, .title {
   font-weight: 650;
 }
 .store-choice.is-on { border-color: var(--green); background: #f3fbe9; color: var(--green-dark); }
-.new-store { display: flex; gap: 0.5rem; align-items: center; margin: 0.15rem 0 0.4rem; }
+.new-store, .store-manage { display: flex; gap: 0.45rem; align-items: center; margin: 0.35rem 0; }
 .new-store.is-hidden { display: none; }
-.new-store .field-box { flex: 1; }
+.new-store .field-box, .store-manage .field-box { flex: 1; }
 .used-in { margin-top: 0.85rem; }
 .used-line {
   display: flex;

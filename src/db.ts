@@ -2,7 +2,7 @@ import { HttpError } from "./http";
 import { groceryKey, groceryName, type FoodSection } from "./ingredients";
 import {
   barcodeKeys,
-  mergedCategory,
+  CATEGORIES,
   type ItemInput,
   type ItemPatch,
   type StapleInput,
@@ -26,6 +26,7 @@ export type Item = {
   substitute: string | null;
   notes: string | null;
   storeTag: string | null;
+  storeName: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -113,6 +114,7 @@ function toItem(row: ItemRow): Item {
     substitute: row.substitute,
     notes: row.notes,
     storeTag: row.store_tag,
+    storeName: null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -139,11 +141,101 @@ function barcodeClause(code: string): { sql: string; keys: string[] } {
   return { sql: `barcode IN (${keys.map(() => "?").join(", ")})`, keys };
 }
 
+export type GroceryStore = { id: string; name: string };
+
+const PRESET_STORE_NAMES: Record<string, string> = {
+  local: "Local store",
+  costco: "Costco",
+  amazon: "Amazon",
+};
+
+export async function listStores(db: D1Database): Promise<GroceryStore[]> {
+  const rows = await db.prepare(`SELECT id, name FROM stores ORDER BY created_at ASC, name COLLATE NOCASE ASC`).all<GroceryStore>();
+  return rows.results ?? [];
+}
+
+export async function findStore(db: D1Database, requested: string): Promise<GroceryStore | null> {
+  const row = await db
+    .prepare(`SELECT id, name FROM stores WHERE id = ? OR name = ? LIMIT 1`)
+    .bind(requested, requested)
+    .first<GroceryStore>();
+  return row ?? null;
+}
+
+export async function ensureStore(db: D1Database, requested: string): Promise<{ store: GroceryStore; created: boolean }> {
+  const found = await findStore(db, requested);
+  if (found) return { store: found, created: false };
+  const preset = requested === "local" || requested === "costco" || requested === "amazon";
+  const id = preset ? requested : crypto.randomUUID();
+  const name = PRESET_STORE_NAMES[requested] || requested;
+  try {
+    await db.prepare(`INSERT INTO stores (id, name, created_at) VALUES (?, ?, ?)`).bind(id, name, nowIso()).run();
+    return { store: { id, name }, created: true };
+  } catch (error) {
+    const raced = await findStore(db, name);
+    if (raced) return { store: raced, created: false };
+    throw error;
+  }
+}
+
+export async function renameStore(db: D1Database, id: string, name: string): Promise<GroceryStore> {
+  const existing = await db.prepare(`SELECT id, name FROM stores WHERE id = ?`).bind(id).first<GroceryStore>();
+  if (!existing) throw new HttpError(404, "That store is already gone.");
+  const clash = await db.prepare(`SELECT id FROM stores WHERE name = ? AND id <> ?`).bind(name, id).first<{ id: string }>();
+  if (clash) throw new HttpError(400, "That store is already on the list.");
+  await db.prepare(`UPDATE stores SET name = ? WHERE id = ?`).bind(name, id).run();
+  return { id, name };
+}
+
+export async function deleteStore(db: D1Database, id: string): Promise<void> {
+  const existing = await db.prepare(`SELECT id FROM stores WHERE id = ?`).bind(id).first<{ id: string }>();
+  if (!existing) throw new HttpError(404, "That store is already gone.");
+  const now = nowIso();
+  await db.batch([
+    db
+      .prepare(`UPDATE items SET store_tag = '', updated_at = ? WHERE store_tag = ? OR (store_tag IS NULL AND store = ?)`)
+      .bind(now, id, id),
+    db.prepare(`DELETE FROM stores WHERE id = ?`).bind(id),
+  ]);
+}
+
+function legalPair(store: Store, category: string): boolean {
+  return (CATEGORIES[store] as readonly string[]).includes(category);
+}
+
+function localAisle(category: string): string {
+  if (category === "produce" || category === "shelf" || category === "refrigerated" || category === "frozen") return category;
+  return "shelf";
+}
+
+export async function placeStore(
+  db: D1Database,
+  requested: string,
+  category: string,
+): Promise<{ store: Store; category: string; storeTag: string }> {
+  if (!requested) return { store: "local", category: localAisle(category), storeTag: "" };
+  const { store: row } = await ensureStore(db, requested);
+  if ((row.id === "costco" || row.id === "local" || row.id === "amazon") && legalPair(row.id, category)) {
+    return { store: row.id, category, storeTag: row.id };
+  }
+  return { store: "local", category: localAisle(category), storeTag: row.id };
+}
+
+async function attachStoreNames(db: D1Database, items: Item[]): Promise<Item[]> {
+  if (!items.length) return items;
+  const stores = await listStores(db);
+  const names = new Map(stores.map((store) => [store.id, store.name]));
+  return items.map((item) => {
+    const id = item.storeTag === "" ? "" : item.storeTag || item.store;
+    return { ...item, storeName: id ? names.get(id) ?? null : null };
+  });
+}
+
 export async function listItems(db: D1Database): Promise<Item[]> {
   const result = await db
     .prepare(`SELECT ${ITEM_COLUMNS} FROM items WHERE deleted_at IS NULL ORDER BY created_at ASC`)
     .all<ItemRow>();
-  return result.results.map(toItem);
+  return attachStoreNames(db, result.results.map(toItem));
 }
 
 export async function listStaples(db: D1Database): Promise<Staple[]> {
@@ -155,7 +247,7 @@ export async function listStaples(db: D1Database): Promise<Staple[]> {
 
 export async function getItem(db: D1Database, id: string): Promise<Item | null> {
   const row = await db.prepare(`SELECT ${ITEM_COLUMNS} FROM items WHERE id = ?`).bind(id).first<ItemRow>();
-  return row ? toItem(row) : null;
+  return row ? (await attachStoreNames(db, [toItem(row)]))[0] : null;
 }
 
 async function getStaple(db: D1Database, id: string): Promise<Staple | null> {
@@ -260,7 +352,6 @@ export async function createItem(db: D1Database, input: ItemInput): Promise<Item
   }
 
   const stapleFlag = remember ? 1 : 0;
-  const storeTag = input.storeTag ? (await addCustomStore(db, input.storeTag)).name : input.storeTag === "" ? "" : null;
   statements.push(
     db
       .prepare(`INSERT INTO items (${ITEM_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
@@ -280,7 +371,7 @@ export async function createItem(db: D1Database, input: ItemInput): Promise<Item
         input.imageUrl ?? null,
         input.substitute ?? null,
         input.notes ?? null,
-        storeTag,
+        input.storeTag === undefined ? null : input.storeTag,
         now,
         now,
       ),
@@ -305,14 +396,23 @@ export async function updateItem(db: D1Database, id: string, patch: ItemPatch): 
   const existing = await getItem(db, id);
   if (!existing) throw new HttpError(404, "That item isn't on the list anymore.");
 
-  const store = patch.store ?? existing.store;
-  const category = mergedCategory(store, patch.category ?? existing.category);
+  let store = existing.store;
+  let category = existing.category;
+  let storeTag = existing.storeTag;
+  if (patch.storeRequest !== undefined || patch.category !== undefined) {
+    const requested = patch.storeRequest !== undefined ? patch.storeRequest : existing.storeTag === "" ? "" : existing.storeTag || existing.store;
+    const placed = await placeStore(db, requested, patch.category ?? existing.category);
+    store = placed.store;
+    category = placed.category;
+    storeTag = placed.storeTag;
+  }
   const next: Item = {
     ...existing,
     name: patch.name ?? existing.name,
     quantityNote: patch.quantityNote === undefined ? existing.quantityNote : patch.quantityNote,
     store,
     category,
+    storeTag,
     checked: patch.checked ?? existing.checked,
     brand: patch.brand === undefined ? existing.brand : patch.brand,
     asin: patch.asin === undefined ? existing.asin : patch.asin,
@@ -322,14 +422,6 @@ export async function updateItem(db: D1Database, id: string, patch: ItemPatch): 
     imageUrl: patch.imageUrl === undefined ? existing.imageUrl : patch.imageUrl,
     substitute: patch.substitute === undefined ? existing.substitute : patch.substitute,
     notes: patch.notes === undefined ? existing.notes : patch.notes,
-    storeTag:
-      patch.storeTag === undefined
-        ? existing.storeTag
-        : patch.storeTag
-          ? (await addCustomStore(db, patch.storeTag)).name
-          : patch.storeTag === ""
-            ? ""
-            : null,
   };
 
   const now = nowIso();
@@ -344,6 +436,7 @@ export async function updateItem(db: D1Database, id: string, patch: ItemPatch): 
   const touchesTemplate =
     patch.staple !== undefined ||
     patch.name !== undefined ||
+    patch.storeRequest !== undefined ||
     patch.store !== undefined ||
     patch.category !== undefined ||
     patch.brand !== undefined ||
@@ -438,18 +531,12 @@ export async function deleteItem(db: D1Database, id: string): Promise<void> {
   ]);
 }
 
-export async function clearChecked(db: D1Database, store: Store): Promise<number> {
-  const row = await db
-    .prepare(`SELECT COUNT(*) AS n FROM items WHERE store = ? AND checked = 1`)
-    .bind(store)
-    .first<{ n: number }>();
+export async function clearChecked(db: D1Database, storeId: string): Promise<number> {
+  const match = `checked = 1 AND (store_tag = ? OR (store_tag IS NULL AND store = ?))`;
+  const row = await db.prepare(`SELECT COUNT(*) AS n FROM items WHERE ${match}`).bind(storeId, storeId).first<{ n: number }>();
   await db.batch([
-    db
-      .prepare(
-        `DELETE FROM grocery_sources WHERE item_id IN (SELECT id FROM items WHERE store = ? AND checked = 1)`,
-      )
-      .bind(store),
-    db.prepare(`DELETE FROM items WHERE store = ? AND checked = 1`).bind(store),
+    db.prepare(`DELETE FROM grocery_sources WHERE item_id IN (SELECT id FROM items WHERE ${match})`).bind(storeId, storeId),
+    db.prepare(`DELETE FROM items WHERE ${match}`).bind(storeId, storeId),
   ]);
   return Number(row?.n ?? 0);
 }
@@ -536,24 +623,6 @@ export async function addStapleToList(
 }
 
 export type OnHandItem = { id: string; name: string };
-
-export async function listCustomStores(db: D1Database): Promise<{ name: string }[]> {
-  const rows = await db.prepare(`SELECT name FROM custom_stores ORDER BY name COLLATE NOCASE`).all<{ name: string }>();
-  return rows.results ?? [];
-}
-
-export async function addCustomStore(db: D1Database, name: string): Promise<{ name: string; created: boolean }> {
-  const existing = await db.prepare(`SELECT name FROM custom_stores WHERE name = ?`).bind(name).first<{ name: string }>();
-  if (existing) return { name: existing.name, created: false };
-  try {
-    await db.prepare(`INSERT INTO custom_stores (name, created_at) VALUES (?, ?)`).bind(name, nowIso()).run();
-    return { name, created: true };
-  } catch (error) {
-    const raced = await db.prepare(`SELECT name FROM custom_stores WHERE name = ?`).bind(name).first<{ name: string }>();
-    if (raced) return { name: raced.name, created: false };
-    throw error;
-  }
-}
 
 export async function listOnHand(db: D1Database): Promise<OnHandItem[]> {
   const rows = await db
