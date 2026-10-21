@@ -556,14 +556,14 @@ function mealLabel(meal) {
 function monthGrid(iso, selected, action = "select-day") {
   const [year, month] = iso.split("-").map(Number);
   const first = `${iso.slice(0, 7)}-01`;
-  const start = mondayOf(first);
+  const start = sundayOf(first);
   const cells = [];
   for (let index = 0; index < 42; index += 1) {
     const date = addDays(start, index);
     if (index >= 35 && Number(date.slice(5, 7)) !== month) break;
     cells.push(date);
   }
-  const names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+  const names = ["S", "M", "T", "W", "T", "F", "S"];
   return `<div class="month-names">${names.map((name) => `<span>${name}</span>`).join("")}</div>
     <div class="month-grid">${cells.map((date) => monthCell(date, Number(date.slice(5, 7)) === month, selected, action)).join("")}</div>`;
 }
@@ -2530,10 +2530,10 @@ function addDays(iso, count) {
   date.setUTCDate(date.getUTCDate() + count);
   return date.toISOString().slice(0, 10);
 }
-function mondayOf(iso) {
+function sundayOf(iso) {
   const [year, month, day] = iso.split("-").map(Number);
   const weekday = new Date(Date.UTC(year, month - 1, day)).getUTCDay();
-  return addDays(iso, weekday === 0 ? -6 : 1 - weekday);
+  return addDays(iso, -weekday);
 }
 function mergeDated(existing, incoming, range) {
   const prior = Array.isArray(existing) ? existing : [];
@@ -2563,7 +2563,7 @@ function visibleRange() {
   let to;
   if (state.calMode === "month") {
     const start = state.calStart || `${today.slice(0, 7)}-01`;
-    const gridStart = mondayOf(`${start.slice(0, 7)}-01`);
+    const gridStart = sundayOf(`${start.slice(0, 7)}-01`);
     const gridEnd = addDays(gridStart, 41);
     from = gridStart;
     to = gridEnd;
@@ -2575,7 +2575,7 @@ function visibleRange() {
     to = addDays(end, 1);
   }
   if (state.sheet?.kind === "pick-date" && state.sheet.month) {
-    const gridStart = mondayOf(`${String(state.sheet.month).slice(0, 7)}-01`);
+    const gridStart = sundayOf(`${String(state.sheet.month).slice(0, 7)}-01`);
     const gridEnd = addDays(gridStart, 41);
     if (gridStart < from) from = gridStart;
     if (gridEnd > to) to = gridEnd;

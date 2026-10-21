@@ -2141,9 +2141,16 @@ describe("grocery API", () => {
     expect(css).toContain("opacity 300ms");
     expect(css).toContain(".month-panel-head.is-today .week-date");
     const shell = await (await exports.default.fetch("https://grocery.test/sw.js")).text();
-    expect(shell).toContain("grocery-shell-v54");
+    expect(shell).toContain("grocery-shell-v55");
     expect(shell).toContain("/styles.css?v=48");
-    expect(shell).toContain("/app.js?v=51");
+    expect(shell).toContain("/app.js?v=52");
+    const monthGrid = js.slice(js.indexOf("function monthGrid"), js.indexOf("function monthCell"));
+    expect(monthGrid).toContain('["S", "M", "T", "W", "T", "F", "S"]');
+    expect(monthGrid).toContain("sundayOf(first)");
+    expect(monthGrid).not.toContain("mondayOf");
+    const weekList = js.slice(js.indexOf("function weekListHtml"), js.indexOf("function monthHtml"));
+    expect(weekList).toContain("addDays(today, 6)");
+    expect(weekList).not.toContain("sundayOf");
     expect(css).toContain(".toast.is-fading");
     expect(css).toContain("opacity 400ms linear");
     expect(js).toContain('getElementById("splash")');
