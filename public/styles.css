@@ -449,20 +449,69 @@ h1, .title {
 .add-sheet .sheet-card,
 .pick-sheet .sheet-card { max-height: calc(100dvh - 4.25rem); }
 .aisle-head { margin: 0.45rem 0 0.1rem; color: #9a9aa0; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }
-.store-options { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.15rem 0 0.35rem; }
-.store-choice {
-  min-height: 36px;
-  padding: 0.3rem 0.75rem;
+.store-field { margin: 0.15rem 0 0.1rem; }
+.store-current {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  width: 100%;
+  min-height: 44px;
+  padding: 0.35rem 0.75rem;
   border: 1px solid var(--line);
-  border-radius: 999px;
+  border-radius: 12px;
   background: #fff;
-  color: inherit;
+  text-align: left;
+}
+.store-current span { color: var(--muted); font-weight: 650; }
+.store-current strong { font-weight: 700; }
+.store-menu { margin-top: 0.35rem; }
+.store-menu.is-hidden, .more-details.is-hidden { display: none; }
+.store-list {
+  max-height: 11rem;
+  margin-top: 0.3rem;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+}
+.store-line, .store-rename, .store-confirm {
+  display: flex;
+  align-items: center;
+  min-height: 40px;
+  border-bottom: 1px solid var(--line);
+}
+.store-list > :last-child { border-bottom: 0; }
+.store-line.is-on { background: #f3fbe9; }
+.store-pick, button.store-line {
+  flex: 1;
+  min-height: 40px;
+  padding: 0.3rem 0.75rem;
+  text-align: left;
   font-weight: 650;
 }
-.store-choice.is-on { border-color: var(--green); background: #f3fbe9; color: var(--green-dark); }
-.new-store, .store-manage { display: flex; gap: 0.45rem; align-items: center; margin: 0.35rem 0; }
-.new-store.is-hidden { display: none; }
-.new-store .field-box, .store-manage .field-box { flex: 1; }
+.store-add { color: var(--green-dark); }
+.store-edit {
+  flex: none;
+  width: 36px;
+  height: 36px;
+  margin-right: 0.15rem;
+  color: var(--muted);
+}
+.store-rename, .store-confirm { gap: 0.35rem; padding: 0.3rem 0.45rem; }
+.store-rename .field-box { flex: 1; min-height: 36px; }
+.store-confirm { font-size: 0.84rem; color: var(--muted); }
+.store-confirm span { flex: 1; }
+.store-empty { margin: 0.45rem 0.75rem; }
+.more-toggle {
+  display: block;
+  min-height: 36px;
+  margin: 0.1rem 0 0.25rem;
+  padding: 0.2rem 0;
+  color: var(--green);
+  font-weight: 700;
+  text-align: left;
+}
 .used-in { margin-top: 0.85rem; }
 .used-line {
   display: flex;
