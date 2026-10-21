@@ -310,7 +310,7 @@ function leftoversNight(entry, recipe, options = {}) {
       <div class="hero night-hero">
         <img class="fallback-photo" src="${esc(photo || "/photos/leftovers-hero.jpg")}" alt="">
         ${back}
-        <button class="float right" type="button" data-action="recipe-menu" data-date="${esc(entry.date)}" data-meal="${esc(entry.meal)}" aria-label="More">${dots()}</button>
+        <button class="float right" type="button" data-action="recipe-menu" data-id="${esc(entry.id)}" data-date="${esc(entry.date)}" data-meal="${esc(entry.meal)}"${options.back ? "" : ` data-from="today"`} aria-label="More">${dots()}</button>
       </div>
       <div class="pad">
         ${options.back ? `<p class="kicker meal-kicker">${esc(mealLabel(entry.meal))}</p>` : ""}
@@ -693,7 +693,8 @@ function recipeView(recipe, mode) {
   const panel = embedded ? state.todayPanel || "ingredients" : state.page.panel || "ingredients";
   const open = embedded ? state.todayServingsOpen : state.page.servingsOpen;
   const tag = embedded ? prepPhotoTag() : "";
-  return `${hero(recipe, !embedded, tag)}
+  const tonight = mode === "today" ? mealOn(nyToday(), "dinner") : null;
+  return `${hero(recipe, !embedded, tag, tonight)}
     <div class="pad">
       ${mode === "leftovers" ? `<span class="lo-pill">Leftovers</span>` : ""}
       <div class="title-row"><h1>${esc(recipe.name)}</h1>
@@ -723,8 +724,11 @@ function cookDock(recipe, raised) {
     </div>`;
 }
 
-function hero(recipe, showBack, prepTag = "") {
-  const menu = `<button class="float right" type="button" data-action="recipe-menu" aria-label="More">${dots()}</button>`;
+function hero(recipe, showBack, prepTag = "", entry = null) {
+  const today = entry
+    ? ` data-from="today" data-id="${esc(entry.id)}" data-date="${esc(entry.date)}" data-meal="${esc(entry.meal)}"`
+    : "";
+  const menu = `<button class="float right" type="button" data-action="recipe-menu"${today} aria-label="More">${dots()}</button>`;
   const back = showBack ? `<button class="float left" type="button" data-action="back" aria-label="Back">${chevLeft()}</button>` : "";
   if (!recipe.imageUrl) {
     return `<div class="hero hero-empty">${back}<span class="hero-mark" aria-hidden="true">${plateIcon()}</span>${prepTag}${menu}</div>`;
@@ -1179,31 +1183,36 @@ function sheetHtml() {
       </form></div>`;
   }
   if (state.sheet?.kind === "recipe-menu") {
-    const context = mealContext();
-    const planned = state.sheet.entryId ? entryById(state.sheet.entryId) : context ? mealOn(context.date, context.meal) : null;
+    const mealMenu = Boolean(state.sheet.date && state.sheet.meal);
+    const onToday = state.sheet.from === "today";
+    const planned = mealMenu ? (state.sheet.entryId ? entryById(state.sheet.entryId) : mealOn(state.sheet.date, state.sheet.meal)) : null;
     const recipe = activeRecipe();
-    return `<div class="sheet"><div class="sheet-card" role="dialog" aria-label="Recipe">
+    if (!mealMenu) {
+      return `<div class="sheet"><div class="sheet-card" role="dialog" aria-label="Recipe">
         <div class="sheet-head"><span></span><button type="button" data-action="close-sheet" aria-label="Close">✕</button></div>
-        ${planned ? `<button class="menu-row" type="button" data-action="add-meal" data-date="${esc(planned.date)}" data-meal="${esc(planned.meal)}">Add</button>` : ""}
+        ${recipe ? recipeMenuRows(recipe.id) : ""}
+      </div></div>`;
+    }
+    return `<div class="sheet"><div class="sheet-card" role="dialog" aria-label="Meal">
+        <div class="sheet-head"><span></span><button type="button" data-action="close-sheet" aria-label="Close">✕</button></div>
+        ${planned && !onToday ? `<button class="menu-row" type="button" data-action="add-meal" data-date="${esc(planned.date)}" data-meal="${esc(planned.meal)}">Add</button>` : ""}
         ${planned ? `<button class="menu-row" type="button" data-action="remove-meal" data-id="${esc(planned.id)}">Remove</button>` : ""}
         ${recipe ? `<button class="menu-row" type="button" data-action="edit-recipe">Edit recipe</button>` : ""}
-        ${recipe ? `<button class="menu-row" type="button" data-action="add-to-date" data-id="${esc(recipe.id)}">Add to date</button>` : ""}
       </div></div>`;
   }
   if (state.sheet?.kind === "recipe-row-menu") {
     return `<div class="sheet"><div class="sheet-card" role="dialog" aria-label="Recipe options">
         <div class="sheet-head"><span></span><button type="button" data-action="close-sheet" aria-label="Close">✕</button></div>
-        <button class="menu-row" type="button" data-action="add-to-date" data-id="${esc(state.sheet.recipeId)}">Add to date</button>
+        ${recipeMenuRows(state.sheet.recipeId)}
       </div></div>`;
   }
   if (state.sheet?.kind === "pick-date") return dateSheetHtml();
   if (state.sheet?.kind === "plan-choice") {
     return `<div class="sheet"><div class="sheet-card plan-choice" role="dialog" aria-label="This day already has a dinner">
         <div class="sheet-head"><span></span><button type="button" data-action="plan-cancel" aria-label="Close">✕</button></div>
-        <p>${esc(state.sheet.when)} already has ${esc(state.sheet.name)}. Replace it or add both?</p>
+        <p>${esc(state.sheet.when)} already has ${esc(state.sheet.name)}. Replace it?</p>
         ${state.error ? `<p class="error">${esc(state.error)}</p>` : ""}
         <button class="menu-row" type="button" data-action="plan-replace">Replace</button>
-        <button class="menu-row" type="button" data-action="plan-keep">Add both</button>
         <button class="menu-row" type="button" data-action="plan-cancel">Cancel</button>
       </div></div>`;
   }
@@ -1461,10 +1470,10 @@ async function onClick(event) {
     render();
     return;
   }
-  if (action === "plan-replace" || action === "plan-keep") {
+  if (action === "plan-replace") {
     const sheet = state.sheet;
     if (sheet?.kind !== "plan-choice") return;
-    return planRecipe(sheet.date, sheet.meal, sheet.recipeId, action === "plan-keep");
+    return planRecipe(sheet.date, sheet.meal, sheet.recipeId, false);
   }
   if (action === "plan-cancel") {
     state.error = "";
@@ -1529,12 +1538,18 @@ async function onClick(event) {
     return;
   }
   if (action === "recipe-menu") {
-    state.sheet = { kind: "recipe-menu", date: button.dataset.date || null, meal: button.dataset.meal || null, entryId: button.dataset.id || null };
+    state.sheet = {
+      kind: "recipe-menu",
+      date: button.dataset.date || null,
+      meal: button.dataset.meal || null,
+      entryId: button.dataset.id || null,
+      from: button.dataset.from || null,
+    };
     render();
     return;
   }
   if (action === "edit-recipe") {
-    const recipe = activeRecipe();
+    const recipe = (button.dataset.id && recipeById(button.dataset.id)) || activeRecipe();
     if (!recipe) return;
     state.sheet = { kind: "edit-recipe", id: recipe.id, error: "", date: state.sheet?.date || null, meal: state.sheet?.meal || null };
     render();
@@ -1747,6 +1762,11 @@ function canShiftDateMonth(delta) {
   const [year, month] = String(current).split("-").map(Number);
   const previousLast = new Date(Date.UTC(year, month - 1, 0)).toISOString().slice(0, 10);
   return previousLast >= nyToday();
+}
+
+function recipeMenuRows(recipeId) {
+  return `<button class="menu-row" type="button" data-action="add-to-date" data-id="${esc(recipeId)}">Add to date</button>
+        <button class="menu-row" type="button" data-action="edit-recipe" data-id="${esc(recipeId)}">Edit recipe</button>`;
 }
 
 function dateSheetHtml() {
