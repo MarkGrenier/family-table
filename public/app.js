@@ -67,6 +67,13 @@ let gesture = null;
 let wakeLock = null;
 let undoTimer = null;
 let checkGeneration = 0;
+let refreshSerial = 0;
+let planSerial = 0;
+const pendingDeletes = new Set();
+const pendingAlso = new Set();
+const pendingSlots = new Map();
+const deleteJobs = new Map();
+const removeSerial = new Map();
 let swallowClick = false;
 let viewKeySeen = "";
 
@@ -126,6 +133,7 @@ function dismissSplash() {
 async function refresh(force) {
   if (!state.authed) return;
   if (state.checking && !force) return;
+  const serial = ++refreshSerial;
   try {
     const range = visibleRange();
     const [items, recipes, plan, events] = await Promise.all([
@@ -134,13 +142,15 @@ async function refresh(force) {
       api(`/api/plan?from=${range.from}&to=${range.to}`),
       api(`/api/events?from=${range.from}&to=${range.to}`),
     ]);
+    if (serial !== refreshSerial) return;
     state.items = items.items || [];
     state.recipes = recipes.recipes || [];
-    state.plan = mergeDated(state.plan, plan.plan || [], range);
+    state.plan = applyPlanPending(mergeDated(state.plan, plan.plan || [], range));
     state.events = mergeDated(state.events, events.events || [], range);
     state.error = "";
     if ((force || !isTyping()) && !gesture?.dragging) render();
   } catch (error) {
+    if (serial !== refreshSerial) return;
     if (error.status === 401) {
       state.authed = false;
       render();
@@ -1214,16 +1224,20 @@ function sheetHtml() {
         <div class="sheet-head"><span></span><button type="button" data-action="plan-cancel" aria-label="Close">✕</button></div>
         <p>${esc(state.sheet.when)} already has ${esc(state.sheet.name)}.</p>
         ${state.error ? `<p class="error">${esc(state.error)}</p>` : ""}
-        <button class="menu-row" type="button" data-action="plan-replace">Replace</button>
-        <button class="menu-row" type="button" data-action="plan-cancel">Cancel</button>
+        <div class="choice-stack">
+          <button class="choice-btn is-go" type="button" data-action="plan-replace">Replace</button>
+          <button class="choice-btn is-quiet" type="button" data-action="plan-cancel">Cancel</button>
+        </div>
       </div></div>`;
   }
   if (state.sheet?.kind === "remove-choice") {
     return `<div class="sheet"><div class="sheet-card plan-choice" role="dialog" aria-label="Remove meal">
         <div class="sheet-head"><span></span><button type="button" data-action="close-sheet" aria-label="Close">✕</button></div>
-        <p>Remove ${esc(state.sheet.name)} from ${esc(state.sheet.when)}?</p>
-        <button class="sheet-delete" type="button" data-action="confirm-remove" data-id="${esc(state.sheet.id)}">Remove</button>
-        <button class="menu-row" type="button" data-action="close-sheet">Cancel</button>
+        <p>Remove from ${esc(state.sheet.when)}?</p>
+        <div class="choice-stack">
+          <button class="choice-btn is-danger" type="button" data-action="confirm-remove" data-id="${esc(state.sheet.id)}">Remove</button>
+          <button class="choice-btn is-quiet" type="button" data-action="close-sheet">Cancel</button>
+        </div>
       </div></div>`;
   }
   if (state.sheet?.kind === "edit-recipe") return editRecipeHtml();
@@ -1835,14 +1849,67 @@ async function planRecipe(date, meal, recipeId, keep = false) {
   const slot = meal || "dinner";
   const body = { date, meal: slot, type: "recipe", recipeId };
   if (keep) body.keep = true;
+  const existing = mealOn(date, slot);
+  const snapshot = existing ? copyPlan(existing) : null;
+  const optimistic = optimisticPlan(date, slot, recipeId, existing, keep);
+  const key = planKey(date, slot);
+  const serial = ++planSerial;
+  pendingSlots.set(key, optimistic);
+  state.plan = state.plan.filter((entry) => planKey(entry.date, entry.meal) !== key);
+  state.plan.push(optimistic);
+  showPlannedDay(date);
   try {
-    await api("/api/plan", { method: "POST", body });
-    showPlannedDay(date);
+    const data = await api("/api/plan", { method: "POST", body });
+    if (serial !== planSerial) return;
+    const saved = data.entry || optimistic;
+    pendingSlots.set(key, saved);
+    state.plan = state.plan.filter((entry) => planKey(entry.date, entry.meal) !== key);
+    state.plan.push(saved);
+    render();
     await refresh(true);
+    if (serial !== planSerial) return;
+    pendingSlots.delete(key);
   } catch (error) {
+    if (serial !== planSerial) return;
+    pendingSlots.delete(key);
+    state.plan = state.plan.filter((entry) => planKey(entry.date, entry.meal) !== key);
+    if (snapshot) state.plan.push(snapshot);
     state.error = error.message;
     render();
   }
+}
+
+function optimisticPlan(date, slot, recipeId, existing, keep) {
+  const recipe = recipeById(recipeId);
+  if (keep && existing) {
+    const also = [...(existing.also || [])];
+    if (existing.recipeId !== recipeId && !also.includes(recipeId)) also.push(recipeId);
+    return { ...existing, also };
+  }
+  return {
+    id: existing?.id || `pending-${date}-${slot}`,
+    date,
+    meal: slot,
+    type: "recipe",
+    recipeId,
+    recipeName: recipe?.name || "Recipe",
+    imageUrl: recipe?.imageUrl || null,
+    note: null,
+    alternates: [],
+    also: [],
+  };
+}
+
+function copyPlan(entry) {
+  return {
+    ...entry,
+    alternates: [...(entry.alternates || [])],
+    also: [...(entry.also || [])],
+  };
+}
+
+function planKey(date, meal) {
+  return `${date}|${meal}`;
 }
 
 function confirmRemove(id) {
@@ -1862,39 +1929,65 @@ async function removeMeal(id) {
   if (also) {
     const parent = state.plan.find((item) => item.id === also[1]);
     const name = recipeById(also[2])?.name || "Meal";
+    const previousAlso = parent ? [...(parent.also || [])] : null;
+    if (parent) parent.also = (parent.also || []).filter((recipeId) => recipeId !== also[2]);
+    const marker = `${also[1]}:${also[2]}`;
+    pendingAlso.add(marker);
     state.sheet = null;
-    try {
-      await api(`/api/plan/${also[1]}/also/${also[2]}`, { method: "DELETE" });
-      if (parent) showUndo({ id, name, kind: "plan-also", snapshot: { date: parent.date, meal: parent.meal, recipeId: also[2] } });
-      await refresh(true);
-    } catch (error) {
-      state.error = error.message;
-      render();
-    }
+    if (parent) showUndo({ id, name, kind: "plan-also", snapshot: { date: parent.date, meal: parent.meal, recipeId: also[2] } }, 3000);
+    render();
+    const serial = bumpRemove(id);
+    const job = api(`/api/plan/${also[1]}/also/${also[2]}`, { method: "DELETE" })
+      .then(() => {
+        if (removeSerial.get(id) !== serial) return;
+        pendingAlso.delete(marker);
+        refresh(true);
+      })
+      .catch((error) => {
+        if (removeSerial.get(id) !== serial) return;
+        pendingAlso.delete(marker);
+        if (parent && previousAlso) parent.also = previousAlso;
+        if (state.undo?.id === id) clearUndo();
+        state.error = error.message;
+        render();
+        throw error;
+      });
+    deleteJobs.set(id, job);
     return;
   }
   const entry = state.plan.find((item) => item.id === id);
-  const snapshot = entry
-    ? {
-        date: entry.date,
-        meal: entry.meal,
-        type: entry.type,
-        recipeId: entry.recipeId || null,
-        note: entry.note || null,
-        alternates: entry.alternates || [],
-        also: entry.also || [],
-      }
-    : null;
+  const snapshot = entry ? copyPlan(entry) : null;
   const name = entry ? planTitle(entry) : "Meal";
-  state.sheet = null;
-  try {
-    await api(`/api/plan/${id}`, { method: "DELETE" });
-    if (snapshot) showUndo({ id, name, kind: "plan", snapshot });
-    await refresh(true);
-  } catch (error) {
-    state.error = error.message;
-    render();
+  if (entry) {
+    state.plan = state.plan.filter((item) => item.id !== id);
+    pendingDeletes.add(id);
   }
+  state.sheet = null;
+  if (snapshot) showUndo({ id, name, kind: "plan", snapshot }, 3000);
+  render();
+  const serial = bumpRemove(id);
+  const job = api(`/api/plan/${id}`, { method: "DELETE" })
+    .then(() => {
+      if (removeSerial.get(id) !== serial) return;
+      pendingDeletes.delete(id);
+      refresh(true);
+    })
+    .catch((error) => {
+      if (removeSerial.get(id) !== serial) return;
+      pendingDeletes.delete(id);
+      if (snapshot && !state.plan.some((item) => item.id === id)) state.plan.push(snapshot);
+      if (state.undo?.id === id) clearUndo();
+      state.error = error.message;
+      render();
+      throw error;
+    });
+  deleteJobs.set(id, job);
+}
+
+function bumpRemove(id) {
+  const next = (removeSerial.get(id) || 0) + 1;
+  removeSerial.set(id, next);
+  return next;
 }
 
 function planRestoreBody(snapshot) {
@@ -2032,11 +2125,35 @@ async function undoCheck() {
   state.checking = null;
   try {
     if (undo.kind === "plan") {
+      bumpRemove(undo.id);
+      const job = deleteJobs.get(undo.id);
+      pendingDeletes.delete(undo.id);
+      const restored = copyPlan(undo.snapshot);
+      const key = planKey(restored.date, restored.meal);
+      const serial = ++planSerial;
+      pendingSlots.set(key, restored);
+      state.plan = state.plan.filter((entry) => planKey(entry.date, entry.meal) !== key);
+      state.plan.push(restored);
+      render();
+      if (job) await job.catch(() => {});
       await api("/api/plan", { method: "POST", body: planRestoreBody(undo.snapshot) });
       for (const recipeId of undo.snapshot.also || []) {
         await api("/api/plan", { method: "POST", body: { date: undo.snapshot.date, meal: undo.snapshot.meal, type: "recipe", recipeId, keep: true } });
       }
+      if (serial !== planSerial) return;
+      await refresh(true);
+      if (serial !== planSerial) return;
+      pendingSlots.delete(key);
+      return;
     } else if (undo.kind === "plan-also") {
+      bumpRemove(undo.id);
+      const job = deleteJobs.get(undo.id);
+      const parentId = undo.id.split(":also:")[0];
+      pendingAlso.delete(`${parentId}:${undo.snapshot.recipeId}`);
+      const parent = state.plan.find((item) => item.id === parentId);
+      if (parent && !(parent.also || []).includes(undo.snapshot.recipeId)) parent.also = [...(parent.also || []), undo.snapshot.recipeId];
+      render();
+      if (job) await job.catch(() => {});
       await api("/api/plan", {
         method: "POST",
         body: { date: undo.snapshot.date, meal: undo.snapshot.meal, type: "recipe", recipeId: undo.snapshot.recipeId, keep: true },
@@ -2048,6 +2165,11 @@ async function undoCheck() {
     }
     await refresh(true);
   } catch (error) {
+    if (undo.kind === "plan" && undo.snapshot) {
+      const key = planKey(undo.snapshot.date, undo.snapshot.meal);
+      pendingSlots.delete(key);
+      state.plan = state.plan.filter((entry) => planKey(entry.date, entry.meal) !== key);
+    }
     state.error = error.message;
     render();
   }
@@ -2059,14 +2181,14 @@ function clearUndo() {
   state.undo = null;
 }
 
-function showUndo(undo) {
+function showUndo(undo, ms = 5000) {
   state.undo = undo;
   if (undoTimer) clearTimeout(undoTimer);
   undoTimer = setTimeout(() => {
     state.undo = null;
     undoTimer = null;
     render();
-  }, 5000);
+  }, ms);
 }
 
 async function deleteGrocery(id) {
@@ -2377,6 +2499,18 @@ function mergeDated(existing, incoming, range) {
   const seen = new Set(next.map((entry) => entry.id));
   const kept = prior.filter((entry) => (entry.date < range.from || entry.date > range.to) && !seen.has(entry.id));
   return kept.concat(next);
+}
+
+function applyPlanPending(entries) {
+  const cleaned = entries
+    .filter((entry) => !pendingDeletes.has(entry.id))
+    .map((entry) => {
+      if (!entry?.also?.length || !entry.also.some((recipeId) => pendingAlso.has(`${entry.id}:${recipeId}`))) return entry;
+      return { ...entry, also: entry.also.filter((recipeId) => !pendingAlso.has(`${entry.id}:${recipeId}`)) };
+    })
+    .filter((entry) => !pendingSlots.has(planKey(entry.date, entry.meal)));
+  for (const entry of pendingSlots.values()) cleaned.push(entry);
+  return cleaned;
 }
 
 function visibleRange() {

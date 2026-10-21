@@ -710,9 +710,10 @@ export async function addRecipeToGroceries(db: D1Database, recipeId: string, ser
   if (!recipe) throw new HttpError(404, "That recipe isn't here anymore.");
   const factor = servings == null ? 1 : servings / recipe.servings;
   const onHand = await onHandKeys(db);
+  const items = await listItems(db);
   const totals = { added: 0, updated: 0, skipped: 0 };
   for (let index = 0; index < recipe.ingredients.length; index += 1) {
-    const change = await addOneIngredient(db, scaleIngredient(recipe.ingredients[index], factor), `recipe:${recipe.id}:${index}`, onHand);
+    const change = await addOneIngredient(db, scaleIngredient(recipe.ingredients[index], factor), `recipe:${recipe.id}:${index}`, onHand, items);
     totals[change] += 1;
   }
   return totals;
@@ -724,8 +725,9 @@ async function addEntryGroceries(db: D1Database, entry: PlanEntry, onHand?: Set<
   const recipe = await getRecipe(db, entry.recipeId);
   if (!recipe) return totals;
   const keys = onHand ?? (await onHandKeys(db));
+  const items = await listItems(db);
   for (let index = 0; index < recipe.ingredients.length; index += 1) {
-    const change = await addOneIngredient(db, recipe.ingredients[index], `plan:${entry.id}:${index}`, keys);
+    const change = await addOneIngredient(db, recipe.ingredients[index], `plan:${entry.id}:${index}`, keys, items);
     totals[change] += 1;
   }
   return totals;
@@ -1142,14 +1144,15 @@ async function removePlanGroceries(db: D1Database, entry: PlanEntry): Promise<vo
     .prepare(`SELECT item_id, source_key FROM grocery_sources WHERE instr(source_key, ?) = 1`)
     .bind(`plan:${entry.id}:`)
     .all<{ item_id: string; source_key: string }>();
+  const items = await listItems(db);
   for (const row of rows.results ?? []) {
-    await removeOneSource(db, row.item_id, row.source_key);
+    await removeOneSource(db, row.item_id, row.source_key, items);
   }
 }
 
-async function removeOneSource(db: D1Database, itemId: string, sourceKey: string): Promise<void> {
-  const items = await listItems(db);
-  const item = items.find((entry) => entry.id === itemId);
+async function removeOneSource(db: D1Database, itemId: string, sourceKey: string, items?: Item[]): Promise<void> {
+  const list = items ?? (await listItems(db));
+  const item = list.find((entry) => entry.id === itemId);
   if (!item || item.checked) {
     await db.prepare(`DELETE FROM grocery_sources WHERE item_id = ? AND source_key = ?`).bind(itemId, sourceKey).run();
     return;
@@ -1161,6 +1164,8 @@ async function removeOneSource(db: D1Database, itemId: string, sourceKey: string
     .first<{ n: number }>();
   if (Number(others?.n ?? 0) === 0) {
     await deleteItem(db, itemId);
+    const index = list.findIndex((entry) => entry.id === itemId);
+    if (index >= 0) list.splice(index, 1);
     return;
   }
   await refreshItemQuantity(db, itemId);
@@ -1276,6 +1281,7 @@ async function addOneIngredient(
   ingredient: Ingredient,
   sourceKey: string,
   onHand: Set<string>,
+  items?: Item[],
 ): Promise<keyof GroceryChange> {
   if (ingredient.buy === false || (ingredient.optional && ingredient.buy !== true)) return "skipped";
   if (onHand.has(groceryKey(ingredient.name))) return "skipped";
@@ -1286,8 +1292,8 @@ async function addOneIngredient(
   if (seen) return "skipped";
   const name = groceryName(ingredient.name);
   const key = groceryKey(name);
-  const items = await listItems(db);
-  const existing = items.find((item) => !item.checked && groceryKey(item.name) === key && sectionsMatch(item.section, ingredient.section));
+  const list = items ?? (await listItems(db));
+  const existing = list.find((item) => !item.checked && groceryKey(item.name) === key && sectionsMatch(item.section, ingredient.section));
   if (!existing) {
     const item = await createItem(db, {
       name,
@@ -1301,6 +1307,7 @@ async function addOneIngredient(
       staple: false,
       section: ingredient.section,
     });
+    list.push(item);
     await insertContribution(db, item.id, sourceKey, ingredient);
     await refreshItemQuantity(db, item.id);
     return "added";
@@ -1315,7 +1322,10 @@ async function addOneIngredient(
       .bind(existing.id, handSourceKey(existing.id, existing.quantityNote))
       .run();
   }
-  if (existing.section == null) await updateItem(db, existing.id, { section: ingredient.section });
+  if (existing.section == null) {
+    await updateItem(db, existing.id, { section: ingredient.section });
+    existing.section = ingredient.section;
+  }
   await insertContribution(db, existing.id, sourceKey, ingredient);
   await refreshItemQuantity(db, existing.id);
   return "updated";
