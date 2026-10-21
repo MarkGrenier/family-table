@@ -488,8 +488,8 @@ function monthPanel(date) {
   const today = date === nyToday();
   const label = today ? `Today · ${shortDate(date)}` : shortDate(date);
   return `<section class="month-panel">
-      <div class="month-panel-head${today ? " is-today" : ""}"><p class="week-date">${esc(label)}</p></div>
-      ${meals.length ? meals.map((entry) => mealRow(entry, "calendar")).join("") : `<button class="week-empty" type="button" data-action="add-meal" data-date="${esc(date)}" data-meal="dinner">Nothing planned</button>`}
+      <div class="month-panel-head${today ? " is-today" : ""}"><p class="week-date">${esc(label)}</p>${addDinnerButton(date)}</div>
+      ${meals.length ? meals.map((entry) => mealRow(entry, "calendar")).join("") : `<p class="week-empty">Nothing planned</p>`}
       ${events.map((event) => `<p class="event-line">${event.time ? `<time>${esc(event.time)}</time>` : ""}${esc(event.title)}</p>`).join("")}
     </section>`;
 }
@@ -508,10 +508,15 @@ function weekDay(date) {
   const events = eventsOn(date);
   const label = today ? `Today · ${shortDate(date)}` : shortDate(date);
   return `<section class="week-day${today ? " is-today" : ""}">
-      <button class="week-date" type="button" data-action="open-day" data-date="${esc(date)}">${esc(label)}</button>
+      <div class="week-day-head"><button class="week-date" type="button" data-action="open-day" data-date="${esc(date)}">${esc(label)}</button>${addDinnerButton(date)}</div>
       ${meals.length ? meals.map((entry) => mealRow(entry, "calendar")).join("") : `<button class="week-empty" type="button" data-action="open-day" data-date="${esc(date)}">Nothing planned</button>`}
       ${events.map((event) => `<p class="event-line">${event.time ? `<time>${esc(event.time)}</time>` : ""}${esc(event.title)}</p>`).join("")}
     </section>`;
+}
+
+function addDinnerButton(date) {
+  if (!date || date < nyToday() || mealOn(date, "dinner")) return "";
+  return `<button class="icon-btn add-plus" type="button" data-action="add-meal" data-date="${esc(date)}" data-meal="dinner" aria-label="Add dinner">${plus()}</button>`;
 }
 
 function mealMenu(entry, scope) {
@@ -606,8 +611,8 @@ function dayHtml(date) {
   const meals = mealsOn(date);
   const body = meals.length
     ? meals.map(mealRow).join("")
-    : `<button class="primary" type="button" data-action="add-meal" data-date="${esc(date)}" data-meal="dinner">Add dinner</button>`;
-  return `<button class="text-green" type="button" data-action="back">Week</button>
+    : `<p class="week-empty">Nothing planned</p>`;
+  return `<div class="day-head"><button class="text-green" type="button" data-action="back">Week</button>${addDinnerButton(date)}</div>
     <h1>${esc(longDate(date))}</h1>
     <section class="day-meals">${body}</section>`;
 }
@@ -684,6 +689,7 @@ function recipeRows(recipes, options = {}) {
         ${recipeThumb(recipe)}
         <span class="recipe-copy"><span>${esc(recipe.name)}</span>${recipe.needsReview ? `<span class="review-pill">Needs a look</span>` : ""}${lastMadeText(recipe) ? `<span class="small">${esc(lastMadeText(recipe))}</span>` : ""}</span>
       </button>
+      ${options.pick ? "" : `<button class="icon-btn add-plus" type="button" data-action="add-to-date" data-id="${esc(recipe.id)}" aria-label="Add to date">${plus()}</button>`}
       ${options.pick ? "" : `<button class="icon-btn" type="button" data-action="recipe-row-menu" data-id="${esc(recipe.id)}" aria-label="More">${dots()}</button>`}
       <button class="heart${recipe.favorite ? " is-on" : ""}" type="button" data-action="favorite" data-id="${esc(recipe.id)}" aria-label="${recipe.favorite ? "Unfavorite" : "Favorite"}">${heart(recipe.favorite)}</button>
     </div>`).join("");
@@ -740,13 +746,15 @@ function hero(recipe, showBack, prepTag = "", entry = null) {
     ? ` data-from="today" data-id="${esc(entry.id)}" data-date="${esc(entry.date)}" data-meal="${esc(entry.meal)}"`
     : "";
   const menu = `<button class="float right" type="button" data-action="recipe-menu"${today} aria-label="More">${dots()}</button>`;
+  const add = showBack && !entry ? `<button class="float right add-float" type="button" data-action="add-to-date" data-id="${esc(recipe.id)}" aria-label="Add to date">${plus()}</button>` : "";
   const back = showBack ? `<button class="float left" type="button" data-action="back" aria-label="Back">${chevLeft()}</button>` : "";
   if (!recipe.imageUrl) {
-    return `<div class="hero hero-empty">${back}<span class="hero-mark" aria-hidden="true">${plateIcon()}</span>${prepTag}${menu}</div>`;
+    return `<div class="hero hero-empty">${back}<span class="hero-mark" aria-hidden="true">${plateIcon()}</span>${prepTag}${add}${menu}</div>`;
   }
   return `<div class="hero"><img class="fallback-photo" src="${esc(safeSrc(recipe.imageUrl))}" alt="">
       ${back}
       ${prepTag}
+      ${add}
       ${menu}
     </div>`;
 }
@@ -1442,10 +1450,14 @@ async function onClick(event) {
     render();
     return;
   }
-  if (action === "plan-dinner" || action === "open-day") {
+  if (action === "plan-dinner") {
     const date = button.dataset.date || nyToday();
     if (date < nyToday()) return;
-    if (!mealOn(date, "dinner")) return openAddMeal(date, "dinner");
+    return openAddMeal(date, "dinner");
+  }
+  if (action === "open-day") {
+    const date = button.dataset.date || nyToday();
+    if (date < nyToday()) return;
     state.tab = "calendar";
     state.page = { kind: "day", date };
     state.sheet = null;
@@ -1468,7 +1480,6 @@ async function onClick(event) {
     const date = button.dataset.date;
     if (!date || date < nyToday()) return;
     state.monthPick = date;
-    if (!mealOn(date, "dinner")) return openAddMeal(date, "dinner");
     render();
     return;
   }
@@ -2674,6 +2685,9 @@ function heart(on) {
 }
 function chevLeft() { return `<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="#222" stroke-width="2.4"><path d="M15 5 8 12l7 7"/></svg>`; }
 function chevRight() { return `<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="#222" stroke-width="2.4"><path d="m9 5 7 7-7 7"/></svg>`; }
+function plus() {
+  return `<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>`;
+}
 function dots() { return `<svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><circle cx="6" cy="12" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="18" cy="12" r="1.7"/></svg>`; }
 function checkIcon() { return `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="white" stroke-width="3"><path d="m5 12 5 5 9-10"/></svg>`; }
 function listIcon() { return `<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="#444" stroke-width="2"><path d="M8 7h11M8 12h11M8 17h11M4 7h.01M4 12h.01M4 17h.01"/></svg>`; }

@@ -252,6 +252,7 @@ h1, .title {
 
 .float.left { left: 0.8rem; }
 .float.right { right: 0.8rem; }
+.float.add-float { right: calc(0.8rem + 52px); color: var(--green-dark); }
 
 .pad { padding: 1rem 1.15rem 0; }
 
@@ -1024,6 +1025,10 @@ body:has(.night-screen),
 
 .icon-btn svg { width: 24px; height: 24px; }
 .icon-btn.is-on { background: var(--green-soft); }
+.add-plus { color: var(--green-dark); background: var(--green-soft); border-radius: 12px; }
+
+.week-day-head, .day-head { display: flex; align-items: center; justify-content: space-between; gap: 0.25rem; }
+.week-day-head .week-date { flex: 1; width: auto; }
 
 .week-day { padding: 0.85rem 0 0.45rem; border-top: 1px solid var(--line); }
 .week-day:first-child { border-top: 0; }
@@ -1173,7 +1178,7 @@ body:has(.month-screen),
 
 .month-panel { margin-top: 0.15rem; padding-top: 0.15rem; border-top: 1px solid var(--line); text-align: left; }
 .month-panel-head { display: flex; align-items: center; justify-content: space-between; gap: 0.6rem; }
-.month-panel-head .week-date { min-height: 0; padding: 0.15rem 0 0.2rem; }
+.month-panel-head .week-date { min-height: 0; width: auto; flex: 1; padding: 0.15rem 0 0.2rem; }
 .month-panel-head.is-today .week-date { color: var(--green-dark); }
 .month-panel h2 { margin: 0; font-size: 1rem; font-weight: 750; text-align: left; line-height: 1.2; }
 .month-panel .text-green { min-height: 2rem; }
