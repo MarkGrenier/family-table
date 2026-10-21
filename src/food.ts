@@ -537,7 +537,15 @@ export async function savePlan(db: D1Database, input: PlanInput): Promise<PlanEn
     const kept = await addPlanAlso(db, input.date, input.meal, input.recipeId);
     if (kept) return kept;
   }
-  const previous = await planOn(db, input.date, input.meal);
+  const anchored = input.id ? await getPlan(db, input.id) : null;
+  if (input.id && !anchored) throw new HttpError(404, "That meal isn't planned anymore.");
+  const moving = anchored != null && (anchored.date !== input.date || anchored.meal !== input.meal);
+  const occupant = await planOn(db, input.date, input.meal);
+  if (moving && occupant && occupant.id !== anchored.id) {
+    if (inGroceryWindow(occupant.date)) await removePlanGroceries(db, occupant);
+    await db.prepare(`DELETE FROM plan_entries WHERE id = ?`).bind(occupant.id).run();
+  }
+  const previous = moving ? anchored : occupant;
   const now = nowIso();
   const id = crypto.randomUUID();
   let note = input.note;
@@ -559,27 +567,42 @@ export async function savePlan(db: D1Database, input: PlanInput): Promise<PlanEn
     wasDeferred = Number(flag?.deferred) === 1;
   }
   const deferred = inGroceryWindow(input.date) ? 0 : 1;
-  await db
-    .prepare(
-      `INSERT INTO plan_entries (id, plan_date, meal, entry_type, recipe_id, note, alternates_json, also_json, groceries_deferred, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, '[]', ?, ?, ?)
-       ON CONFLICT (plan_date, meal) DO UPDATE SET
-         entry_type = excluded.entry_type,
-         recipe_id = excluded.recipe_id,
-         note = excluded.note,
-         alternates_json = excluded.alternates_json,
-         also_json = '[]',
-         groceries_deferred = excluded.groceries_deferred,
-         updated_at = excluded.updated_at`,
-    )
-    .bind(id, input.date, input.meal, input.type, recipeId, note, JSON.stringify(alternates), deferred, now, now)
-    .run();
+  if (moving && anchored) {
+    await db
+      .prepare(
+        `UPDATE plan_entries
+         SET plan_date = ?, meal = ?, entry_type = ?, recipe_id = ?, note = ?, alternates_json = ?, also_json = '[]', groceries_deferred = ?, updated_at = ?
+         WHERE id = ?`,
+      )
+      .bind(input.date, input.meal, input.type, recipeId, note, JSON.stringify(alternates), deferred, now, anchored.id)
+      .run();
+  } else {
+    await db
+      .prepare(
+        `INSERT INTO plan_entries (id, plan_date, meal, entry_type, recipe_id, note, alternates_json, also_json, groceries_deferred, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, '[]', ?, ?, ?)
+         ON CONFLICT (plan_date, meal) DO UPDATE SET
+           entry_type = excluded.entry_type,
+           recipe_id = excluded.recipe_id,
+           note = excluded.note,
+           alternates_json = excluded.alternates_json,
+           also_json = '[]',
+           groceries_deferred = excluded.groceries_deferred,
+           updated_at = excluded.updated_at`,
+      )
+      .bind(id, input.date, input.meal, input.type, recipeId, note, JSON.stringify(alternates), deferred, now, now)
+      .run();
+  }
   const saved = await planOn(db, input.date, input.meal);
   if (!saved) throw new HttpError(500, "Something went wrong. Try again.");
   const sameRecipe =
     previous?.type === "recipe" && saved.type === "recipe" && previous.recipeId === saved.recipeId && Boolean(saved.recipeId);
   const inWindow = deferred === 0;
-  if (inWindow) {
+  if (!inWindow) {
+    // The meal left the window, or it is being replaced while it sits beyond it.
+    // Take its groceries back now so the later sync can add them once.
+    if (previous) await removePlanGroceries(db, previous);
+  } else {
     if (previous) {
       for (const extraId of previous.also) {
         await removePlanGroceries(db, { ...previous, id: alsoPlanId(previous.id, extraId) });

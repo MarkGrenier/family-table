@@ -1888,6 +1888,95 @@ describe("grocery API", () => {
     expect((await names()).find((item) => item.name === "Window rice")?.quantityNote).toBe("1 lb");
   });
 
+  it("takes groceries back when a meal moves from the window to a later date", async () => {
+    const token = env.API_TOKEN;
+    const span = shopWindow();
+    const today = easternDay();
+    const outside = shiftDay(span.to, 8);
+    const other = shiftDay(today, 1) <= span.to ? shiftDay(today, 1) : today;
+    const otherMeal = other === today ? "lunch" : "dinner";
+    const created = await call("/api/recipes", {
+      method: "POST",
+      token,
+      body: {
+        name: "Move bowl",
+        ingredients: ["1 lb move rice", "1 lemon", "1 carton oat milk", "1 sponge"],
+        steps: ["Stir."],
+      },
+    });
+    const id = (created.json?.recipe as Json).id as string;
+    const side = await call("/api/recipes", {
+      method: "POST",
+      token,
+      body: { name: "Move rice side", ingredients: ["1 lb move rice"], steps: ["Simmer."] },
+    });
+    const sideId = (side.json?.recipe as Json).id as string;
+    const hand = await call("/api/items", {
+      method: "POST",
+      token,
+      body: { name: "Oat milk", store: "local", category: "shelf", section: "pantry", quantityNote: "2 cartons" },
+    });
+    expect(hand.status).toBe(201);
+    const names = async () => ((await call("/api/items", { token })).json?.items ?? []) as Json[];
+    const deferred = async (planId: string) => {
+      const row = await env.DB.prepare(`SELECT groceries_deferred AS deferred, plan_date FROM plan_entries WHERE id = ?`)
+        .bind(planId)
+        .first<{ deferred: number; plan_date: string }>();
+      return { deferred: Number(row?.deferred), date: row?.plan_date ?? "" };
+    };
+
+    const stayed = await call("/api/plan", {
+      method: "POST",
+      token,
+      body: { date: other, meal: otherMeal, type: "recipe", recipeId: sideId },
+    });
+    expect(stayed.status).toBe(200);
+    const moving = await call("/api/plan", {
+      method: "POST",
+      token,
+      body: { date: today, meal: "dinner", type: "recipe", recipeId: id },
+    });
+    expect(moving.status).toBe(200);
+    const planId = (moving.json?.entry as Json).id as string;
+    expect((await deferred(planId)).deferred).toBe(0);
+    const shopped = await names();
+    expect(shopped.find((item) => item.name === "Move rice")?.quantityNote).toBe("2 lb");
+    expect(shopped.some((item) => item.name === "Lemon")).toBe(true);
+    const sponge = shopped.find((item) => item.name === "Sponge");
+    expect(sponge).toBeTruthy();
+    expect((await call(`/api/items/${sponge?.id}`, { method: "PATCH", token, body: { checked: true } })).status).toBe(200);
+
+    const moved = await call("/api/plan", {
+      method: "POST",
+      token,
+      body: { id: planId, date: outside, meal: "dinner", type: "recipe", recipeId: id },
+    });
+    expect(moved.status).toBe(200);
+    expect((moved.json?.entry as Json).id).toBe(planId);
+    expect((moved.json?.entry as Json).date).toBe(outside);
+    expect(await deferred(planId)).toEqual({ deferred: 1, date: outside });
+    const leftBehind = ((await call(`/api/plan?from=${today}&to=${today}`, { token })).json?.plan ?? []) as Json[];
+    expect(leftBehind.some((entry) => entry.meal === "dinner")).toBe(false);
+
+    const after = await names();
+    expect(after.find((item) => item.name === "Move rice")?.quantityNote).toBe("1 lb");
+    expect(after.some((item) => item.name === "Lemon")).toBe(false);
+    expect(after.find((item) => item.name === "Oat milk")?.quantityNote).toBe("2 cartons");
+    expect(after.find((item) => item.name === "Sponge")).toMatchObject({ checked: true });
+    const again = await names();
+    expect(again.find((item) => item.name === "Move rice")?.quantityNote).toBe("1 lb");
+    expect(again.filter((item) => item.name === "Sponge")).toHaveLength(1);
+
+    await env.DB.prepare(`UPDATE plan_entries SET plan_date = ? WHERE id = ?`).bind(today, planId).run();
+    const returned = await names();
+    expect(returned.find((item) => item.name === "Move rice")?.quantityNote).toBe("2 lb");
+    expect(returned.some((item) => item.name === "Lemon")).toBe(true);
+    expect((await deferred(planId)).deferred).toBe(0);
+    const returnedAgain = await names();
+    expect(returnedAgain.find((item) => item.name === "Move rice")?.quantityNote).toBe("2 lb");
+    expect(returnedAgain.filter((item) => item.name === "Lemon")).toHaveLength(1);
+  });
+
   it("serves the phone page", async () => {
     const response = await exports.default.fetch("https://grocery.test/");
     expect(response.status).toBe(200);

@@ -56,6 +56,8 @@ export type PlanInput = {
   note: string | null;
   alternates?: string[];
   keep?: boolean;
+  /** Existing meal to update. A different date moves that meal. */
+  id?: string;
 };
 
 export type EventInput = {
@@ -391,6 +393,11 @@ export function parsePlan(body: Record<string, unknown>): PlanInput {
   };
   if ("alternates" in body) plan.alternates = cleanAlternateIds(body.alternates);
   if (body.keep === true) plan.keep = true;
+  if (typeof body.id === "string" && body.id.trim()) {
+    const id = body.id.trim();
+    if (!/^[A-Za-z0-9-]{1,80}$/.test(id)) throw new HttpError(400, "That meal isn't planned anymore.");
+    plan.id = id;
+  }
   return plan;
 }
 
