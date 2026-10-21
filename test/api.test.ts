@@ -1848,7 +1848,8 @@ describe("grocery API", () => {
     expect(js).toContain('data-action="add-to-date"');
     expect(js).toContain('kind: "pick-date"');
     expect(js).toContain('"pick-date-day"');
-    expect(js).toContain("Replace it?");
+    expect(js).toContain("already has ${esc(state.sheet.name)}.");
+    expect(js).not.toContain("Replace it?");
     expect(js).not.toContain("Replace it or add both?");
     expect(js).not.toContain("Add both");
     expect(js).not.toContain("plan-keep");
@@ -1858,9 +1859,9 @@ describe("grocery API", () => {
     expect(css).toContain("opacity 300ms");
     expect(css).toContain(".month-panel-head.is-today .week-date");
     const shell = await (await exports.default.fetch("https://grocery.test/sw.js")).text();
-    expect(shell).toContain("grocery-shell-v47");
+    expect(shell).toContain("grocery-shell-v48");
     expect(shell).toContain("/styles.css?v=44");
-    expect(shell).toContain("/app.js?v=45");
+    expect(shell).toContain("/app.js?v=46");
     expect(js).toContain('getElementById("splash")');
     expect(js).not.toContain("Loading…");
     const html = await (await exports.default.fetch("https://grocery.test/")).text();

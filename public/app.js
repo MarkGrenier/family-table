@@ -1210,7 +1210,7 @@ function sheetHtml() {
   if (state.sheet?.kind === "plan-choice") {
     return `<div class="sheet"><div class="sheet-card plan-choice" role="dialog" aria-label="This day already has a dinner">
         <div class="sheet-head"><span></span><button type="button" data-action="plan-cancel" aria-label="Close">✕</button></div>
-        <p>${esc(state.sheet.when)} already has ${esc(state.sheet.name)}. Replace it?</p>
+        <p>${esc(state.sheet.when)} already has ${esc(state.sheet.name)}.</p>
         ${state.error ? `<p class="error">${esc(state.error)}</p>` : ""}
         <button class="menu-row" type="button" data-action="plan-replace">Replace</button>
         <button class="menu-row" type="button" data-action="plan-cancel">Cancel</button>
