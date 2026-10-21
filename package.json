@@ -12,7 +12,7 @@
     "dev": "wrangler dev",
     "setup": "node scripts/setup.mjs",
     "share-keys": "node scripts/print-share-keys.mjs",
-    "cleanup-nov13": "node --experimental-strip-types scripts/cleanup-nov13-groceries.mjs",
+    "cleanup-future": "node --experimental-strip-types scripts/cleanup-future-groceries.mjs",
     "seed": "wrangler d1 execute grocery --local --yes --file=./seed.sql",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",

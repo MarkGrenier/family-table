@@ -550,33 +550,45 @@ export async function savePlan(db: D1Database, input: PlanInput): Promise<PlanEn
     input.alternates !== undefined
       ? await resolveAlternateIds(db, input.alternates, recipeId)
       : (previous?.alternates ?? []).filter((alternateId) => alternateId !== recipeId);
+  let wasDeferred = false;
+  if (previous) {
+    const flag = await db
+      .prepare(`SELECT groceries_deferred AS deferred FROM plan_entries WHERE id = ?`)
+      .bind(previous.id)
+      .first<{ deferred: number }>();
+    wasDeferred = Number(flag?.deferred) === 1;
+  }
+  const deferred = inGroceryWindow(input.date) ? 0 : 1;
   await db
     .prepare(
-      `INSERT INTO plan_entries (id, plan_date, meal, entry_type, recipe_id, note, alternates_json, also_json, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, '[]', ?, ?)
+      `INSERT INTO plan_entries (id, plan_date, meal, entry_type, recipe_id, note, alternates_json, also_json, groceries_deferred, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, '[]', ?, ?, ?)
        ON CONFLICT (plan_date, meal) DO UPDATE SET
          entry_type = excluded.entry_type,
          recipe_id = excluded.recipe_id,
          note = excluded.note,
          alternates_json = excluded.alternates_json,
          also_json = '[]',
+         groceries_deferred = excluded.groceries_deferred,
          updated_at = excluded.updated_at`,
     )
-    .bind(id, input.date, input.meal, input.type, recipeId, note, JSON.stringify(alternates), now, now)
+    .bind(id, input.date, input.meal, input.type, recipeId, note, JSON.stringify(alternates), deferred, now, now)
     .run();
   const saved = await planOn(db, input.date, input.meal);
   if (!saved) throw new HttpError(500, "Something went wrong. Try again.");
   const sameRecipe =
     previous?.type === "recipe" && saved.type === "recipe" && previous.recipeId === saved.recipeId && Boolean(saved.recipeId);
-  const inWindow = inGroceryWindow(saved.date);
-  if (previous && inWindow) {
-    for (const extraId of previous.also) {
-      await removePlanGroceries(db, { ...previous, id: alsoPlanId(previous.id, extraId) });
+  const inWindow = deferred === 0;
+  if (inWindow) {
+    if (previous) {
+      for (const extraId of previous.also) {
+        await removePlanGroceries(db, { ...previous, id: alsoPlanId(previous.id, extraId) });
+      }
     }
-  }
-  if (!sameRecipe) {
-    if (previous?.type === "recipe" && inWindow) await removePlanGroceries(db, previous);
-    if (saved.type === "recipe" && saved.recipeId && inWindow) await addEntryGroceries(db, saved);
+    if (!sameRecipe || wasDeferred) {
+      if (previous?.type === "recipe" && !sameRecipe) await removePlanGroceries(db, previous);
+      if (saved.type === "recipe" && saved.recipeId) await addEntryGroceries(db, saved);
+    }
   }
   return saved;
 }
@@ -740,37 +752,32 @@ export async function addRecipeToGroceries(db: D1Database, recipeId: string, ser
   return totals;
 }
 
-function planSourcePresent(keys: Set<string>, entryId: string): boolean {
-  const prefix = `plan:${entryId}:`;
-  const alsoPrefix = entryId.includes(":also:") ? null : `plan:${entryId}:also:`;
-  for (const key of keys) {
-    if (!key.startsWith(prefix)) continue;
-    if (alsoPrefix && key.startsWith(alsoPrefix)) continue;
-    return true;
-  }
-  return false;
-}
-
-/** Add groceries for in-window meals that do not have them yet. Safe to run on every list fetch. */
+/**
+ * Shop a meal once, when it was planned beyond the window and that date has since
+ * arrived (today through the end of next week). Meals already in the window stay
+ * as they are, including ones whose groceries were cleared. Past dates are left alone.
+ */
 export async function syncWindowGroceries(db: D1Database): Promise<void> {
-  const window = groceryWindow();
-  const planned = await listPlan(db, window.from, window.to);
-  const targets: PlanEntry[] = [];
-  for (const entry of planned) {
-    if (entry.type === "recipe" && entry.recipeId) targets.push(entry);
-    for (const recipeId of entry.also) {
-      targets.push({ ...entry, id: alsoPlanId(entry.id, recipeId), type: "recipe", recipeId });
-    }
-  }
-  if (!targets.length) return;
+  const today = easternToday();
+  const window = groceryWindow(today);
   const rows = await db
-    .prepare(`SELECT source_key FROM grocery_sources WHERE source_key LIKE 'plan:%'`)
-    .all<{ source_key: string }>();
-  const keys = new Set((rows.results ?? []).map((row) => row.source_key));
-  const missing = targets.filter((entry) => !planSourcePresent(keys, entry.id));
-  if (!missing.length) return;
+    .prepare(
+      `${PLAN_SELECT}
+       WHERE p.groceries_deferred = 1 AND p.plan_date >= ? AND p.plan_date <= ?`,
+    )
+    .bind(today, window.to)
+    .all<PlanRow>();
+  const planned = (rows.results ?? []).map(planFromRow);
+  if (!planned.length) return;
   const onHand = await onHandKeys(db);
-  for (const entry of missing) await addEntryGroceries(db, entry, onHand);
+  const now = nowIso();
+  for (const entry of planned) {
+    if (entry.type === "recipe" && entry.recipeId) await addEntryGroceries(db, entry, onHand);
+    for (const recipeId of entry.also) {
+      await addEntryGroceries(db, { ...entry, id: alsoPlanId(entry.id, recipeId), type: "recipe", recipeId }, onHand);
+    }
+    await db.prepare(`UPDATE plan_entries SET groceries_deferred = 0, updated_at = ? WHERE id = ?`).bind(now, entry.id).run();
+  }
 }
 
 async function addEntryGroceries(db: D1Database, entry: PlanEntry, onHand?: Set<string>): Promise<GroceryChange> {
@@ -1182,10 +1189,21 @@ export async function replaceWeek(db: D1Database, input: WeekInput): Promise<{ w
     const alternates = await resolveAlternateIds(db, day.alternates, chosenId);
     await db
       .prepare(
-        `INSERT INTO plan_entries (id, plan_date, meal, entry_type, recipe_id, note, alternates_json, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO plan_entries (id, plan_date, meal, entry_type, recipe_id, note, alternates_json, groceries_deferred, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
-      .bind(crypto.randomUUID(), day.date, day.meal, day.type, chosenId, day.note, JSON.stringify(alternates), now, now)
+      .bind(
+        crypto.randomUUID(),
+        day.date,
+        day.meal,
+        day.type,
+        chosenId,
+        day.note,
+        JSON.stringify(alternates),
+        inGroceryWindow(day.date) ? 0 : 1,
+        now,
+        now,
+      )
       .run();
   }
   const saved = await listPlan(db, input.weekStart, end);

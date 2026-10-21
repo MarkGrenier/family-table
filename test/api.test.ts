@@ -1074,7 +1074,7 @@ describe("grocery API", () => {
     expect(cleared.status).toBe(200);
     expect(Number(cleared.json?.deleted)).toBeGreaterThan(0);
     const left = ((await call("/api/items", { token })).json?.items ?? []) as Json[];
-    expect(left.find((item) => item.name === "Chicken thighs")?.quantityNote).toBe("1 lb");
+    expect(left.some((item) => item.name === "Chicken thighs")).toBe(false);
   });
 
   it("keeps an explicit buy on an optional ingredient and accepts timer ranges", async () => {
@@ -1782,10 +1782,10 @@ describe("grocery API", () => {
     expect((await names()).map((item) => item.name)).toEqual(["Zzalso lentils"]);
   });
 
-  it("shops this week and next week only, then adds groceries when a meal enters the window", async () => {
+  it("shops a deferred meal once when it reaches today, and leaves cleared meals alone", async () => {
     const token = env.API_TOKEN;
     const span = shopWindow();
-    const inside = span.from;
+    const today = easternDay();
     const outside = shiftDay(span.to, 10);
     const created = await call("/api/recipes", {
       method: "POST",
@@ -1801,6 +1801,12 @@ describe("grocery API", () => {
     const paperId = (manual.json?.item as Json).id as string;
     await call(`/api/items/${paperId}`, { method: "PATCH", token, body: { checked: true } });
     const names = async () => ((await call("/api/items", { token })).json?.items ?? []) as Json[];
+    const deferred = async (planId: string) => {
+      const row = await env.DB.prepare(`SELECT groceries_deferred AS deferred FROM plan_entries WHERE id = ?`)
+        .bind(planId)
+        .first<{ deferred: number }>();
+      return Number(row?.deferred);
+    };
 
     const far = await call("/api/plan", {
       method: "POST",
@@ -1809,6 +1815,7 @@ describe("grocery API", () => {
     });
     expect(far.status).toBe(200);
     const farId = (far.json?.entry as Json).id as string;
+    expect(await deferred(farId)).toBe(1);
     expect((await names()).some((item) => item.name === "Window rice")).toBe(false);
     const blocked = await call("/api/plan/groceries", { method: "POST", token, body: { from: outside, to: outside } });
     expect(blocked.json).toMatchObject({ added: 0, updated: 0 });
@@ -1826,32 +1833,59 @@ describe("grocery API", () => {
     });
     const parked = ((await call(`/api/plan?from=${outside}&to=${outside}`, { token })).json?.plan ?? []) as Json[];
     expect(parked).toHaveLength(1);
-    await env.DB.prepare(`UPDATE plan_entries SET plan_date = ? WHERE id = ?`).bind(inside, parked[0].id).run();
+    const parkedId = parked[0].id as string;
+    expect(await deferred(parkedId)).toBe(1);
+
+    const yesterday = shiftDay(today, -1);
+    await env.DB.prepare(`UPDATE plan_entries SET plan_date = ? WHERE id = ?`).bind(yesterday, parkedId).run();
+    expect((await names()).some((item) => item.name === "Window rice")).toBe(false);
+    expect(await deferred(parkedId)).toBe(1);
+
+    await env.DB.prepare(`UPDATE plan_entries SET plan_date = ? WHERE id = ?`).bind(today, parkedId).run();
     const arrived = await names();
     expect(arrived.find((item) => item.name === "Window rice")?.quantityNote).toBe("1 lb");
     expect(arrived.find((item) => item.id === paperId)?.checked).toBe(true);
+    expect(await deferred(parkedId)).toBe(0);
     const again = await names();
     expect(again.find((item) => item.name === "Window rice")?.quantityNote).toBe("1 lb");
     const sources = await env.DB.prepare(`SELECT COUNT(*) AS n FROM grocery_sources WHERE instr(source_key, ?) = 1`)
-      .bind(`plan:${parked[0].id}:`)
+      .bind(`plan:${parkedId}:`)
       .first<{ n: number }>();
     expect(Number(sources?.n)).toBe(1);
 
+    await env.DB.prepare(`DELETE FROM grocery_sources WHERE instr(source_key, ?) = 1`).bind(`plan:${parkedId}:`).run();
+    await env.DB.prepare(`DELETE FROM items WHERE name = ?`).bind("Window rice").run();
+    expect((await names()).some((item) => item.name === "Window rice")).toBe(false);
+    expect((await names()).some((item) => item.name === "Window rice")).toBe(false);
+    expect(await deferred(parkedId)).toBe(0);
+
+    const later = shiftDay(today, 1);
+    const second = later <= span.to ? { date: later, meal: "dinner" } : { date: today, meal: "lunch" };
     const near = await call("/api/plan", {
       method: "POST",
       token,
-      body: { date: shiftDay(inside, 1), meal: "dinner", type: "recipe", recipeId: id },
+      body: { ...second, type: "recipe", recipeId: id },
     });
     expect(near.status).toBe(200);
-    expect((await names()).find((item) => item.name === "Window rice")?.quantityNote).toBe("2 lb");
-    expect((await names()).find((item) => item.name === "Window rice")?.quantityNote).toBe("2 lb");
+    const nearId = (near.json?.entry as Json).id as string;
+    expect(await deferred(nearId)).toBe(0);
+    expect((await names()).find((item) => item.name === "Window rice")?.quantityNote).toBe("1 lb");
+    expect((await names()).find((item) => item.name === "Window rice")?.quantityNote).toBe("1 lb");
+
+    const stillFar = await call("/api/plan", {
+      method: "POST",
+      token,
+      body: { date: outside, meal: "dinner", type: "recipe", recipeId: id },
+    });
+    expect(stillFar.status).toBe(200);
+    expect(await deferred((stillFar.json?.entry as Json).id as string)).toBe(1);
     const outsideRebuild = await call("/api/groceries/rebuild", {
       method: "POST",
       token,
       body: { from: outside, to: outside },
     });
     expect(outsideRebuild.json).toMatchObject({ added: 0, removed: 0 });
-    expect((await names()).find((item) => item.name === "Window rice")?.quantityNote).toBe("2 lb");
+    expect((await names()).find((item) => item.name === "Window rice")?.quantityNote).toBe("1 lb");
   });
 
   it("serves the phone page", async () => {
@@ -2009,7 +2043,7 @@ describe("grocery API", () => {
     expect(css).toContain("opacity 300ms");
     expect(css).toContain(".month-panel-head.is-today .week-date");
     const shell = await (await exports.default.fetch("https://grocery.test/sw.js")).text();
-    expect(shell).toContain("grocery-shell-v52");
+    expect(shell).toContain("grocery-shell-v53");
     expect(shell).toContain("/styles.css?v=47");
     expect(shell).toContain("/app.js?v=50");
     expect(js).toContain('getElementById("splash")');

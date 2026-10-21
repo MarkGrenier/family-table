@@ -72,7 +72,7 @@ A browser window opens. Sign in to Cloudflare and approve the question it asks. 
 
 The phones already have the grocery list. This step adds recipes, the week plan, and family events. It does not erase anything already on the list.
 
-New files are `migrations/0003_food.sql`, `migrations/0004_recipe_sections.sql`, `migrations/0005_mealime.sql`, `migrations/0006_item_deleted.sql`, `migrations/0007_plan_alternates.sql`, `migrations/0008_on_hand.sql`, `migrations/0009_share_keys.sql`, and `migrations/0010_plan_also.sql`. Older migration files stay as they are. The command below applies every one that is not on the live list yet. `0005_mealime.sql` adds grocery sections, cookware, cooked days, and feedback. `0006_item_deleted.sql` lets a grocery line be hidden and put back. `0007_plan_alternates.sql` adds an empty list of alternate recipes to each planned meal. `0008_on_hand.sql` adds an empty usually-on-hand list and remembers the amount each recipe contributed to a grocery line. `0009_share_keys.sql` marks every existing recipe as finished (`needs_review` starts off) and adds an empty table for share-sheet keys. `0010_plan_also.sql` adds an empty list of extra dinners on a day that already has one. None of them change rows that are already there.
+New files are `migrations/0003_food.sql`, `migrations/0004_recipe_sections.sql`, `migrations/0005_mealime.sql`, `migrations/0006_item_deleted.sql`, `migrations/0007_plan_alternates.sql`, `migrations/0008_on_hand.sql`, `migrations/0009_share_keys.sql`, `migrations/0010_plan_also.sql`, and `migrations/0011_groceries_deferred.sql`. Older migration files stay as they are. The command below applies every one that is not on the live list yet. `0005_mealime.sql` adds grocery sections, cookware, cooked days, and feedback. `0006_item_deleted.sql` lets a grocery line be hidden and put back. `0007_plan_alternates.sql` adds an empty list of alternate recipes to each planned meal. `0008_on_hand.sql` adds an empty usually-on-hand list and remembers the amount each recipe contributed to a grocery line. `0009_share_keys.sql` marks every existing recipe as finished (`needs_review` starts off) and adds an empty table for share-sheet keys. `0010_plan_also.sql` adds an empty list of extra dinners on a day that already has one. `0011_groceries_deferred.sql` adds `groceries_deferred` to each planned meal, starting at 0, so meals already on the calendar are not shopped again. None of them change rows that are already there.
 
 ```bash
 npx wrangler d1 migrations apply grocery --remote
@@ -354,7 +354,7 @@ Dates are `YYYY-MM-DD`. Meals are `breakfast`, `lunch`, or `dinner`. A day has o
 
 `GET /api/plan?from=2026-10-19&to=2026-10-25`
 
-`POST /api/plan` saves or replaces that day and meal. Weeks run Monday through Sunday. A `recipe` meal adds its ingredients to groceries only when the date is in the grocery window: the Monday of the current week through the Sunday of the next week, in Eastern time. A meal further out is saved and does not change the list. The next time the list is fetched (`GET /api/items`, which the app does on load), meals that have moved into that window get their groceries, and fetching again does not add them twice. Replacing an in-window meal with a different recipe, leftovers, or a note takes back the unchecked items that were added only for that meal. Bought items stay. Leftovers and notes add nothing. Removing a meal outside the window does not change the list.
+`POST /api/plan` saves or replaces that day and meal. Weeks run Monday through Sunday. A `recipe` meal adds its ingredients to groceries only when the date is in the grocery window: the Monday of the current week through the Sunday of the next week, in Eastern time. A meal further out is saved with `groceries_deferred` set, and does not change the list. The next time the list is fetched (`GET /api/items`, which the app does on load), a deferred meal whose date is today through the end of that window is shopped once and the flag is cleared. Fetching again does not add it twice. A meal already in the window stays as it is, including one whose groceries were cleared after shopping. Past dates are never shopped by that check. Replacing an in-window meal with a different recipe, leftovers, or a note takes back the unchecked items that were added only for that meal. Bought items stay. Leftovers and notes add nothing. Removing a meal outside the window does not change the list.
 
 ```json
 { "date": "2026-10-19", "meal": "dinner", "type": "recipe", "recipeId": "RECIPE_ID" }
@@ -372,7 +372,16 @@ Dates are `YYYY-MM-DD`. Meals are `breakfast`, `lunch`, or `dinner`. A day has o
 
 `POST /api/groceries/rebuild` with `{}` rebuilds grocery lines for planned recipes inside the grocery window (this Monday through the Sunday of next week). Meals outside that window are left as they are. Send `{ "from": "2026-10-19", "to": "2026-10-25" }` to limit the dates further. Both dates are required if you send either one. It detaches unchecked lines that those meals added, deletes a line only when nothing else is still attached, then adds the meals again with the rules above. Checked lines stay, including ones already bought. Items you typed yourself stay on the list and are not duplicated. The reply is `{ "added", "updated", "skipped", "removed" }`.
 
-One dinner on 13 Nov 2026, Chili-Lime Chicken Breast Burrito Bowls, was planned before this window existed and already changed the list. `npm run cleanup-nov13` prints the before/after diff and writes nothing. `npm run cleanup-nov13 -- --apply` removes only that meal's contribution. Checked lines stay checked. Other lines stay, and an amount changes only when this meal was part of it.
+Meals already planned after the window can still be sitting on the grocery list from before this rule. On 21 Oct 2026 the window ends 1 Nov 2026, so that includes 13 Nov Chili-Lime Chicken Breast Burrito Bowls and 27 Nov Beef Taco Potato Skillet. `npm run cleanup-future` reads a sqlite copy and prints the before/after diff. The copy stays as it is. `--sql` writes a file you can run on the live database after migration 0011 is applied. Every plan row stays. Those meals are marked deferred, so each one is shopped once when its date enters the window. Checked lines stay checked. A line you added by hand stays. An unchecked line that only those meals contributed comes off the list.
+
+```bash
+npx wrangler d1 migrations apply grocery --remote
+npx wrangler d1 export grocery --remote --output live.sql
+sqlite3 live.sqlite < live.sql
+npm run cleanup-future -- --db live.sqlite
+npm run cleanup-future -- --db live.sqlite --sql cleanup-future-groceries.sql
+npx wrangler d1 execute grocery --remote --file=cleanup-future-groceries.sql
+```
 
 ### Usually on hand
 
