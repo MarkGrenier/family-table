@@ -24,6 +24,7 @@ export type ItemInput = {
   imageUrl?: string | null;
   substitute?: string | null;
   notes?: string | null;
+  storeTag?: string | null;
 };
 
 export type ItemPatch = {
@@ -40,6 +41,7 @@ export type ItemPatch = {
   imageUrl?: string | null;
   substitute?: string | null;
   notes?: string | null;
+  storeTag?: string | null;
   deleted?: boolean;
 };
 
@@ -67,6 +69,19 @@ export function cleanName(value: unknown): string {
 export function cleanStore(value: unknown): Store {
   if (typeof value === "string" && isStore(value)) return value;
   throw new HttpError(400, "Pick Costco, the local store, or Amazon.");
+}
+
+export function cleanStoreTag(value: unknown): string | null {
+  if (value == null) return null;
+  if (typeof value !== "string") throw new HttpError(400, "The store name should be words.");
+  const text = value.trim().replace(/\s+/g, " ");
+  if (!text) return "";
+  if (text.length > 40) throw new HttpError(400, "That store name is too long.");
+  const lower = text.toLowerCase();
+  if (lower === "local" || lower === "costco" || lower === "amazon" || lower === "local store" || lower === "no store") {
+    throw new HttpError(400, "That store is already on the list.");
+  }
+  return text;
 }
 
 export function cleanCategory(value: unknown, store: Store): string {
@@ -147,6 +162,7 @@ export function parseNewItem(body: Record<string, unknown>): ItemInput {
     imageUrl: cleanOptional(body.imageUrl, "The photo", 500),
     substitute: cleanOptional(body.substitute, "The substitute", 280),
     notes: cleanOptional(body.notes, "The note", 500),
+    storeTag: body.storeTag === undefined ? null : cleanStoreTag(body.storeTag),
   };
 }
 
@@ -174,6 +190,7 @@ export function parseItemPatch(body: Record<string, unknown>): ItemPatch {
   if ("imageUrl" in body) patch.imageUrl = cleanOptional(body.imageUrl, "The photo", 500);
   if ("substitute" in body) patch.substitute = cleanOptional(body.substitute, "The substitute", 280);
   if ("notes" in body) patch.notes = cleanOptional(body.notes, "The note", 500);
+  if ("storeTag" in body) patch.storeTag = cleanStoreTag(body.storeTag);
   if ("deleted" in body) patch.deleted = cleanBool(body.deleted, "Deleted");
   if (Object.keys(patch).length === 0) {
     throw new HttpError(400, "Nothing to change.");

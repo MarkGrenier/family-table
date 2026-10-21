@@ -8,6 +8,7 @@ const state = {
   plan: [],
   events: [],
   items: [],
+  stores: [],
   recipeQuery: "",
   recipeSort: "favorites",
   addQuery: "",
@@ -68,11 +69,12 @@ const AISLES = {
 };
 
 function blankAddDraft() {
-  return { quantityNote: "", store: "local", category: "shelf", section: "other", brand: "", notes: "", sectionTouched: false, aisleTouched: false };
+  return { quantityNote: "", store: "", category: "shelf", section: "other", brand: "", notes: "", sectionTouched: false, aisleTouched: false };
 }
 
 const app = document.getElementById("app");
 app.addEventListener("click", onClick);
+app.addEventListener("keydown", onKeyDown);
 app.addEventListener("error", onPhotoError, true);
 app.addEventListener("submit", onSubmit);
 app.addEventListener("input", onInput);
@@ -164,14 +166,16 @@ async function refresh(force) {
   const serial = ++refreshSerial;
   try {
     const range = visibleRange();
-    const [items, recipes, plan, events] = await Promise.all([
+    const [items, recipes, plan, events, stores] = await Promise.all([
       api("/api/items"),
       api("/api/recipes"),
       api(`/api/plan?from=${range.from}&to=${range.to}`),
       api(`/api/events?from=${range.from}&to=${range.to}`),
+      api("/api/stores"),
     ]);
     if (serial !== refreshSerial) return;
     state.items = items.items || [];
+    state.stores = (stores.stores || []).map((store) => store.name);
     state.recipes = recipes.recipes || [];
     state.plan = applyPlanPending(mergeDated(state.plan, plan.plan || [], range));
     state.events = mergeDated(state.events, events.events || [], range);
@@ -644,7 +648,8 @@ function pickHtml() {
   const meal = state.page.meal || "dinner";
   const mealName = meal === "lunch" ? "lunch" : meal === "breakfast" ? "breakfast" : "dinner";
   const label = formatUtc(date, { weekday: "short", month: "short", day: "numeric" });
-  return `<div class="pick-bar"><button class="text-green" type="button" data-action="cancel-pick">Cancel</button><h1>Pick ${esc(mealName)} for ${esc(label)}</h1></div>
+  return `<div class="sheet pick-sheet"><div class="sheet-card pick-card" role="dialog" aria-label="Pick a recipe">
+    <div class="pick-bar"><button class="text-green" type="button" data-action="cancel-pick">Cancel</button><h1>Pick ${esc(mealName)} for ${esc(label)}</h1></div>
     ${state.error ? `<p class="error">${esc(state.error)}</p>` : ""}
     <label class="search">
       <input id="recipe-search" class="field-box" type="search" value="${esc(state.recipeQuery)}" placeholder="Search recipes" aria-label="Search recipes" autocomplete="off">
@@ -652,7 +657,8 @@ function pickHtml() {
     <div class="sort" role="group" aria-label="Sort recipes">
       ${sortButton("favorites", "Favorites")}${sortButton("recent", "Recent")}${sortButton("az", "A-Z")}
     </div>
-    <div id="recipe-list">${recipeListHtml()}</div>`;
+    <div id="recipe-list">${recipeListHtml()}</div>
+  </div></div>`;
 }
 
 function recipesHtml() {
@@ -870,8 +876,12 @@ function cookHtml() {
 
 function groceriesHtml() {
   const open = state.items.filter((item) => !item.checked || item.id === state.checking);
-  const groups = SECTIONS.map(([id, label]) => ({ id, label, items: open.filter((item) => (item.section || "other") === id) })).filter((group) => group.items.length);
-  const loose = open.filter((item) => !SECTIONS.some(([id]) => id === (item.section || "other")));
+  const tagged = open.filter((item) => item.storeTag);
+  const plain = open.filter((item) => !item.storeTag);
+  const storeNames = [...new Set(tagged.map((item) => item.storeTag))].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+  const groups = storeNames.map((name) => ({ id: name, label: name, items: tagged.filter((item) => item.storeTag === name) }));
+  groups.push(...SECTIONS.map(([id, label]) => ({ id, label, items: plain.filter((item) => (item.section || "other") === id) })).filter((group) => group.items.length));
+  const loose = plain.filter((item) => !SECTIONS.some(([id]) => id === (item.section || "other")));
   if (loose.length) groups.push({ id: "other", label: "Other", items: loose });
   const done = state.items.filter((item) => item.checked && item.id !== state.checking);
   return `<div class="title-row"><h1>Groceries</h1><button class="icon-green" type="button" data-action="grocery-menu" aria-label="List options">${dots()}</button></div>
@@ -923,15 +933,17 @@ function addHtml() {
   const draft = state.addDraft || blankAddDraft();
   const names = filteredSuggestions();
   const section = draft.sectionTouched ? draft.section : state.addQuery.trim() ? guessSection(state.addQuery) : "other";
-  const category = draft.aisleTouched ? draft.category : aisleFor(draft.store, section);
-  return `<form id="add-form" class="add-form" data-form="add-item">
+  const category = draft.aisleTouched ? draft.category : aisleFor(presetStore(draft.store), section);
+  return `<div class="sheet add-sheet"><form id="add-form" class="add-form sheet-card" data-form="add-item">
       <div class="topbar"><button class="back" type="button" data-action="back" aria-label="Close">✕</button><h1>Add</h1><span></span></div>
       <div class="pad">
         <input id="add-search" name="name" class="search-box" type="text" placeholder="Add something..." value="${esc(state.addQuery)}" maxlength="80" autocomplete="off" enterkeyhint="done" aria-label="Name">
         <div class="add-details">
           <label class="field-label">Quantity<input class="field-box" name="quantityNote" maxlength="140" value="${esc(draft.quantityNote)}" placeholder="2 lb, a bunch" enterkeyhint="done"></label>
-          <label class="field-label">Store<span class="select-wrap"><select class="box" name="store">${choiceHtml(STORES, draft.store)}</select></span></label>
-          <label class="field-label">Aisle<span class="select-wrap"><select class="box" name="category">${choiceHtml(aisleOptions(draft.store), category)}</select></span></label>
+          <p class="field-label">Store</p>
+          <div class="store-options">${storeOptionsHtml(draft.store)}</div>
+          ${newStoreHtml()}
+          <label class="field-label">Aisle<span class="select-wrap"><select class="box" name="category">${choiceHtml(aisleOptions(presetStore(draft.store)), category)}</select></span></label>
           <label class="field-label">Section<span class="select-wrap"><select class="box" name="section">${choiceHtml(SECTIONS, section)}</select></span></label>
           <label class="field-label">Brand<input class="field-box" name="brand" maxlength="80" value="${esc(draft.brand)}" enterkeyhint="done"></label>
           <label class="field-label">Note<input class="field-box" name="notes" maxlength="500" value="${esc(draft.notes)}" enterkeyhint="done"></label>
@@ -940,7 +952,7 @@ function addHtml() {
         <button class="green-btn" type="submit">Add</button>
         <div id="suggest-list">${suggestHtml(names)}</div>
       </div>
-    </form>`;
+    </form></div>`;
 }
 
 function newRecipeHtml() {
@@ -1217,6 +1229,9 @@ function sheetHtml() {
         <label class="field-label">Name<input class="field-box" name="name" required maxlength="80" value="${esc(item.name)}"></label>
         <label class="field-label">Quantity<input class="field-box" name="quantityNote" maxlength="140" value="${esc(qtyOf(item))}"></label>
         <label class="field-label">Section<span class="select-wrap"><select class="box" name="section">${choiceHtml(SECTIONS, item.section || "other")}</select></span></label>
+        <p class="field-label">Store</p>
+        <div class="store-options">${storeOptionsHtml(storeChoiceOf(item))}</div>
+        ${newStoreHtml()}
         ${usedInHtml(item)}
       </form></div>`;
   }
@@ -1433,9 +1448,34 @@ function clearGesture() {
   gesture = null;
 }
 
+function dismissSheet() {
+  if (state.sheet?.kind === "plan-choice") {
+    state.error = "";
+    state.sheet = state.sheet.back || null;
+    render();
+    return;
+  }
+  state.sheet = null;
+  state.error = "";
+  render();
+}
+
 async function onClick(event) {
   if (swallowClick) {
     swallowClick = false;
+    return;
+  }
+  if (event.target.classList?.contains("sheet")) {
+    if (state.sheet) dismissSheet();
+    else if (state.page?.kind === "pick") closePick();
+    else if (state.page?.kind === "add-item") {
+      state.page = null;
+      state.tab = "groceries";
+      state.addQuery = "";
+      state.addDraft = blankAddDraft();
+      state.error = "";
+      render();
+    }
     return;
   }
   const button = event.target.closest("[data-action]");
@@ -1541,9 +1581,7 @@ async function onClick(event) {
     return planRecipe(sheet.date, sheet.meal, sheet.recipeId, false);
   }
   if (action === "plan-cancel") {
-    state.error = "";
-    state.sheet = state.sheet?.back || null;
-    render();
+    dismissSheet();
     return;
   }
   if (action === "clear-meal" || action === "remove-meal") return confirmRemove(button.dataset.id);
@@ -1689,10 +1727,7 @@ async function onClick(event) {
     return;
   }
   if (action === "close-sheet") {
-    if (state.sheet?.kind === "plan-choice" && state.sheet.back) state.sheet = state.sheet.back;
-    else state.sheet = null;
-    state.error = "";
-    render();
+    dismissSheet();
     return;
   }
   if (action === "toggle-done") {
@@ -1713,6 +1748,8 @@ async function onClick(event) {
     render();
     return;
   }
+  if (action === "pick-store") return pickStore(button);
+  if (action === "save-store") return saveStore(button);
   if (action === "quick-add") return addGrocery(button.dataset.name);
   if (action === "edit-item") {
     state.swipeId = null;
@@ -2337,7 +2374,127 @@ async function shareList() {
 }
 
 function choiceHtml(pairs, selected) {
-  return pairs.map(([id, label]) => `<option value="${id}" ${id === selected ? "selected" : ""}>${esc(label)}</option>`).join("");
+  return pairs.map(([id, label]) => `<option value="${esc(id)}" ${id === selected ? "selected" : ""}>${esc(label)}</option>`).join("");
+}
+
+function presetStore(choice) {
+  return choice === "costco" || choice === "amazon" || choice === "local" ? choice : "local";
+}
+
+function storeChoiceOf(item) {
+  if (!item) return "";
+  if (item.storeTag === "") return "";
+  if (item.storeTag) return item.storeTag;
+  return item.store || "local";
+}
+
+function storeOptionsHtml(selected) {
+  const names = [...(state.stores || [])];
+  const known = selected && !["", "local", "costco", "amazon"].includes(selected) && !names.some((name) => name.toLowerCase() === String(selected).toLowerCase());
+  if (known) names.push(selected);
+  const pairs = [["", "No store"], ...STORES, ...names.map((name) => [name, name]), ["__add__", "Add store…"]];
+  const hidden = `<input type="hidden" name="store" value="${esc(selected)}">`;
+  const buttons = pairs.map(([id, label]) => {
+    const on = id === selected;
+    return `<button class="store-choice${on ? " is-on" : ""}" type="button" data-action="pick-store" data-store="${esc(id)}" aria-pressed="${on ? "true" : "false"}">${esc(label)}</button>`;
+  }).join("");
+  return hidden + buttons;
+}
+
+function newStoreHtml() {
+  return `<div class="new-store is-hidden"><input class="field-box" name="newStore" maxlength="40" placeholder="Target, Trader Joe's" enterkeyhint="done" aria-label="New store"><button class="text-green" type="button" data-action="save-store">Add</button></div>`;
+}
+
+function storePayload(choice, section, aisle) {
+  const base = presetStore(choice);
+  const preset = choice === "amazon" || choice === "costco" || choice === "local";
+  let category = aisle && aisleOptions(base).some(([id]) => id === aisle) ? aisle : aisleFor(base, section);
+  if (base === "amazon") category = "general";
+  const storeTag = preset ? null : choice ? choice : "";
+  return { store: base, category, storeTag };
+}
+
+function syncAisle(form) {
+  const draft = state.addDraft;
+  if (!draft || !form || form.id !== "add-form") return;
+  const base = presetStore(draft.store);
+  const allowed = aisleOptions(base).map(([id]) => id);
+  const section = form.querySelector("[name=section]")?.value || draft.section;
+  if (!draft.aisleTouched || !allowed.includes(draft.category)) draft.category = aisleFor(base, section);
+  const aisle = form.querySelector("[name=category]");
+  if (aisle) {
+    aisle.innerHTML = choiceHtml(aisleOptions(base), draft.category);
+    aisle.value = draft.category;
+  }
+}
+
+function pickStore(button) {
+  const form = button.closest("form");
+  if (!form) return;
+  const choice = button.dataset.store ?? "";
+  if (choice === "__add__") {
+    form.querySelector(".new-store")?.classList.remove("is-hidden");
+    form.querySelector("[name=newStore]")?.focus();
+    return;
+  }
+  const box = form.querySelector(".store-options");
+  if (box) box.innerHTML = storeOptionsHtml(choice);
+  form.querySelector(".new-store")?.classList.add("is-hidden");
+  if (form.id === "add-form" && state.addDraft) {
+    state.addDraft.store = choice;
+    syncAisle(form);
+  }
+}
+
+function showFormError(form, message) {
+  if (!form) return;
+  let node = form.querySelector(".store-error");
+  if (!message) {
+    node?.remove();
+    return;
+  }
+  if (!node) {
+    node = document.createElement("p");
+    node.className = "error store-error";
+    const row = form.querySelector(".new-store");
+    if (row) row.insertAdjacentElement("afterend", node);
+    else form.appendChild(node);
+  }
+  node.textContent = message;
+}
+
+async function saveStore(button) {
+  const form = button.closest("form");
+  if (!form) return;
+  const raw = String(form.querySelector("[name=newStore]")?.value || "").trim().replace(/\s+/g, " ");
+  if (!raw) {
+    showFormError(form, "Type a store name.");
+    return;
+  }
+  try {
+    const data = await api("/api/stores", { method: "POST", body: { name: raw } });
+    const saved = data.store?.name || raw;
+    if (!(state.stores || []).some((name) => name.toLowerCase() === saved.toLowerCase())) state.stores.push(saved);
+    const box = form.querySelector(".store-options");
+    if (box) box.innerHTML = storeOptionsHtml(saved);
+    const input = form.querySelector("[name=newStore]");
+    if (input) input.value = "";
+    form.querySelector(".new-store")?.classList.add("is-hidden");
+    showFormError(form, "");
+    if (form.id === "add-form" && state.addDraft) {
+      state.addDraft.store = saved;
+      syncAisle(form);
+    }
+  } catch (error) {
+    showFormError(form, error.message);
+  }
+}
+
+function onKeyDown(event) {
+  if (event.key !== "Enter" || event.target?.name !== "newStore") return;
+  event.preventDefault();
+  const button = event.target.form?.querySelector("[data-action=save-store]");
+  if (button) saveStore(button);
 }
 
 function aisleOptions(store) {
@@ -2399,18 +2556,6 @@ function onAddField(event) {
     draft.aisleTouched = true;
     return true;
   }
-  if (name === "store") {
-    draft.store = event.target.value;
-    const allowed = aisleOptions(draft.store).map(([id]) => id);
-    const section = form.querySelector("[name=section]")?.value || draft.section;
-    if (!draft.aisleTouched || !allowed.includes(draft.category)) draft.category = aisleFor(draft.store, section);
-    const aisle = form.querySelector("[name=category]");
-    if (aisle) {
-      aisle.innerHTML = choiceHtml(aisleOptions(draft.store), draft.category);
-      aisle.value = draft.category;
-    }
-    return true;
-  }
   return false;
 }
 
@@ -2418,15 +2563,15 @@ async function submitAdd(form) {
   const data = new FormData(form);
   const name = String(data.get("name") || "").trim();
   if (!name) return;
-  const store = String(data.get("store") || "local");
+  const choice = String(data.get("store") ?? "");
+  if (choice === "__add__") return;
   const section = String(data.get("section") || guessSection(name));
-  let category = String(data.get("category") || "");
-  const allowed = aisleOptions(store).map(([id]) => id);
-  if (!allowed.includes(category)) category = aisleFor(store, section);
+  const payload = storePayload(choice, section, String(data.get("category") || ""));
   const ok = await addGrocery(name, {
     quantityNote: String(data.get("quantityNote") || "") || null,
-    store,
-    category,
+    store: payload.store,
+    category: payload.category,
+    storeTag: payload.storeTag,
     section,
     brand: String(data.get("brand") || "") || null,
     notes: String(data.get("notes") || "") || null,
@@ -2443,21 +2588,23 @@ async function addGrocery(name, extra) {
   if (!clean) return false;
   const section = extra?.section || guessSection(clean);
   const store = extra?.store || "local";
-  let category = extra?.category || aisleFor(store, section);
-  const allowed = aisleOptions(store).map(([id]) => id);
-  if (!allowed.includes(category)) category = aisleFor(store, section);
+  let category = extra?.category || aisleFor(presetStore(store), section);
+  const allowed = aisleOptions(presetStore(store)).map(([id]) => id);
+  if (!allowed.includes(category)) category = aisleFor(presetStore(store), section);
+  const body = {
+    name: clean,
+    store,
+    category,
+    section,
+    quantityNote: extra?.quantityNote || null,
+    brand: extra?.brand || null,
+    notes: extra?.notes || null,
+  };
+  if (extra && Object.prototype.hasOwnProperty.call(extra, "storeTag")) body.storeTag = extra.storeTag;
   try {
     await api("/api/items", {
       method: "POST",
-      body: {
-        name: clean,
-        store,
-        category,
-        section,
-        quantityNote: extra?.quantityNote || null,
-        brand: extra?.brand || null,
-        notes: extra?.notes || null,
-      },
+      body,
     });
     state.addQuery = "";
     state.addDraft = blankAddDraft();
@@ -2490,11 +2637,20 @@ async function saveItem(form) {
   const id = state.sheet?.id;
   if (!id) return;
   const section = String(form.get("section") || "other");
-  const category = section === "produce" ? "produce" : section === "frozen" ? "frozen" : section === "meat" || section === "dairy" ? "refrigerated" : "shelf";
+  const choice = String(form.get("store") ?? "");
+  if (choice === "__add__") return;
+  const payload = storePayload(choice, section, "");
   try {
     await api(`/api/items/${id}`, {
       method: "PATCH",
-      body: { name: String(form.get("name") || ""), quantityNote: String(form.get("quantityNote") || "") || null, section, category, store: "local" },
+      body: {
+        name: String(form.get("name") || ""),
+        quantityNote: String(form.get("quantityNote") || "") || null,
+        section,
+        category: payload.category,
+        store: payload.store,
+        storeTag: payload.storeTag,
+      },
     });
     state.sheet = null;
     await refresh(true);

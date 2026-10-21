@@ -25,6 +25,7 @@ export type Item = {
   imageUrl: string | null;
   substitute: string | null;
   notes: string | null;
+  storeTag: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -68,6 +69,7 @@ type ItemRow = {
   image_url: string | null;
   substitute: string | null;
   notes: string | null;
+  store_tag: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -85,7 +87,7 @@ type StapleRow = {
 };
 
 const ITEM_COLUMNS =
-  "id, name, quantity_note, store, category, checked, brand, asin, barcode, staple, staple_id, section, image_url, substitute, notes, created_at, updated_at";
+  "id, name, quantity_note, store, category, checked, brand, asin, barcode, staple, staple_id, section, image_url, substitute, notes, store_tag, created_at, updated_at";
 
 const STAPLE_COLUMNS = "id, name, store, category, brand, asin, barcode, created_at, updated_at";
 
@@ -110,6 +112,7 @@ function toItem(row: ItemRow): Item {
     imageUrl: row.image_url,
     substitute: row.substitute,
     notes: row.notes,
+    storeTag: row.store_tag,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -257,9 +260,10 @@ export async function createItem(db: D1Database, input: ItemInput): Promise<Item
   }
 
   const stapleFlag = remember ? 1 : 0;
+  const storeTag = input.storeTag ? (await addCustomStore(db, input.storeTag)).name : input.storeTag === "" ? "" : null;
   statements.push(
     db
-      .prepare(`INSERT INTO items (${ITEM_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .prepare(`INSERT INTO items (${ITEM_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .bind(
         id,
         input.name,
@@ -276,6 +280,7 @@ export async function createItem(db: D1Database, input: ItemInput): Promise<Item
         input.imageUrl ?? null,
         input.substitute ?? null,
         input.notes ?? null,
+        storeTag,
         now,
         now,
       ),
@@ -317,6 +322,14 @@ export async function updateItem(db: D1Database, id: string, patch: ItemPatch): 
     imageUrl: patch.imageUrl === undefined ? existing.imageUrl : patch.imageUrl,
     substitute: patch.substitute === undefined ? existing.substitute : patch.substitute,
     notes: patch.notes === undefined ? existing.notes : patch.notes,
+    storeTag:
+      patch.storeTag === undefined
+        ? existing.storeTag
+        : patch.storeTag
+          ? (await addCustomStore(db, patch.storeTag)).name
+          : patch.storeTag === ""
+            ? ""
+            : null,
   };
 
   const now = nowIso();
@@ -375,7 +388,7 @@ export async function updateItem(db: D1Database, id: string, patch: ItemPatch): 
       .prepare(
         `UPDATE items
          SET name = ?, quantity_note = ?, store = ?, category = ?, checked = ?, brand = ?, asin = ?, barcode = ?, staple = ?, staple_id = ?,
-             section = ?, image_url = ?, substitute = ?, notes = ?, updated_at = ?
+             section = ?, image_url = ?, substitute = ?, notes = ?, store_tag = ?, updated_at = ?
          WHERE id = ?`,
       )
       .bind(
@@ -393,6 +406,7 @@ export async function updateItem(db: D1Database, id: string, patch: ItemPatch): 
         next.imageUrl,
         next.substitute,
         next.notes,
+        next.storeTag,
         now,
         id,
       ),
@@ -488,7 +502,7 @@ export async function addStapleToList(
   const now = nowIso();
   try {
     await db
-      .prepare(`INSERT INTO items (${ITEM_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .prepare(`INSERT INTO items (${ITEM_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .bind(
         itemId,
         staple.name,
@@ -501,6 +515,7 @@ export async function addStapleToList(
         staple.barcode,
         1,
         staple.id,
+        null,
         null,
         null,
         null,
@@ -521,6 +536,24 @@ export async function addStapleToList(
 }
 
 export type OnHandItem = { id: string; name: string };
+
+export async function listCustomStores(db: D1Database): Promise<{ name: string }[]> {
+  const rows = await db.prepare(`SELECT name FROM custom_stores ORDER BY name COLLATE NOCASE`).all<{ name: string }>();
+  return rows.results ?? [];
+}
+
+export async function addCustomStore(db: D1Database, name: string): Promise<{ name: string; created: boolean }> {
+  const existing = await db.prepare(`SELECT name FROM custom_stores WHERE name = ?`).bind(name).first<{ name: string }>();
+  if (existing) return { name: existing.name, created: false };
+  try {
+    await db.prepare(`INSERT INTO custom_stores (name, created_at) VALUES (?, ?)`).bind(name, nowIso()).run();
+    return { name, created: true };
+  } catch (error) {
+    const raced = await db.prepare(`SELECT name FROM custom_stores WHERE name = ?`).bind(name).first<{ name: string }>();
+    if (raced) return { name: raced.name, created: false };
+    throw error;
+  }
+}
 
 export async function listOnHand(db: D1Database): Promise<OnHandItem[]> {
   const rows = await db

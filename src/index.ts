@@ -1,5 +1,5 @@
 import { bearerOk, clearSessionCookie, passcodeMatches, requestAuthed, rollingSessionCookie, sessionCookie, sessionOk, sessionToken } from "./auth";
-import { addOnHand, addStapleToList, clearChecked, createItem, createStaple, deleteItem, deleteOnHand, deleteOnHandByName, deleteStaple, listItems, listOnHand, listStaples, lookupBarcode, updateItem } from "./db";
+import { addCustomStore, addOnHand, addStapleToList, clearChecked, createItem, createStaple, deleteItem, deleteOnHand, deleteOnHandByName, deleteStaple, listCustomStores, listItems, listOnHand, listStaples, lookupBarcode, updateItem } from "./db";
 import {
   addPlanGroceries,
   addRecipeToGroceries,
@@ -33,7 +33,7 @@ import { cleanWeekStart, dateRange, parseEvent, parseEventList, parsePlan, parse
 import { HttpError, json, readJson, text } from "./http";
 import { importSharedRecipe, personForShareKey, shareNotice } from "./share";
 import { importRecipeFromUrl } from "./import-recipe";
-import { cleanBarcode, cleanStore, parseItemPatch, parseNewItem, parseStaple } from "./validate";
+import { cleanBarcode, cleanStore, cleanStoreTag, parseItemPatch, parseNewItem, parseStaple } from "./validate";
 
 export interface Env {
   DB: D1Database;
@@ -191,6 +191,16 @@ async function handleApi(request: Request, env: Env, path: string): Promise<Resp
   if (path === "/api/items" && method === "POST") {
     const item = await createItem(env.DB, parseNewItem(await readJson(request)));
     return json({ item }, 201);
+  }
+  if (path === "/api/stores" && method === "GET") {
+    return json({ stores: await listCustomStores(env.DB) });
+  }
+  if (path === "/api/stores" && method === "POST") {
+    const body = await readJson(request);
+    const name = cleanStoreTag(body.name);
+    if (!name) throw new HttpError(400, "Type a store name.");
+    const saved = await addCustomStore(env.DB, name);
+    return json({ store: { name: saved.name } }, saved.created ? 201 : 200);
   }
   if (path === "/api/items/clear-checked" && method === "POST") {
     const body = await readJson(request);
