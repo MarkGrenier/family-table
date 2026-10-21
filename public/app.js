@@ -136,8 +136,8 @@ async function refresh(force) {
     ]);
     state.items = items.items || [];
     state.recipes = recipes.recipes || [];
-    state.plan = plan.plan || [];
-    state.events = events.events || [];
+    state.plan = mergeDated(state.plan, plan.plan || [], range);
+    state.events = mergeDated(state.events, events.events || [], range);
     state.error = "";
     if ((force || !isTyping()) && !gesture?.dragging) render();
   } catch (error) {
@@ -358,14 +358,14 @@ function tomorrowCard(date) {
     </button>`;
 }
 
-function leftoversRow(entry, recipe) {
+function leftoversRow(entry, recipe, scope) {
   const thumb = recipe ? recipeThumb(recipe) : `<span class="thumb-tile" aria-hidden="true">${plateIcon()}</span>`;
   return `<div class="leftover-row">${thumb}
       <button class="copy" type="button" data-action="open-day" data-date="${esc(entry.date)}">
         <strong>${esc(dishName(entry, recipe))}</strong>
         <span class="leftover-meta"><span class="meal-kind">${esc(mealLabel(entry.meal))}</span><span class="lo-pill">Leftovers</span></span>
       </button>
-      ${mealMenu(entry)}
+      ${mealMenu(entry, scope)}
     </div>`;
 }
 
@@ -479,7 +479,7 @@ function monthPanel(date) {
   const label = today ? `Today · ${shortDate(date)}` : shortDate(date);
   return `<section class="month-panel">
       <div class="month-panel-head${today ? " is-today" : ""}"><p class="week-date">${esc(label)}</p></div>
-      ${meals.length ? meals.map(mealRow).join("") : `<button class="week-empty" type="button" data-action="add-meal" data-date="${esc(date)}" data-meal="dinner">Nothing planned</button>`}
+      ${meals.length ? meals.map((entry) => mealRow(entry, "calendar")).join("") : `<button class="week-empty" type="button" data-action="add-meal" data-date="${esc(date)}" data-meal="dinner">Nothing planned</button>`}
       ${events.map((event) => `<p class="event-line">${event.time ? `<time>${esc(event.time)}</time>` : ""}${esc(event.title)}</p>`).join("")}
     </section>`;
 }
@@ -499,24 +499,25 @@ function weekDay(date) {
   const label = today ? `Today · ${shortDate(date)}` : shortDate(date);
   return `<section class="week-day${today ? " is-today" : ""}">
       <button class="week-date" type="button" data-action="open-day" data-date="${esc(date)}">${esc(label)}</button>
-      ${meals.length ? meals.map(mealRow).join("") : `<button class="week-empty" type="button" data-action="open-day" data-date="${esc(date)}">Nothing planned</button>`}
+      ${meals.length ? meals.map((entry) => mealRow(entry, "calendar")).join("") : `<button class="week-empty" type="button" data-action="open-day" data-date="${esc(date)}">Nothing planned</button>`}
       ${events.map((event) => `<p class="event-line">${event.time ? `<time>${esc(event.time)}</time>` : ""}${esc(event.title)}</p>`).join("")}
     </section>`;
 }
 
-function mealMenu(entry) {
-  return `<button class="icon-btn" type="button" data-action="recipe-menu" data-id="${esc(entry.id)}" data-date="${esc(entry.date)}" data-meal="${esc(entry.meal)}" aria-label="More">${dots()}</button>`;
+function mealMenu(entry, scope) {
+  const from = scope ? ` data-from="${scope}"` : "";
+  return `<button class="icon-btn" type="button" data-action="recipe-menu" data-id="${esc(entry.id)}" data-date="${esc(entry.date)}" data-meal="${esc(entry.meal)}"${from} aria-label="More">${dots()}</button>`;
 }
 
-function mealRow(entry) {
+function mealRow(entry, scope) {
   const recipe = recipeForEntry(entry);
-  if (entry.type === "leftovers") return leftoversRow(entry, recipe);
+  if (entry.type === "leftovers") return leftoversRow(entry, recipe, scope);
   const title = planTitle(entry);
   const meal = mealLabel(entry.meal);
   if (!recipe) {
-    return `<div class="meal-row meal-line"><button class="meal-open" type="button" data-action="open-day" data-date="${esc(entry.date)}"><span class="meal-copy"><strong>${esc(title)}</strong><span>${esc(meal)}</span></span></button>${mealMenu(entry)}</div>`;
+    return `<div class="meal-row meal-line"><button class="meal-open" type="button" data-action="open-day" data-date="${esc(entry.date)}"><span class="meal-copy"><strong>${esc(title)}</strong><span>${esc(meal)}</span></span></button>${mealMenu(entry, scope)}</div>`;
   }
-  return `<div class="meal-row meal-line"><button class="meal-open" type="button" data-action="open-recipe" data-id="${esc(recipe.id)}" data-date="${esc(entry.date)}" data-meal="${esc(entry.meal)}">${recipeThumb(recipe)}<span class="meal-copy"><strong>${esc(title)}</strong><span>${esc(meal)}</span></span></button>${mealMenu(entry)}</div>`;
+  return `<div class="meal-row meal-line"><button class="meal-open" type="button" data-action="open-recipe" data-id="${esc(recipe.id)}" data-date="${esc(entry.date)}" data-meal="${esc(entry.meal)}">${recipeThumb(recipe)}<span class="meal-copy"><strong>${esc(title)}</strong><span>${esc(meal)}</span></span></button>${mealMenu(entry, scope)}</div>`;
 }
 
 function mealLabel(meal) {
@@ -1185,6 +1186,7 @@ function sheetHtml() {
   if (state.sheet?.kind === "recipe-menu") {
     const mealMenu = Boolean(state.sheet.date && state.sheet.meal);
     const onToday = state.sheet.from === "today";
+    const hideAdd = onToday || state.sheet.from === "calendar";
     const planned = mealMenu ? (state.sheet.entryId ? entryById(state.sheet.entryId) : mealOn(state.sheet.date, state.sheet.meal)) : null;
     const recipe = activeRecipe();
     if (!mealMenu) {
@@ -1195,7 +1197,7 @@ function sheetHtml() {
     }
     return `<div class="sheet"><div class="sheet-card" role="dialog" aria-label="Meal">
         <div class="sheet-head"><span></span><button type="button" data-action="close-sheet" aria-label="Close">✕</button></div>
-        ${planned && !onToday ? `<button class="menu-row" type="button" data-action="add-meal" data-date="${esc(planned.date)}" data-meal="${esc(planned.meal)}">Add</button>` : ""}
+        ${planned && !hideAdd ? `<button class="menu-row" type="button" data-action="add-meal" data-date="${esc(planned.date)}" data-meal="${esc(planned.meal)}">Add</button>` : ""}
         ${planned ? `<button class="menu-row" type="button" data-action="remove-meal" data-id="${esc(planned.id)}">Remove</button>` : ""}
         ${recipe ? `<button class="menu-row" type="button" data-action="edit-recipe">Edit recipe</button>` : ""}
       </div></div>`;
@@ -1214,6 +1216,14 @@ function sheetHtml() {
         ${state.error ? `<p class="error">${esc(state.error)}</p>` : ""}
         <button class="menu-row" type="button" data-action="plan-replace">Replace</button>
         <button class="menu-row" type="button" data-action="plan-cancel">Cancel</button>
+      </div></div>`;
+  }
+  if (state.sheet?.kind === "remove-choice") {
+    return `<div class="sheet"><div class="sheet-card plan-choice" role="dialog" aria-label="Remove meal">
+        <div class="sheet-head"><span></span><button type="button" data-action="close-sheet" aria-label="Close">✕</button></div>
+        <p>Remove ${esc(state.sheet.name)} from ${esc(state.sheet.when)}?</p>
+        <button class="sheet-delete" type="button" data-action="confirm-remove" data-id="${esc(state.sheet.id)}">Remove</button>
+        <button class="menu-row" type="button" data-action="close-sheet">Cancel</button>
       </div></div>`;
   }
   if (state.sheet?.kind === "edit-recipe") return editRecipeHtml();
@@ -1395,6 +1405,7 @@ async function onClick(event) {
     state.swipeId = null;
     state.pickBack = null;
     render();
+    if (state.tab === "today") refresh(true);
     return;
   }
   if (action === "back") {
@@ -1481,7 +1492,8 @@ async function onClick(event) {
     render();
     return;
   }
-  if (action === "clear-meal" || action === "remove-meal") return removeMeal(button.dataset.id);
+  if (action === "clear-meal" || action === "remove-meal") return confirmRemove(button.dataset.id);
+  if (action === "confirm-remove") return removeMeal(button.dataset.id);
   if (action === "open-recipe") {
     const recipe = recipeById(button.dataset.id);
     const fromToday = !state.page && state.tab === "today";
@@ -1831,6 +1843,18 @@ async function planRecipe(date, meal, recipeId, keep = false) {
     state.error = error.message;
     render();
   }
+}
+
+function confirmRemove(id) {
+  const entry = entryById(id);
+  if (!entry) return removeMeal(id);
+  state.sheet = {
+    kind: "remove-choice",
+    id,
+    name: planTitle(entry),
+    when: formatUtc(entry.date, { weekday: "short", month: "short", day: "numeric" }),
+  };
+  render();
 }
 
 async function removeMeal(id) {
@@ -2346,8 +2370,18 @@ function mondayOf(iso) {
   const weekday = new Date(Date.UTC(year, month - 1, day)).getUTCDay();
   return addDays(iso, weekday === 0 ? -6 : 1 - weekday);
 }
+function mergeDated(existing, incoming, range) {
+  const prior = Array.isArray(existing) ? existing : [];
+  const next = Array.isArray(incoming) ? incoming : [];
+  if (!range?.from || !range?.to) return next;
+  const seen = new Set(next.map((entry) => entry.id));
+  const kept = prior.filter((entry) => (entry.date < range.from || entry.date > range.to) && !seen.has(entry.id));
+  return kept.concat(next);
+}
+
 function visibleRange() {
   const today = nyToday();
+  if (!state.page && state.tab === "today") return { from: today, to: addDays(today, 6) };
   let from;
   let to;
   if (state.calMode === "month") {
