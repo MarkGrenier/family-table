@@ -64,7 +64,7 @@ const AISLE_GROUPS = [
 ];
 
 function blankAddDraft() {
-  return { quantityNote: "", store: "local", category: "shelf", section: "other", brand: "", notes: "", sectionTouched: false, aisleTouched: false, more: false };
+  return { quantityNote: "", store: "local", category: "shelf", section: "other", brand: "", notes: "", sectionTouched: false };
 }
 
 const app = document.getElementById("app");
@@ -946,20 +946,15 @@ function addHtml() {
   const draft = state.addDraft || blankAddDraft();
   const names = filteredSuggestions();
   const section = draft.sectionTouched ? draft.section : state.addQuery.trim() ? guessSection(state.addQuery) : "other";
-  const category = draft.aisleTouched ? draft.category : aisleFor(draft.store, section);
   return `<div class="sheet add-sheet"><form id="add-form" class="add-form sheet-card" data-form="add-item">
       <div class="topbar"><button class="back" type="button" data-action="back" aria-label="Close">✕</button><h1>Add</h1><span></span></div>
       <div class="pad">
         <input id="add-search" name="name" class="search-box" type="text" placeholder="Add something..." value="${esc(state.addQuery)}" maxlength="80" autocomplete="off" enterkeyhint="done" aria-label="Name">
         <label class="field-label">Quantity<input class="field-box" name="quantityNote" maxlength="140" value="${esc(draft.quantityNote)}" placeholder="2 lb, a bunch" enterkeyhint="done"></label>
         ${storeFieldHtml(draft.store)}
-        <button class="more-toggle" type="button" data-action="toggle-more" aria-expanded="${draft.more ? "true" : "false"}">${draft.more ? "Fewer details" : "More details"}</button>
-        <div class="more-details${draft.more ? "" : " is-hidden"}">
-          <label class="field-label">Aisle<span class="select-wrap"><select class="box" name="category">${choiceHtml(AISLE_GROUPS, category)}</select></span></label>
-          <label class="field-label">Section<span class="select-wrap"><select class="box" name="section">${choiceHtml(SECTIONS, section)}</select></span></label>
-          <label class="field-label">Brand<input class="field-box" name="brand" maxlength="80" value="${esc(draft.brand)}" enterkeyhint="done"></label>
-          <label class="field-label">Note<input class="field-box" name="notes" maxlength="500" value="${esc(draft.notes)}" enterkeyhint="done"></label>
-        </div>
+        <label class="field-label">Section<span class="select-wrap"><select class="box" name="section">${choiceHtml(SECTIONS, section)}</select></span></label>
+        <label class="field-label">Brand<input class="field-box" name="brand" maxlength="80" value="${esc(draft.brand)}" enterkeyhint="done"></label>
+        <label class="field-label">Note<input class="field-box" name="notes" maxlength="500" value="${esc(draft.notes)}" enterkeyhint="done"></label>
         ${state.error ? `<p class="error">${esc(state.error)}</p>` : ""}
         <button class="green-btn" type="submit">Add</button>
         <div id="suggest-list">${suggestHtml(names)}</div>
@@ -1241,11 +1236,9 @@ function sheetHtml() {
         <label class="field-label">Name<input class="field-box" name="name" required maxlength="80" value="${esc(item.name)}"></label>
         <label class="field-label">Quantity<input class="field-box" name="quantityNote" maxlength="140" value="${esc(qtyOf(item))}"></label>
         ${storeFieldHtml(storeIdOf(item))}
-        <button class="more-toggle" type="button" data-action="toggle-more" aria-expanded="${state.detailsOpen ? "true" : "false"}">${state.detailsOpen ? "Fewer details" : "More details"}</button>
-        <div class="more-details${state.detailsOpen ? "" : " is-hidden"}">
-          <label class="field-label">Section<span class="select-wrap"><select class="box" name="section">${choiceHtml(SECTIONS, item.section || "other")}</select></span></label>
-          <label class="field-label">Aisle<span class="select-wrap"><select class="box" name="category">${choiceHtml(AISLE_GROUPS, aisleOf(item))}</select></span></label>
-        </div>
+        <label class="field-label">Section<span class="select-wrap"><select class="box" name="section">${choiceHtml(SECTIONS, item.section || "other")}</select></span></label>
+        <label class="field-label">Brand<input class="field-box" name="brand" maxlength="80" value="${esc(item.brand || "")}" enterkeyhint="done"></label>
+        <label class="field-label">Note<input class="field-box" name="notes" maxlength="500" value="${esc(item.notes || "")}" enterkeyhint="done"></label>
         ${usedInHtml(item)}
       </form></div>`;
   }
@@ -1759,7 +1752,6 @@ async function onClick(event) {
     state.storeOpen = false;
     state.storeEdit = null;
     state.storeConfirm = null;
-    state.detailsOpen = false;
     state.error = "";
     state.swipeId = null;
     state.tab = "groceries";
@@ -1767,7 +1759,6 @@ async function onClick(event) {
     return;
   }
   if (action === "toggle-stores") return toggleStores(button);
-  if (action === "toggle-more") return toggleMore(button);
   if (action === "pick-store") return pickStore(button);
   if (action === "add-named-store") return addNamedStore(button);
   if (action === "edit-store") return editStoreRow(button);
@@ -1784,7 +1775,6 @@ async function onClick(event) {
     state.storeOpen = false;
     state.storeEdit = null;
     state.storeConfirm = null;
-    state.detailsOpen = false;
     state.sheet = { kind: "edit-item", id: button.dataset.id };
     render();
   }
@@ -1827,7 +1817,7 @@ function onInput(event) {
       draft.section = state.addQuery.trim() ? guessSection(state.addQuery) : "other";
       const section = form.querySelector("[name=section]");
       if (section) section.value = draft.section;
-      if (!draft.aisleTouched) setAddAisle(form, aisleFor(draft.store, draft.section));
+      draft.category = aisleFor(draft.store, draft.section);
     }
     return;
   }
@@ -2518,18 +2508,6 @@ function toggleStores(button) {
   }
 }
 
-function toggleMore(button) {
-  const form = button.closest("form");
-  const box = form?.querySelector(".more-details");
-  if (!box) return;
-  const open = box.classList.contains("is-hidden");
-  box.classList.toggle("is-hidden", !open);
-  button.setAttribute("aria-expanded", open ? "true" : "false");
-  button.textContent = open ? "Fewer details" : "More details";
-  if (form.id === "add-form" && state.addDraft) state.addDraft.more = open;
-  else state.detailsOpen = open;
-}
-
 function pickStore(button) {
   const form = button.closest("form");
   if (!form) return;
@@ -2676,12 +2654,6 @@ function guessSection(name) {
   return "pantry";
 }
 
-function setAddAisle(form, value) {
-  state.addDraft.category = value;
-  const aisle = form.querySelector("[name=category]");
-  if (aisle) aisle.value = value;
-}
-
 function onAddField(event) {
   const form = event.target.closest("#add-form");
   if (!form || !state.addDraft) return false;
@@ -2694,12 +2666,7 @@ function onAddField(event) {
   if (name === "section") {
     draft.section = event.target.value;
     draft.sectionTouched = true;
-    if (!draft.aisleTouched) setAddAisle(form, aisleFor(draft.store, draft.section));
-    return true;
-  }
-  if (name === "category") {
-    draft.category = event.target.value;
-    draft.aisleTouched = true;
+    draft.category = aisleFor(draft.store, draft.section);
     return true;
   }
   return false;
@@ -2713,9 +2680,7 @@ async function submitAdd(form) {
   const store = picked == null ? "local" : String(picked);
   if (store === "__add__") return;
   const section = String(data.get("section") || guessSection(name));
-  let category = String(data.get("category") || "");
-  const allowed = aisleOptions(store).map(([id]) => id);
-  if (!allowed.includes(category)) category = aisleFor(store, section);
+  const category = aisleFor(store, section);
   const ok = await addGrocery(name, {
     quantityNote: String(data.get("quantityNote") || "") || null,
     store,
@@ -2778,7 +2743,6 @@ function openEdit(id) {
   state.storeOpen = false;
   state.storeEdit = null;
   state.storeConfirm = null;
-  state.detailsOpen = false;
   state.sheet = { kind: "edit-item", id };
   render();
 }
@@ -2789,11 +2753,17 @@ async function saveItem(form) {
   const section = String(form.get("section") || "other");
   const picked = form.get("store");
   const store = picked == null ? "local" : String(picked);
-  const category = String(form.get("category") || aisleFor(store, section));
   try {
     await api(`/api/items/${id}`, {
       method: "PATCH",
-      body: { name: String(form.get("name") || ""), quantityNote: String(form.get("quantityNote") || "") || null, section, category, store },
+      body: {
+        name: String(form.get("name") || ""),
+        quantityNote: String(form.get("quantityNote") || "") || null,
+        section,
+        store,
+        brand: String(form.get("brand") || "") || null,
+        notes: String(form.get("notes") || "") || null,
+      },
     });
     state.sheet = null;
     await refresh(true);

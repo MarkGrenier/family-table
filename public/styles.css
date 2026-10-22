@@ -467,7 +467,7 @@ h1, .title {
 .store-current span { color: var(--muted); font-weight: 650; }
 .store-current strong { font-weight: 400; }
 .store-menu { margin-top: 0.35rem; }
-.store-menu.is-hidden, .more-details.is-hidden { display: none; }
+.store-menu.is-hidden { display: none; }
 .store-list {
   max-height: 11rem;
   margin-top: 0.3rem;
@@ -504,15 +504,6 @@ h1, .title {
 .store-confirm { font-size: 0.84rem; color: var(--muted); }
 .store-confirm span { flex: 1; }
 .store-empty { margin: 0.45rem 0.75rem; }
-.more-toggle {
-  display: block;
-  min-height: 36px;
-  margin: 0.1rem 0 0.25rem;
-  padding: 0.2rem 0;
-  color: var(--green);
-  font-weight: 700;
-  text-align: left;
-}
 .used-in { margin-top: 0.85rem; }
 .used-line {
   display: flex;

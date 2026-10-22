@@ -2128,8 +2128,11 @@ describe("grocery API", () => {
     expect(addForm.match(/type="submit"/g)).toHaveLength(1);
     expect(addForm).toContain('name="quantityNote"');
     expect(addForm).toContain("storeFieldHtml");
-    expect(addForm).toContain("More details");
-    expect(addForm).toContain("more-details");
+    expect(addForm).toContain('name="section"');
+    expect(addForm).not.toContain("More details");
+    expect(addForm).not.toContain("more-details");
+    expect(addForm).not.toContain('name="category"');
+    expect(addForm).not.toContain(">Aisle");
     expect(addForm).toContain('class="sheet add-sheet"');
     expect(addForm).not.toContain("choiceHtml(STORES");
     expect(js).toContain('Add "');
@@ -2156,7 +2159,11 @@ describe("grocery API", () => {
     expect(addForm).not.toContain("checkIcon");
     const editItem = js.slice(js.indexOf('state.sheet?.kind === "edit-item"'), js.indexOf('state.sheet?.kind === "recipe-menu"'));
     expect(editItem).toContain("usedInHtml");
+    expect(editItem).toContain('name="section"');
+    expect(editItem).toContain('name="brand"');
     expect(editItem).not.toContain("sheet-delete");
+    expect(editItem).not.toContain('name="category"');
+    expect(editItem).not.toContain("More details");
     expect(js).toContain('data-action="delete-item"');
     expect(js).toContain('name="ing-name"');
     expect(js).toContain("raised && cooked");
@@ -2237,9 +2244,9 @@ describe("grocery API", () => {
     expect(css).toContain("opacity 300ms");
     expect(css).toContain(".month-panel-head.is-today .week-date");
     const shell = await (await exports.default.fetch("https://grocery.test/sw.js")).text();
-    expect(shell).toContain("grocery-shell-v59");
-    expect(shell).toContain("/styles.css?v=53");
-    expect(shell).toContain("/app.js?v=57");
+    expect(shell).toContain("grocery-shell-v60");
+    expect(shell).toContain("/styles.css?v=54");
+    expect(shell).toContain("/app.js?v=58");
     expect(css).toContain(".section-head.store-head { font-weight: 400; }");
     expect(css).toContain(".store-current strong { font-weight: 400; }");
     const storeNames = css.slice(css.indexOf(".store-pick"), css.indexOf(".store-add"));
