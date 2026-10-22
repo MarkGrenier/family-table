@@ -556,6 +556,10 @@ button.box { display: block; width: 100%; text-align: left; font-weight: 400; }
   padding: 0.8rem 1.1rem calc(1.2rem + env(safe-area-inset-bottom));
 }
 
+.can-swipe-back { touch-action: pan-y; overscroll-behavior-x: none; }
+.is-swipe-back { box-shadow: -12px 0 28px rgba(0, 0, 0, 0.16); }
+html.is-edge-dragging { overflow-x: hidden; }
+
 .sheet-delete {
   display: flex;
   align-items: center;
@@ -1123,6 +1127,7 @@ body:has(.night-screen),
 @media (prefers-reduced-motion: reduce) {
   .splash { transition: none; }
   .g-swipe.is-checking-out { transition: none; transform: none; }
+  .is-swipe-back { transition: none; }
 }
 .review-pill {
   display: inline-flex;

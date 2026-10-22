@@ -91,6 +91,12 @@ const UNDO_MS = 2000;
 const UNDO_FADE_MS = 400;
 const CHECK_HOLD_MS = 600;
 const CHECK_LEAVE_MS = 380;
+const EDGE_PX = 30;
+const BACK_LOCK_PX = 10;
+const BACK_FLICK_PX = 24;
+const BACK_FLICK_V = 0.55;
+const BACK_SNAP_MS = 280;
+const BACK_SELECTOR = '[data-action="back"], [data-action="close-sheet"], [data-action="close-cook"], [data-action="close-feedback"], [data-action="cancel-pick"], [data-action="plan-cancel"]';
 let noticeTimer = null;
 let renderQueued = false;
 const checkouts = new Map();
@@ -104,6 +110,9 @@ const pendingSlots = new Map();
 const deleteJobs = new Map();
 const removeSerial = new Map();
 let swallowClick = false;
+let edgeClick = false;
+let backSettle = 0;
+let edgeAnimating = 0;
 let viewKeySeen = "";
 
 function swallowNextClick() {
@@ -179,7 +188,7 @@ async function refresh(force) {
     state.plan = applyPlanPending(mergeDated(state.plan, plan.plan || [], range));
     state.events = mergeDated(state.events, events.events || [], range);
     state.error = "";
-    if ((force || !isTyping()) && !gesture?.dragging) render();
+    if ((force || !isTyping()) && !gesture?.dragging && gesture?.kind !== "back" && !edgeAnimating) render();
   } catch (error) {
     if (serial !== refreshSerial) return;
     if (error.status === 401) {
@@ -258,6 +267,7 @@ function render(force = false) {
       document.getElementById(id)?.scrollIntoView({ block: "center" });
     }
     avoidFab();
+    markSwipeBack();
   };
   if (state.loading) {
     finish();
@@ -1345,7 +1355,217 @@ function sheetHtml() {
   return "";
 }
 
+function findBackLayer() {
+  const sheets = [...app.querySelectorAll(".sheet")];
+  for (let i = sheets.length - 1; i >= 0; i -= 1) {
+    const sheet = sheets[i];
+    const control = backControl(sheet);
+    if (!control) continue;
+    return { layer: sheet.querySelector(".sheet-card") || sheet, touch: sheet, backdrop: sheet, control };
+  }
+  const main = app.querySelector("main");
+  const control = backControl(main);
+  if (!control || !main) return null;
+  return { layer: main, touch: main, backdrop: null, control };
+}
+
+function backControl(root) {
+  if (!root) return null;
+  const buttons = [...root.querySelectorAll(BACK_SELECTOR)];
+  if (!buttons.length) return null;
+  return buttons.find((button) => button.closest(".sheet-head, .topbar, .pick-bar") || button.classList.contains("cook-x") || button.classList.contains("float") || button.classList.contains("back")) || buttons[0];
+}
+
+function markSwipeBack() {
+  const found = findBackLayer();
+  for (const el of app.querySelectorAll(".can-swipe-back")) {
+    if (!found || el !== found.touch) el.classList.remove("can-swipe-back");
+  }
+  found?.touch?.classList.add("can-swipe-back");
+}
+
+function beginEdgeBack(event) {
+  if (event.button !== 0 || event.isPrimary === false) return false;
+  if (event.clientX > EDGE_PX) return false;
+  if (event.target.closest?.("input, textarea, select, [contenteditable='true']")) return false;
+  const found = findBackLayer();
+  if (!found) return false;
+  clearGesture();
+  gesture = {
+    kind: "back",
+    pointerId: event.pointerId,
+    x: event.clientX,
+    y: event.clientY,
+    t: event.timeStamp,
+    lastX: event.clientX,
+    lastT: event.timeStamp,
+    velocity: 0,
+    dx: 0,
+    dragging: false,
+    layer: found.layer,
+    touch: found.touch,
+    backdrop: found.backdrop,
+    control: found.control,
+  };
+  return true;
+}
+
+function moveEdgeBack(event) {
+  if (!gesture || gesture.kind !== "back" || gesture.pointerId !== event.pointerId) return;
+  if (!gesture.layer?.isConnected) {
+    clearGesture();
+    return;
+  }
+  const dx = event.clientX - gesture.x;
+  const dy = event.clientY - gesture.y;
+  const dt = event.timeStamp - gesture.lastT;
+  if (dt > 0 && dt < 80) gesture.velocity = (event.clientX - gesture.lastX) / dt;
+  else if (dt >= 80) gesture.velocity = 0;
+  gesture.lastX = event.clientX;
+  gesture.lastT = event.timeStamp;
+  if (!gesture.dragging) {
+    if (Math.abs(dx) < BACK_LOCK_PX && Math.abs(dy) < BACK_LOCK_PX) return;
+    if (dx < BACK_LOCK_PX || Math.abs(dy) > dx) {
+      clearGesture();
+      return;
+    }
+    gesture.dragging = true;
+    backSettle += 1;
+    try {
+      gesture.touch?.setPointerCapture?.(event.pointerId);
+    } catch {
+      // Pointer capture can throw if the pointer already ended.
+    }
+    document.documentElement.classList.add("is-edge-dragging");
+    if (reduceMotion()) return;
+    gesture.layer.classList.add("is-swipe-back");
+    gesture.layer.style.transition = "none";
+  }
+  gesture.dx = Math.max(0, dx);
+  if (reduceMotion()) return;
+  if (event.cancelable) event.preventDefault();
+  gesture.layer.style.transform = `translateX(${gesture.dx}px)`;
+  paintEdgeBackdrop(gesture.backdrop, gesture.layer, gesture.dx, true);
+}
+
+function endEdgeBack(event) {
+  const current = gesture;
+  if (!current || current.kind !== "back") return;
+  if (event.timeStamp - current.lastT > 80) current.velocity = 0;
+  const dx = Math.max(0, event.clientX - current.x);
+  const width = backWidth(current.layer);
+  const commit = current.dragging && (dx >= width / 3 || (current.velocity >= BACK_FLICK_V && dx >= BACK_FLICK_PX));
+  clearGesture();
+  if (!current.dragging) {
+    document.documentElement.classList.remove("is-edge-dragging");
+    const upDy = event.clientY - current.y;
+    if (dx >= width / 3 && dx > Math.abs(upDy)) {
+      swallowNextClick();
+      runBackControl(current.control);
+    }
+    return;
+  }
+  if (!commit) {
+    swallowNextClick();
+    if (reduceMotion()) clearBackStyles(current.layer, current.backdrop);
+    else snapEdgeBack(current.layer, current.backdrop);
+    return;
+  }
+  if (reduceMotion()) {
+    clearBackStyles(current.layer, current.backdrop);
+    runBackControl(current.control);
+    swallowNextClick();
+    return;
+  }
+  swallowNextClick();
+  current.layer.classList.add("is-swipe-back");
+  current.layer.style.transition = `transform ${BACK_SNAP_MS}ms ease`;
+  current.layer.style.transform = `translateX(${width}px)`;
+  paintEdgeBackdrop(current.backdrop, current.layer, width, false);
+  settleEdgeBack(current.layer, current.backdrop, () => runBackControl(current.control));
+}
+
+function cancelEdgeBack() {
+  const current = gesture;
+  clearGesture();
+  if (!current?.dragging) {
+    document.documentElement.classList.remove("is-edge-dragging");
+    return;
+  }
+  swallowNextClick();
+  if (reduceMotion()) clearBackStyles(current.layer, current.backdrop);
+  else snapEdgeBack(current.layer, current.backdrop);
+}
+
+function backWidth(layer) {
+  const width = layer?.getBoundingClientRect().width || window.innerWidth;
+  return Math.max(1, width);
+}
+
+function paintEdgeBackdrop(backdrop, layer, dx, instant) {
+  if (!backdrop || backdrop === layer) return;
+  const alpha = 0.45 * Math.max(0, 1 - dx / backWidth(layer));
+  backdrop.style.transition = instant ? "none" : `background-color ${BACK_SNAP_MS}ms ease`;
+  backdrop.style.backgroundColor = `rgba(0, 0, 0, ${alpha})`;
+}
+
+function snapEdgeBack(layer, backdrop) {
+  if (!layer?.isConnected) {
+    clearBackStyles(layer, backdrop);
+    return;
+  }
+  layer.style.transition = `transform ${BACK_SNAP_MS}ms ease`;
+  layer.style.transform = "translateX(0px)";
+  if (backdrop && backdrop !== layer) {
+    backdrop.style.transition = `background-color ${BACK_SNAP_MS}ms ease`;
+    backdrop.style.backgroundColor = "rgba(0, 0, 0, 0.45)";
+  }
+  settleEdgeBack(layer, backdrop);
+}
+
+function settleEdgeBack(layer, backdrop, run) {
+  const token = ++backSettle;
+  let finished = false;
+  edgeAnimating += 1;
+  const finish = () => {
+    if (finished) return;
+    finished = true;
+    edgeAnimating = Math.max(0, edgeAnimating - 1);
+    layer?.removeEventListener("transitionend", onEnd);
+    if (token !== backSettle) return;
+    clearBackStyles(layer, backdrop);
+    run?.();
+  };
+  const onEnd = (event) => {
+    if (event.target !== layer || event.propertyName !== "transform") return;
+    finish();
+  };
+  layer?.addEventListener("transitionend", onEnd);
+  setTimeout(finish, BACK_SNAP_MS + 50);
+}
+
+function clearBackStyles(layer, backdrop) {
+  document.documentElement.classList.remove("is-edge-dragging");
+  if (layer) {
+    layer.classList.remove("is-swipe-back");
+    layer.style.transition = "";
+    layer.style.transform = "";
+  }
+  if (backdrop) {
+    backdrop.style.transition = "";
+    backdrop.style.backgroundColor = "";
+  }
+}
+
+function runBackControl(control) {
+  if (!control?.isConnected) return;
+  edgeClick = true;
+  control.click();
+  edgeClick = false;
+}
+
 function onPointerDown(event) {
+  if (beginEdgeBack(event)) return;
   const board = event.target.closest(".cal-board");
   if (board) {
     if (state.sheet?.kind === "pick-date") return;
@@ -1373,6 +1593,10 @@ function onPointerDown(event) {
 
 function onPointerMove(event) {
   if (!gesture || gesture.pointerId !== event.pointerId) return;
+  if (gesture.kind === "back") {
+    moveEdgeBack(event);
+    return;
+  }
   if (gesture.kind === "cal") return;
   if (gesture.kind === "recipe") {
     const dx = event.clientX - gesture.x;
@@ -1427,6 +1651,11 @@ function avoidFab() {
 
 function onPointerUp(event) {
   if (!gesture) return;
+  if (gesture.kind === "back") {
+    if (gesture.pointerId !== event.pointerId) return;
+    endEdgeBack(event);
+    return;
+  }
   const dx = event.clientX - gesture.x;
   const dy = event.clientY - gesture.y;
   if (gesture.kind === "recipe") {
@@ -1473,8 +1702,13 @@ function onPointerUp(event) {
   }
 }
 
-function onPointerCancel() {
+function onPointerCancel(event) {
   if (!gesture) return;
+  if (gesture.kind === "back") {
+    if (event && gesture.pointerId !== event.pointerId) return;
+    cancelEdgeBack();
+    return;
+  }
   if (gesture.kind === "cal" || gesture.kind === "recipe") {
     clearGesture();
     return;
@@ -1508,7 +1742,7 @@ function dismissSheet() {
 }
 
 async function onClick(event) {
-  if (swallowClick) {
+  if (swallowClick && !edgeClick) {
     swallowClick = false;
     return;
   }
