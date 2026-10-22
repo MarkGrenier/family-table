@@ -145,32 +145,10 @@ const PLURAL: Record<string, string> = {
   carton: "cartons",
   stick: "sticks",
   ear: "ears",
+  cube: "cubes",
 };
 
 const NO_SINGULAR = new Set(["asparagus", "couscous", "hummus", "molasses", "chips", "cookies", "brownies"]);
-
-const HIDDEN_UNITS = new Set(["tsp", "tbsp", "cup", "ml", "l", "pinch"]);
-
-const COUNT_UNITS = new Set([
-  "clove",
-  "can",
-  "package",
-  "bunch",
-  "slice",
-  "piece",
-  "stalk",
-  "head",
-  "bag",
-  "jar",
-  "box",
-  "pint",
-  "quart",
-  "gallon",
-  "bottle",
-  "carton",
-  "stick",
-  "ear",
-]);
 
 const NICE_FRACTIONS: Array<[number, number, string]> = [
   [1, 2, "½"],
@@ -531,53 +509,54 @@ function canonicalUnit(unit: string | null): string | null {
   return UNIT_WORDS[word] ?? word;
 }
 
-function purchaseKind(unit: string | null): "count" | "oz" | "g" | "hidden" | "other" {
-  const canonical = canonicalUnit(unit);
-  if (!canonical) return "count";
-  if (HIDDEN_UNITS.has(canonical)) return "hidden";
-  if (canonical === "oz" || canonical === "lb") return "oz";
-  if (canonical === "g" || canonical === "kg") return "g";
-  if (COUNT_UNITS.has(canonical)) return "count";
-  return "other";
+/** A stored amount that is only "for 3" or "for 2 recipes", with nothing else on the line. */
+export function isRecipeCountNote(note: string | null): boolean {
+  if (!note) return false;
+  return /^\s*for\s+\d+(\s+[A-Za-z]+)?\.?\s*$/i.test(note);
 }
 
-export function shoppingAmount(parts: ShoppingPart[], recipeCount: number): string | null {
-  const hint = recipeCount > 1 ? `for ${recipeCount} recipes` : null;
+export function shoppingAmount(parts: ShoppingPart[], _recipeCount?: number): string | null {
   const usable = parts.filter((part) => part.quantity != null && part.quantity > 0);
-  if (usable.length === 0) return hint;
-  const kinds = usable.map((part) => purchaseKind(part.unit));
-  if (kinds.some((kind) => kind === "hidden" || kind === "other")) return hint;
+  if (usable.length === 0) return null;
 
-  if (kinds.every((kind) => kind === "count")) {
-    const units = new Set(usable.map((part) => canonicalUnit(part.unit)));
-    if (units.size !== 1) return hint;
-    const total = usable.reduce((sum, part) => sum + (part.quantity ?? 0), 0);
-    return amountText(total, [...units][0]) || hint;
+  type Family = { unit: string | null; total: number };
+  const families: Family[] = [];
+  const byUnit = new Map<string, Family>();
+  for (const part of usable) {
+    const unit = canonicalUnit(part.unit);
+    const key = unit ?? "";
+    let family = byUnit.get(key);
+    if (!family) {
+      family = { unit, total: 0 };
+      byUnit.set(key, family);
+      families.push(family);
+    }
+    family.total += part.quantity ?? 0;
   }
 
-  if (kinds.every((kind) => kind === "oz")) {
-    const preferLb = usable.some((part) => canonicalUnit(part.unit) === "lb");
-    const ounces = usable.reduce((sum, part) => {
-      const qty = part.quantity ?? 0;
-      return sum + (canonicalUnit(part.unit) === "lb" ? qty * 16 : qty);
-    }, 0);
-    const rounded = Math.round(ounces * 1000) / 1000;
-    if (preferLb || rounded >= 16) return amountText(rounded / 16, "lb") || hint;
-    return amountText(rounded, "oz") || hint;
-  }
+  const weightRank: Record<string, number> = { lb: 0, oz: 1, kg: 2, g: 3 };
+  families.sort((left, right) => {
+    const leftRank = left.unit == null ? -1 : (weightRank[left.unit] ?? 10);
+    const rightRank = right.unit == null ? -1 : (weightRank[right.unit] ?? 10);
+    if (leftRank !== rightRank) return leftRank - rightRank;
+    return (left.unit ?? "").localeCompare(right.unit ?? "");
+  });
 
-  if (kinds.every((kind) => kind === "g")) {
-    const preferKg = usable.some((part) => canonicalUnit(part.unit) === "kg");
-    const grams = usable.reduce((sum, part) => {
-      const qty = part.quantity ?? 0;
-      return sum + (canonicalUnit(part.unit) === "kg" ? qty * 1000 : qty);
-    }, 0);
-    const rounded = Math.round(grams * 1000) / 1000;
-    if (preferKg || rounded >= 1000) return amountText(rounded / 1000, "kg") || hint;
-    return amountText(rounded, "g") || hint;
+  const pieces: string[] = [];
+  for (const family of families) {
+    const total = Math.round(family.total * 1000) / 1000;
+    if (total <= 0) continue;
+    // A pile of ounces (or grams) with no pounds (or kilograms) beside it still reads as one weight.
+    const text =
+      family.unit === "oz" && !byUnit.has("lb") && total >= 16
+        ? amountText(total / 16, "lb")
+        : family.unit === "g" && !byUnit.has("kg") && total >= 1000
+          ? amountText(total / 1000, "kg")
+          : amountText(total, family.unit);
+    if (text) pieces.push(text);
   }
-
-  return hint;
+  if (pieces.length === 0) return null;
+  return pieces.join(" + ").slice(0, 140);
 }
 
 export function combineAmounts(existing: string | null, addition: Ingredient): string | null {

@@ -1,4 +1,4 @@
-const CACHE = "grocery-shell-v66";
+const CACHE = "grocery-shell-v67";
 const SHELL = ["/", "/styles.css?v=58", "/app.js?v=64", "/manifest.json", "/mark.svg", "/fonts/fraunces-roman.woff2", "/fonts/fraunces-italic.woff2", "/splash/grain.svg", "/icons/icon-192.png", "/icons/apple-touch-icon.png"];
 
 self.addEventListener("install", (event) => {

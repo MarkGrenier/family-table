@@ -3,6 +3,7 @@ import {
   categoryForSection,
   groceryKey,
   groceryName,
+  isRecipeCountNote,
   normalizeStoredIngredient,
   scaleIngredient,
   shoppingAmount,
@@ -999,9 +1000,8 @@ export async function rebuildPlanGroceries(
       }
     }
     const shop = shoppingAmount(parts, identities.size);
-    const summed = shop != null && !/^for \d+ recipes$/.test(shop);
-    if (summed) return shop;
-    if (hand?.known && hand.note) return hand.note;
+    if (shop != null && !isRecipeCountNote(shop)) return shop;
+    if (hand?.known && hand.note && !isRecipeCountNote(hand.note)) return hand.note;
     if (hand && !hand.known && item.quantityNote && !isDisposableNote(item.quantityNote)) return item.quantityNote;
     return shop;
   }
@@ -1099,6 +1099,15 @@ export async function rebuildPlanGroceries(
         totals[placeIngredient(ingredients[index], `plan:${entry.id}:also:${recipeId}:${index}`)] += 1;
       }
     }
+  }
+
+  for (const item of items) {
+    if (item.removed || item.isNew) continue;
+    if (!isRecipeCountNote(item.quantityNote)) continue;
+    const next = noteFor(item);
+    if (next === item.quantityNote) continue;
+    item.quantityNote = next;
+    totals.updated += 1;
   }
 
   const statements: D1PreparedStatement[] = [];
@@ -1324,11 +1333,7 @@ function recipeIdentity(sourceKey: string): string | null {
 
 function isDisposableNote(note: string | null): boolean {
   if (!note) return true;
-  if (/^for \d+ recipes$/.test(note)) return true;
-  if (/\b(tsp|tbsp|teaspoons?|tablespoons?|cups?)\b/i.test(note)) return true;
-  if (note.includes("+")) return true;
-  if (/\bcubes?\b/i.test(note)) return true;
-  return false;
+  return isRecipeCountNote(note);
 }
 
 async function ingredientForSource(db: D1Database, sourceKey: string): Promise<Ingredient | null> {
@@ -1381,10 +1386,9 @@ async function refreshItemQuantity(db: D1Database, itemId: string): Promise<void
     }
   }
   const shop = shoppingAmount(parts, identities.size);
-  const summed = shop != null && !/^for \d+ recipes$/.test(shop);
   let next: string | null;
-  if (summed) next = shop;
-  else if (hand?.known && hand.note) next = hand.note;
+  if (shop != null && !isRecipeCountNote(shop)) next = shop;
+  else if (hand?.known && hand.note && !isRecipeCountNote(hand.note)) next = hand.note;
   else if (hand && !hand.known && item.quantityNote && !isDisposableNote(item.quantityNote)) next = item.quantityNote;
   else next = shop;
   if (next !== item.quantityNote) await updateItem(db, itemId, { quantityNote: next });

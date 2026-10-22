@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { groceryKey, shoppingAmount, singularize } from "../src/ingredients";
+import { groceryKey, isRecipeCountNote, shoppingAmount, singularize } from "../src/ingredients";
 
 describe("grocery names and purchase amounts", () => {
   it("singularizes the last word so plurals share a key", () => {
@@ -14,17 +14,20 @@ describe("grocery names and purchase amounts", () => {
     expect(groceryKey("English cucumbers")).toBe("english cucumber");
   });
 
-  it("sums only compatible purchase units", () => {
+  it("sums compatible units and lists the rest", () => {
+    expect(shoppingAmount([{ quantity: 1, unit: "cup" }, { quantity: 1, unit: "cup" }], 2)).toBe("2 cups");
+    expect(shoppingAmount([{ quantity: 1, unit: "lb" }, { quantity: 0.25, unit: "lb" }], 2)).toBe("1 ¼ lb");
     expect(shoppingAmount([{ quantity: 1, unit: "lb" }, { quantity: 1, unit: "lb" }], 2)).toBe("2 lb");
     expect(shoppingAmount([{ quantity: 8, unit: "oz" }, { quantity: 8, unit: "oz" }], 2)).toBe("1 lb");
-    expect(shoppingAmount([{ quantity: 1, unit: "lb" }, { quantity: 8, unit: "oz" }], 2)).toBe("1 ½ lb");
+    expect(shoppingAmount([{ quantity: 1, unit: "lb" }, { quantity: 8, unit: "oz" }], 2)).toBe("1 lb + 8 oz");
+    expect(shoppingAmount([{ quantity: 8, unit: "oz" }, { quantity: 1, unit: "lb" }], 2)).toBe("1 lb + 8 oz");
     expect(shoppingAmount([{ quantity: 2, unit: "clove" }, { quantity: 2, unit: "clove" }], 1)).toBe("4 cloves");
     expect(shoppingAmount([{ quantity: 2, unit: null }, { quantity: 1, unit: null }], 2)).toBe("3");
-    expect(shoppingAmount([{ quantity: 8.5, unit: "tsp" }], 1)).toBeNull();
-    expect(shoppingAmount([{ quantity: 8.5, unit: "tsp" }, { quantity: 1, unit: "tsp" }], 2)).toBe("for 2 recipes");
-    expect(shoppingAmount([{ quantity: 0.5, unit: "cup" }], 1)).toBeNull();
-    expect(shoppingAmount([{ quantity: 1, unit: "tbsp" }], 1)).toBeNull();
-    expect(shoppingAmount([{ quantity: 4, unit: "cube" }], 1)).toBeNull();
+    expect(shoppingAmount([{ quantity: 8.5, unit: "tsp" }], 1)).toBe("8 ½ tsp");
+    expect(shoppingAmount([{ quantity: 8.5, unit: "tsp" }, { quantity: 1, unit: "tsp" }], 2)).toBe("9 ½ tsp");
+    expect(shoppingAmount([{ quantity: 0.5, unit: "cup" }], 1)).toBe("½ cup");
+    expect(shoppingAmount([{ quantity: 1, unit: "tbsp" }], 1)).toBe("1 tbsp");
+    expect(shoppingAmount([{ quantity: 4, unit: "cube" }], 1)).toBe("4 cubes");
     expect(
       shoppingAmount(
         [
@@ -33,7 +36,19 @@ describe("grocery names and purchase amounts", () => {
         ],
         2,
       ),
-    ).toBe("for 2 recipes");
+    ).toBe("1 bag + 1 ½ cups");
     expect(shoppingAmount([{ quantity: 1, unit: "bag" }], 1)).toBe("1 bag");
+    expect(shoppingAmount([{ quantity: null, unit: null }, { quantity: null, unit: null }], 2)).toBeNull();
+    expect(shoppingAmount([], 3)).toBeNull();
+    expect(shoppingAmount([{ quantity: 1, unit: "cup" }], 4)).not.toMatch(/^for \d+/);
+  });
+
+  it("recognizes a recipe-count amount and nothing else", () => {
+    expect(isRecipeCountNote("for 2 recipes")).toBe(true);
+    expect(isRecipeCountNote("for 3")).toBe(true);
+    expect(isRecipeCountNote("For 10 recipes")).toBe(true);
+    expect(isRecipeCountNote("2 cups")).toBe(false);
+    expect(isRecipeCountNote("1 lb + 8 oz")).toBe(false);
+    expect(isRecipeCountNote("buy extra for 3")).toBe(false);
   });
 });

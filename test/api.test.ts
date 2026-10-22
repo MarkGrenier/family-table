@@ -1163,7 +1163,7 @@ describe("grocery API", () => {
     const shrimpDay = shiftDay(shopWindow().from, 4);
     await call("/api/plan", { method: "POST", token, body: { date: shrimpDay, meal: "dinner", type: "recipe", recipeId: id } });
     const items = ((await call("/api/items", { token })).json?.items ?? []) as Json[];
-    expect(items.find((item) => item.name === "Rice")?.quantityNote ?? null).toBeNull();
+    expect(items.find((item) => item.name === "Rice")?.quantityNote ?? null).toBe("½ cup");
     expect(items.some((item) => item.name === "Shrimp")).toBe(true);
     expect(items.some((item) => item.name === "Avocado")).toBe(false);
     const leftover = await call("/api/plan", {
@@ -1366,7 +1366,7 @@ describe("grocery API", () => {
     expect(day.recipeId).toBe(mainId);
   });
 
-  it("merges plurals, hides cooking measures, and keeps different sections apart", async () => {
+  it("merges plurals, sums amounts, and keeps different sections apart", async () => {
     const token = env.API_TOKEN;
     const first = await call("/api/recipes", {
       method: "POST",
@@ -1424,16 +1424,14 @@ describe("grocery API", () => {
 
     const garlics = items.filter((item) => item.name === "Garlic");
     expect(garlics).toHaveLength(2);
-    expect(garlics.find((item) => item.section === "produce")?.quantityNote).toBe("for 2 recipes");
+    expect(garlics.find((item) => item.section === "produce")?.quantityNote).toBe("9 ½ tsp");
     expect(garlics.find((item) => item.section === "pantry")?.quantityNote).toBe("1 jar");
-    expect(garlics.map((item) => String(item.quantityNote ?? "")).join(" ")).not.toMatch(/\b(tsp|tbsp|cups?)\b/i);
+    expect(String(garlics.find((item) => item.section === "pantry")?.quantityNote ?? "")).not.toMatch(/\b(tsp|tbsp|cups?)\b/i);
     const carrots = items.find((item) => item.name === "Carrots");
-    expect(carrots?.quantityNote).toBe("for 2 recipes");
-    expect(String(carrots?.quantityNote)).not.toMatch(/bag|cup/i);
+    expect(carrots?.quantityNote).toBe("1 bag + 1 ½ cups");
     const butter = items.find((item) => item.name === "Butter");
-    expect(butter?.quantityNote ?? null).toBeNull();
+    expect(butter?.quantityNote).toBe("4 cubes");
     expect(butter?.section).toBe("dairy");
-    expect(String(butter?.quantityNote ?? "")).not.toMatch(/cube/i);
   });
 
   it("skips usually-on-hand names and rebuilds planned groceries without dropping typed items", async () => {
@@ -1580,7 +1578,7 @@ describe("grocery API", () => {
     const items = ((await call("/api/items", { token })).json?.items ?? []) as Json[];
     const starch = items.filter((item) => /cornstarch/i.test(String(item.name)));
     expect(starch).toHaveLength(1);
-    expect(starch[0]?.quantityNote).toBe("for 10 recipes");
+    expect(starch[0]?.quantityNote).toBe("30 tbsp");
     expect(items.filter((item) => /chicken thigh/i.test(String(item.name)))).toHaveLength(1);
     expect(items.filter((item) => item.name === "Dish soap")).toHaveLength(1);
     const plan = ((await call(`/api/plan?from=${starchStart}&to=${starchStart}`, { token })).json?.plan ?? []) as Json[];
@@ -1589,6 +1587,65 @@ describe("grocery API", () => {
     expect(still.status).toBe(200);
     expect((still.json?.recipe as Json).name).toBe("Cornstarch chicken");
     expect(((still.json?.recipe as Json).ingredients as unknown[]) ?? []).toHaveLength(3);
+  });
+
+  it("rebuild clears a for-N amount and puts the summed total back", async () => {
+    const token = env.API_TOKEN;
+    const jarred = await call("/api/items", {
+      method: "POST",
+      token,
+      body: { name: "Jarred garlic", quantityNote: "for 2 recipes", store: "local", category: "shelf", section: "pantry" },
+    });
+    const paprika = await call("/api/items", {
+      method: "POST",
+      token,
+      body: { name: "Paprika", quantityNote: "for 3", store: "local", category: "shelf", section: "pantry" },
+    });
+    const milk = await call("/api/items", {
+      method: "POST",
+      token,
+      body: { name: "Oat milk", quantityNote: "2 cartons", store: "local", category: "refrigerated" },
+    });
+    expect(jarred.status).toBe(201);
+    expect(paprika.status).toBe(201);
+    expect(milk.status).toBe(201);
+    const cleared = await call("/api/groceries/rebuild", { method: "POST", token, body: {} });
+    expect(cleared.status).toBe(200);
+    expect(cleared.json).toMatchObject({ added: 0, updated: 2, removed: 0 });
+    const idle = ((await call("/api/items", { token })).json?.items ?? []) as Json[];
+    expect(idle.find((item) => item.id === (jarred.json?.item as Json).id)?.quantityNote ?? null).toBeNull();
+    expect(idle.find((item) => item.id === (paprika.json?.item as Json).id)?.quantityNote ?? null).toBeNull();
+    expect(idle.find((item) => item.id === (milk.json?.item as Json).id)?.quantityNote).toBe("2 cartons");
+
+    const first = await call("/api/recipes", {
+      method: "POST",
+      token,
+      body: { name: "Cup one", ingredients: ["1 cup rice"], steps: ["Boil."] },
+    });
+    const second = await call("/api/recipes", {
+      method: "POST",
+      token,
+      body: { name: "Cup two", ingredients: ["1 cup rice"], steps: ["Simmer."] },
+    });
+    const ids = [first, second].map((response) => (response.json?.recipe as Json).id as string);
+    const dates = [6, 7].map((offset) => shiftDay(shopWindow().from, offset));
+    for (let index = 0; index < ids.length; index += 1) {
+      const planned = await call("/api/plan", {
+        method: "POST",
+        token,
+        body: { date: dates[index], meal: "lunch", type: "recipe", recipeId: ids[index] },
+      });
+      expect(planned.status).toBe(200);
+    }
+    const before = ((await call("/api/items", { token })).json?.items ?? []) as Json[];
+    const rice = before.find((item) => item.name === "Rice");
+    expect(rice?.quantityNote).toBe("2 cups");
+    expect((await call(`/api/items/${rice?.id}`, { method: "PATCH", token, body: { quantityNote: "for 2 recipes" } })).status).toBe(200);
+    const rebuilt = await call("/api/groceries/rebuild", { method: "POST", token, body: {} });
+    expect(rebuilt.status).toBe(200);
+    const after = ((await call("/api/items", { token })).json?.items ?? []) as Json[];
+    expect(after.find((item) => item.name === "Rice")?.quantityNote).toBe("2 cups");
+    expect(after.find((item) => item.id === (milk.json?.item as Json).id)?.quantityNote).toBe("2 cartons");
   });
 
   it("keeps the main photo from the recipe, then the page card", async () => {
@@ -2382,7 +2439,7 @@ describe("grocery API", () => {
     expect(css).toContain("opacity 300ms");
     expect(css).toContain(".month-panel-head.is-today .week-date");
     const shell = await (await exports.default.fetch("https://grocery.test/sw.js")).text();
-    expect(shell).toContain("grocery-shell-v66");
+    expect(shell).toContain("grocery-shell-v67");
     expect(shell).toContain("/styles.css?v=58");
     expect(shell).toContain("/app.js?v=64");
     expect(css).toContain(".section-head.store-head { font-weight: 400; }");
