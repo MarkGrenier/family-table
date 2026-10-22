@@ -376,7 +376,7 @@ h1, .title {
   overflow: hidden;
   margin: 0 -1.15rem;
   width: calc(100% + 2.3rem);
-  max-height: 88px;
+  max-height: 112px;
   background: var(--danger);
   transition: max-height 0.22s ease, opacity 0.22s ease;
 }
@@ -640,29 +640,13 @@ button.box { display: block; width: 100%; text-align: left; font-weight: 400; }
 }
 .fresh-box:checked { background: var(--green); }
 .fresh-box:checked::after { left: 20px; }
-.coming-line {
-  display: flex;
-  align-items: center;
-  gap: 0.45rem;
-  width: 100%;
-  min-height: 40px;
-  margin-top: 1.15rem;
+.buy-hint {
+  display: block;
+  margin-top: 0.08rem;
   color: var(--muted);
-  font-size: 0.9rem;
-  text-align: left;
+  font-size: 0.78rem;
+  font-weight: 500;
 }
-.coming-line.is-docked {
-  position: fixed;
-  left: 50%;
-  transform: translateX(-50%);
-  bottom: calc(var(--tab-bar) + 0.1rem);
-  width: min(45rem, 100%);
-  margin: 0;
-  padding: 0.35rem 1.15rem 0.45rem;
-  background: var(--bg);
-  z-index: 18;
-}
-.coming-count { font-variant-numeric: tabular-nums; }
 
 .field-box, .search-box, textarea.box, select.box, button.box {
   width: 100%;

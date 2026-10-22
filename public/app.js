@@ -39,7 +39,6 @@ const state = {
   todayServings: null,
   todayServingsOpen: false,
   todayId: null,
-  comingOpen: false,
 };
 
 const SECTIONS = [
@@ -319,7 +318,7 @@ function bodyHtml() {
 
 function tabsHtml() {
   const today = nyToday();
-  const count = state.items.filter((item) => !item.checked && item.id !== state.checking && !(item.dueDate && item.dueDate > today)).length;
+  const count = state.items.filter((item) => !item.checked && item.id !== state.checking && !freshWaiting(item, today)).length;
   return `<nav class="tabs">${tabBtn("today", "Today", sun())}${tabBtn("calendar", "Week", cal())}${tabBtn("recipes", "Recipes", book())}${tabBtn("groceries", "Groceries", cart(), count)}</nav>`;
 }
 
@@ -875,13 +874,14 @@ function groceriesHtml() {
   const today = nyToday();
   const open = state.items.filter((item) => !item.checked || item.id === state.checking);
   const buyToday = [];
-  const coming = [];
+  const fresh = [];
   const rest = [];
   for (const item of open) {
-    if (item.dueDate && item.dueDate <= today) buyToday.push(item);
-    else if (item.dueDate && item.dueDate > today) coming.push(item);
+    if (item.fresh && item.dueDate && item.dueDate <= today) buyToday.push(item);
+    else if (freshWaiting(item, today)) fresh.push(item);
     else rest.push(item);
   }
+  fresh.sort((a, b) => (a.dueDate || "9999").localeCompare(b.dueDate || "9999") || a.name.localeCompare(b.name));
   const byStore = new Map();
   for (const item of rest) {
     const id = storeIdOf(item);
@@ -907,21 +907,21 @@ function groceriesHtml() {
     return { label, aisles };
   }).filter((block) => block.aisles.length);
   const done = state.items.filter((item) => item.checked && item.id !== state.checking);
-  const body = blocks.map((block) => `<h2 class="section-head store-head">${esc(block.label)}</h2>${block.aisles.map((aisle) => `<h3 class="aisle-head">${esc(aisle.label)}</h3>${aisle.items.map(groceryRow).join("")}`).join("")}`).join("");
-  const comingLine = coming.length
-    ? `${state.comingOpen ? coming.map(groceryRow).join("") : ""}<button class="coming-line${state.comingOpen ? "" : " is-docked"}" type="button" data-action="toggle-coming" aria-expanded="${state.comingOpen ? "true" : "false"}">Coming up <span class="coming-count">${coming.length}</span></button>`
+  const body = blocks.map((block) => `<h2 class="section-head store-head">${esc(block.label)}</h2>${block.aisles.map((aisle) => `<h3 class="aisle-head">${esc(aisle.label)}</h3>${aisle.items.map((item) => groceryRow(item)).join("")}`).join("")}`).join("");
+  const freshBlock = fresh.length
+    ? `<h2 class="section-head">Fresh</h2>${fresh.map((item) => groceryRow(item, buyHint(item))).join("")}`
     : "";
-  const clear = !body && !buyToday.length && !coming.length;
+  const clear = !body && !buyToday.length && !fresh.length;
   return `<div class="title-row"><h1>Groceries</h1><button class="icon-green" type="button" data-action="grocery-menu" aria-label="List options">${dots()}</button></div>
-    ${buyToday.length ? `<h2 class="section-head">Buy today</h2>${buyToday.map(groceryRow).join("")}` : ""}
+    ${buyToday.length ? `<h2 class="section-head">Buy today</h2>${buyToday.map((item) => groceryRow(item)).join("")}` : ""}
     ${body}
     ${clear ? `<p class="empty">The list is clear.</p>` : ""}
-    ${comingLine}
-    ${state.doneOpen && done.length ? `<h2 class="section-head">Completed</h2>${done.map(groceryRow).join("")}` : ""}
+    ${freshBlock}
+    ${state.doneOpen && done.length ? `<h2 class="section-head">Completed</h2>${done.map((item) => groceryRow(item)).join("")}` : ""}
     <button class="fab" type="button" data-action="add-item" aria-label="Add">+</button>`;
 }
 
-function groceryRow(item) {
+function groceryRow(item, hint) {
   const checking = state.checking === item.id;
   const done = item.checked || checking;
   const open = state.swipeId === item.id;
@@ -929,10 +929,19 @@ function groceryRow(item) {
       <button class="g-delete" type="button" data-action="delete-item" data-id="${esc(item.id)}">Delete</button>
       <div class="g-row${done ? " is-done" : ""}" data-id="${esc(item.id)}">
         <button class="check${done ? " is-on" : ""} g-check" type="button" data-action="toggle-item" data-id="${esc(item.id)}" aria-label="${done ? "Put back" : "Mark bought"} ${esc(item.name)}">${done ? checkIcon() : ""}</button>
-        <span class="g-name">${esc(item.name)}</span>
+        <span class="g-name">${esc(item.name)}${hint ? `<span class="buy-hint">${esc(hint)}</span>` : ""}</span>
         <span class="qty">${esc(qtyOf(item))}</span>
       </div>
     </div>`;
+}
+
+function freshWaiting(item, today) {
+  return Boolean(item.fresh) && !(item.dueDate && item.dueDate <= today);
+}
+
+function buyHint(item) {
+  if (!item.dueDate) return "";
+  return `Buy ${formatUtc(item.dueDate, { weekday: "short" })}`;
 }
 
 function itemHtml(id) {
@@ -1761,11 +1770,6 @@ async function onClick(event) {
   if (action === "toggle-done") {
     state.doneOpen = !state.doneOpen;
     state.sheet = null;
-    render();
-    return;
-  }
-  if (action === "toggle-coming") {
-    state.comingOpen = !state.comingOpen;
     render();
     return;
   }
