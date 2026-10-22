@@ -2269,6 +2269,7 @@ describe("grocery API", () => {
     expect(addForm).not.toContain('name="brand"');
     expect(addForm).not.toContain(">Brand");
     expect(addForm.indexOf('name="section"')).toBeLessThan(addForm.indexOf("storeFieldHtml"));
+    expect(addForm.indexOf("freshRowHtml(draft.fresh)")).toBeLessThan(addForm.indexOf('name="notes"'));
     expect(addForm).toContain('name="notes"');
     expect(addForm).toContain("freshRowHtml(draft.fresh)");
     const freshRow = js.slice(js.indexOf("function freshRowHtml"), js.indexOf("function aisleFor"));
@@ -2285,6 +2286,7 @@ describe("grocery API", () => {
     expect(editItem).not.toContain("sheet-delete");
     expect(editItem).not.toContain('name="category"');
     expect(editItem).not.toContain("More details");
+    expect(editItem.indexOf("freshRowHtml")).toBeLessThan(editItem.indexOf('name="notes"'));
     expect(editItem).toContain("freshRowHtml");
     const saveItem = js.slice(js.indexOf("async function saveItem"), js.indexOf("async function fetchRecipe"));
     expect(saveItem).not.toContain("brand");
@@ -2376,9 +2378,9 @@ describe("grocery API", () => {
     expect(css).toContain("opacity 300ms");
     expect(css).toContain(".month-panel-head.is-today .week-date");
     const shell = await (await exports.default.fetch("https://grocery.test/sw.js")).text();
-    expect(shell).toContain("grocery-shell-v64");
+    expect(shell).toContain("grocery-shell-v65");
     expect(shell).toContain("/styles.css?v=57");
-    expect(shell).toContain("/app.js?v=62");
+    expect(shell).toContain("/app.js?v=63");
     expect(css).toContain(".section-head.store-head { font-weight: 400; }");
     expect(css).toContain(".fresh-row {");
     expect(css).toContain(".coming-line.is-docked {");

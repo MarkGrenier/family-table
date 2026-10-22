@@ -971,8 +971,8 @@ function addHtml() {
         <label class="field-label">Quantity<input class="field-box" name="quantityNote" maxlength="140" value="${esc(draft.quantityNote)}" placeholder="2 lb, a bunch" enterkeyhint="done"></label>
         <label class="field-label">Section<span class="select-wrap"><select class="box" name="section">${choiceHtml(SECTIONS, section)}</select></span></label>
         ${storeFieldHtml(draft.store)}
-        <label class="field-label">Note<input class="field-box" name="notes" maxlength="500" value="${esc(draft.notes)}" enterkeyhint="done"></label>
         ${freshRowHtml(draft.fresh)}
+        <label class="field-label">Note<input class="field-box" name="notes" maxlength="500" value="${esc(draft.notes)}" enterkeyhint="done"></label>
         ${state.error ? `<p class="error">${esc(state.error)}</p>` : ""}
         <button class="green-btn" type="submit">Add</button>
         <div id="suggest-list">${suggestHtml(names)}</div>
@@ -1255,8 +1255,8 @@ function sheetHtml() {
         <label class="field-label">Quantity<input class="field-box" name="quantityNote" maxlength="140" value="${esc(qtyOf(item))}"></label>
         <label class="field-label">Section<span class="select-wrap"><select class="box" name="section">${choiceHtml(SECTIONS, item.section || "other")}</select></span></label>
         ${storeFieldHtml(storeIdOf(item))}
-        <label class="field-label">Note<input class="field-box" name="notes" maxlength="500" value="${esc(item.notes || "")}" enterkeyhint="done"></label>
         ${freshRowHtml(item.fresh)}
+        <label class="field-label">Note<input class="field-box" name="notes" maxlength="500" value="${esc(item.notes || "")}" enterkeyhint="done"></label>
       </form></div>`;
   }
   if (state.sheet?.kind === "recipe-menu") {
