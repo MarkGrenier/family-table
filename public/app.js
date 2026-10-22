@@ -19,7 +19,6 @@ const state = {
   loginError: "",
   passcode: "",
   showMeals: {},
-  checking: null,
   doneOpen: false,
   timer: null,
   timerHandle: null,
@@ -90,8 +89,13 @@ let undoTimer = null;
 let undoFadeTimer = null;
 const UNDO_MS = 2000;
 const UNDO_FADE_MS = 400;
+const CHECK_HOLD_MS = 600;
+const CHECK_LEAVE_MS = 380;
 let noticeTimer = null;
-let checkGeneration = 0;
+let renderQueued = false;
+const checkouts = new Map();
+const desiredChecked = new Map();
+const checkFlight = new Map();
 let refreshSerial = 0;
 let planSerial = 0;
 const pendingDeletes = new Set();
@@ -157,7 +161,7 @@ function dismissSplash() {
 
 async function refresh(force) {
   if (!state.authed) return;
-  if (state.checking && !force) return;
+  if (checkouts.size && !force) return;
   const serial = ++refreshSerial;
   try {
     const range = visibleRange();
@@ -234,7 +238,14 @@ function scrollToTop() {
   document.body.scrollTop = 0;
 }
 
-function render() {
+function render(force = false) {
+  if (!force && deferGroceryPaint()) {
+    renderQueued = true;
+    paintToast();
+    paintBadge();
+    return;
+  }
+  renderQueued = false;
   const key = viewKey();
   const moved = key !== viewKeySeen;
   if (moved && key.startsWith("tab:today")) state.todayPanel = "ingredients";
@@ -318,7 +329,7 @@ function bodyHtml() {
 
 function tabsHtml() {
   const today = nyToday();
-  const count = state.items.filter((item) => !item.checked && item.id !== state.checking && !freshWaiting(item, today)).length;
+  const count = state.items.filter((item) => !item.checked && !freshWaiting(item, today)).length;
   return `<nav class="tabs">${tabBtn("today", "Today", sun())}${tabBtn("calendar", "Week", cal())}${tabBtn("recipes", "Recipes", book())}${tabBtn("groceries", "Groceries", cart(), count)}</nav>`;
 }
 
@@ -872,7 +883,7 @@ function cookHtml() {
 
 function groceriesHtml() {
   const today = nyToday();
-  const open = state.items.filter((item) => !item.checked || item.id === state.checking);
+  const open = state.items.filter((item) => !item.checked || checkouts.has(item.id));
   const buyToday = [];
   const fresh = [];
   const rest = [];
@@ -906,7 +917,7 @@ function groceriesHtml() {
     })).filter((group) => group.items.length);
     return { label, aisles };
   }).filter((block) => block.aisles.length);
-  const done = state.items.filter((item) => item.checked && item.id !== state.checking);
+  const done = state.items.filter((item) => item.checked && !checkouts.has(item.id));
   const body = blocks.map((block) => `<h2 class="section-head store-head">${esc(block.label)}</h2>${block.aisles.map((aisle) => `<h3 class="aisle-head">${esc(aisle.label)}</h3>${aisle.items.map((item) => groceryRow(item)).join("")}`).join("")}`).join("");
   const freshBlock = fresh.length
     ? `<h2 class="section-head">Fresh</h2>${fresh.map((item) => groceryRow(item, buyHint(item))).join("")}`
@@ -922,15 +933,18 @@ function groceriesHtml() {
 }
 
 function groceryRow(item, hint) {
-  const checking = state.checking === item.id;
-  const done = item.checked || checking;
+  const phase = checkouts.get(item.id)?.phase;
+  const done = item.checked || Boolean(phase);
   const open = state.swipeId === item.id;
-  return `<div class="g-swipe${open ? " is-open" : ""}" data-id="${esc(item.id)}">
+  const leaving = phase === "leave" ? " is-checking-out" : "";
+  return `<div class="g-swipe${open ? " is-open" : ""}${leaving}" data-id="${esc(item.id)}">
+      <div class="g-clip">
       <button class="g-delete" type="button" data-action="delete-item" data-id="${esc(item.id)}">Delete</button>
       <div class="g-row${done ? " is-done" : ""}" data-id="${esc(item.id)}">
         <button class="check${done ? " is-on" : ""} g-check" type="button" data-action="toggle-item" data-id="${esc(item.id)}" aria-label="${done ? "Put back" : "Mark bought"} ${esc(item.name)}">${done ? checkIcon() : ""}</button>
         <span class="g-name">${esc(item.name)}${hint ? `<span class="buy-hint">${esc(hint)}</span>` : ""}</span>
         <span class="qty">${esc(qtyOf(item))}</span>
+      </div>
       </div>
     </div>`;
 }
@@ -2247,48 +2261,197 @@ async function sendFeedback(id) {
   }
 }
 
+function deferGroceryPaint() {
+  if (state.loading || !state.authed || state.page || state.sheet) return false;
+  if (state.tab !== "groceries") return false;
+  return [...checkouts.values()].some((entry) => entry.phase === "leave");
+}
+
+function paintToast() {
+  const html = toastHtml();
+  const current = app.querySelector(":scope > .toast");
+  if (!html) {
+    current?.remove();
+    return;
+  }
+  if (current) current.outerHTML = html;
+  else app.insertAdjacentHTML("beforeend", html);
+}
+
+function paintBadge() {
+  const btn = document.querySelector('.tabs button[data-tab="groceries"]');
+  if (!btn) return;
+  const today = nyToday();
+  const count = state.items.filter((item) => !item.checked && !freshWaiting(item, today)).length;
+  const label = btn.querySelector("span:last-child");
+  const badge = btn.querySelector(".badge");
+  if (!count) {
+    badge?.remove();
+    return;
+  }
+  if (!badge) {
+    label?.insertAdjacentHTML("beforebegin", `<span class="badge">${count}</span>`);
+    return;
+  }
+  badge.textContent = String(count);
+}
+
+function reduceMotion() {
+  return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
+function restoreRow(id, name) {
+  const swipe = document.querySelector(`.g-swipe[data-id="${cssEscape(id)}"]`);
+  if (!swipe) return false;
+  swipe.classList.remove("is-checking-out", "is-open");
+  swipe.querySelector(".g-row")?.classList.remove("is-done");
+  const check = swipe.querySelector(".g-check");
+  if (check) {
+    check.classList.remove("is-on");
+    check.setAttribute("aria-label", `Mark bought ${name}`);
+    check.textContent = "";
+  }
+  return true;
+}
+
+function putBack(id, name) {
+  const onScreen = restoreRow(id, name);
+  if (onScreen && deferGroceryPaint()) {
+    paintToast();
+    paintBadge();
+    return;
+  }
+  render(deferGroceryPaint());
+}
+
+function cancelCheckout(id) {
+  const entry = checkouts.get(id);
+  if (!entry) return;
+  clearTimeout(entry.timer);
+  checkouts.delete(id);
+}
+
+function armCheckout(id) {
+  cancelCheckout(id);
+  const entry = { phase: "hold", timer: 0 };
+  checkouts.set(id, entry);
+  entry.timer = setTimeout(() => beginLeave(id), CHECK_HOLD_MS);
+}
+
+function beginLeave(id) {
+  const entry = checkouts.get(id);
+  if (!entry || entry.phase !== "hold") return;
+  const item = state.items.find((entryItem) => entryItem.id === id);
+  if (!item?.checked) {
+    cancelCheckout(id);
+    return;
+  }
+  if (reduceMotion() || state.tab !== "groceries" || state.page) {
+    cancelCheckout(id);
+    render();
+    return;
+  }
+  entry.phase = "leave";
+  const row = document.querySelector(`.g-swipe[data-id="${cssEscape(id)}"]`);
+  if (!row) {
+    cancelCheckout(id);
+    render();
+    return;
+  }
+  row.classList.add("is-checking-out");
+  entry.timer = setTimeout(() => finishLeave(id), CHECK_LEAVE_MS);
+}
+
+function finishLeave(id) {
+  const entry = checkouts.get(id);
+  if (!entry || entry.phase !== "leave") return;
+  checkouts.delete(id);
+  const still = [...checkouts.values()].some((other) => other.phase === "leave");
+  if (still) {
+    document.querySelector(`.g-swipe[data-id="${cssEscape(id)}"]`)?.remove();
+    return;
+  }
+  render();
+}
+
+function settleCheck(id, checked) {
+  desiredChecked.set(id, checked);
+  if (checkFlight.has(id)) return checkFlight.get(id);
+  const job = (async () => {
+    try {
+      while (desiredChecked.has(id)) {
+        const want = desiredChecked.get(id);
+        await api(`/api/items/${id}`, { method: "PATCH", body: { checked: want } });
+        if (desiredChecked.get(id) === want) {
+          desiredChecked.delete(id);
+          break;
+        }
+      }
+    } catch (error) {
+      desiredChecked.delete(id);
+      cancelCheckout(id);
+      if (state.undo?.id === id && state.undo.kind === "check") clearUndo();
+      state.error = error.message;
+      try {
+        await refresh(true);
+      } catch {
+        render();
+      }
+      throw error;
+    }
+  })().finally(() => {
+    checkFlight.delete(id);
+    if (desiredChecked.has(id)) settleCheck(id, desiredChecked.get(id));
+  });
+  checkFlight.set(id, job);
+  return job;
+}
+
 async function toggleItem(id) {
   const item = state.items.find((entry) => entry.id === id);
   if (!item) return;
-  if (item.checked) {
-    if (state.undo?.id === id) clearUndo();
+  if (item.checked || checkouts.has(id)) {
+    if (state.undo?.id === id && state.undo.kind === "check") clearUndo();
+    cancelCheckout(id);
+    item.checked = false;
+    if (state.swipeId === id) state.swipeId = null;
+    putBack(id, item.name);
     try {
-      await api(`/api/items/${id}`, { method: "PATCH", body: { checked: false } });
-      await refresh(true);
-    } catch (error) {
-      state.error = error.message;
-      render();
+      await settleCheck(id, false);
+    } catch {
+      /* settleCheck already refreshed */
     }
     return;
   }
-  const generation = ++checkGeneration;
+  if (state.swipeId === id) state.swipeId = null;
   item.checked = true;
-  state.checking = null;
+  armCheckout(id);
   showUndo({ id, name: item.name, kind: "check" });
   render();
   try {
-    await api(`/api/items/${id}`, { method: "PATCH", body: { checked: true } });
-    if (generation !== checkGeneration) {
-      await api(`/api/items/${id}`, { method: "PATCH", body: { checked: false } });
-      await refresh(true);
-      return;
-    }
-    await refresh(true);
-  } catch (error) {
-    if (generation !== checkGeneration) return;
-    item.checked = false;
-    if (state.undo?.id === id && state.undo.kind === "check") clearUndo();
-    state.error = error.message;
-    render();
+    await settleCheck(id, true);
+  } catch {
+    /* settleCheck already refreshed */
   }
 }
 
 async function undoCheck() {
   const undo = state.undo;
   if (!undo) return;
-  checkGeneration += 1;
+  if (undo.kind === "check") {
+    const item = state.items.find((entry) => entry.id === undo.id);
+    clearUndo();
+    cancelCheckout(undo.id);
+    if (item) item.checked = false;
+    putBack(undo.id, item?.name || undo.name);
+    try {
+      await settleCheck(undo.id, false);
+    } catch {
+      /* settleCheck already refreshed */
+    }
+    return;
+  }
   clearUndo();
-  state.checking = null;
   try {
     if (undo.kind === "plan") {
       bumpRemove(undo.id);

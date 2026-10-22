@@ -373,17 +373,30 @@ h1, .title {
 
 .g-swipe {
   position: relative;
+  display: grid;
+  grid-template-rows: 1fr;
   overflow: hidden;
   margin: 0 -1.15rem;
   width: calc(100% + 2.3rem);
   max-height: 112px;
   background: var(--danger);
-  transition: max-height 0.22s ease, opacity 0.22s ease;
+  transition: grid-template-rows 0.34s ease, max-height 0.22s ease, opacity 0.28s ease, transform 0.34s ease;
 }
 .g-swipe.is-leaving {
   max-height: 0;
   min-height: 0;
   opacity: 0;
+}
+.g-swipe.is-checking-out {
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transform: translateY(-8px);
+  pointer-events: none;
+}
+.g-clip {
+  min-height: 0;
+  overflow: hidden;
+  position: relative;
 }
 .g-delete {
   position: absolute;
@@ -423,6 +436,7 @@ h1, .title {
 }
 
 .check.is-on { background: #1c1c1c; border-color: #1c1c1c; }
+.g-check.is-on { background: var(--green); border-color: var(--green); }
 
 .fab {
   position: fixed;
@@ -1108,6 +1122,7 @@ body:has(.night-screen),
 }
 @media (prefers-reduced-motion: reduce) {
   .splash { transition: none; }
+  .g-swipe.is-checking-out { transition: none; transform: none; }
 }
 .review-pill {
   display: inline-flex;
