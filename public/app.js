@@ -1472,6 +1472,10 @@ async function onClick(event) {
     swallowClick = false;
     return;
   }
+  const storeLabel = event.target.closest?.(".field-label");
+  if (state.storeOpen && !event.target.closest(".store-drop") && !storeLabel?.querySelector("[data-action=toggle-stores]")) {
+    closeStoreDrop();
+  }
   if (event.target.classList?.contains("sheet")) {
     if (state.sheet) dismissSheet();
     else if (state.page?.kind === "pick") closePick();
@@ -1750,6 +1754,8 @@ async function onClick(event) {
     state.addQuery = "";
     state.addDraft = blankAddDraft();
     state.storeOpen = false;
+    state.storeAdd = false;
+    state.storeEditOpen = false;
     state.storeEdit = null;
     state.storeConfirm = null;
     state.error = "";
@@ -1760,12 +1766,14 @@ async function onClick(event) {
   }
   if (action === "toggle-stores") return toggleStores(button);
   if (action === "pick-store") return pickStore(button);
-  if (action === "add-named-store") return addNamedStore(button);
+  if (action === "add-store-row") return showNewStore(button);
+  if (action === "save-store") return saveStore(button);
+  if (action === "edit-stores") return showEditStores(button);
   if (action === "edit-store") return editStoreRow(button);
   if (action === "save-rename") return saveRename(button);
   if (action === "ask-remove-store") {
     state.storeConfirm = button.dataset.id;
-    paintStoreList(button.closest("form"));
+    paintStoreMenus(button.closest("form"));
     return;
   }
   if (action === "confirm-remove-store") return removeStore(button.dataset.id);
@@ -1773,6 +1781,8 @@ async function onClick(event) {
   if (action === "edit-item") {
     state.swipeId = null;
     state.storeOpen = false;
+    state.storeAdd = false;
+    state.storeEditOpen = false;
     state.storeEdit = null;
     state.storeConfirm = null;
     state.sheet = { kind: "edit-item", id: button.dataset.id };
@@ -1819,11 +1829,6 @@ function onInput(event) {
       if (section) section.value = draft.section;
       draft.category = aisleFor(draft.store, draft.section);
     }
-    return;
-  }
-  if (event.target.name === "storeQuery") {
-    state.storeQuery = event.target.value;
-    paintStoreList(event.target.form);
     return;
   }
   if (onAddField(event)) return;
@@ -2437,74 +2442,72 @@ function storeEditIcon() {
 }
 
 function storeFieldHtml(selected) {
-  const query = state.storeQuery || "";
   const open = state.storeOpen ? "" : " is-hidden";
-  return `<div class="store-field">
+  const adding = state.storeAdd ? "" : " is-hidden";
+  const editing = state.storeEditOpen ? "" : " is-hidden";
+  return `<label class="field-label">Store<span class="select-wrap"><button class="box" type="button" data-action="toggle-stores" aria-haspopup="listbox" aria-expanded="${state.storeOpen ? "true" : "false"}">${esc(storeLabel(selected))}</button></span></label>
     <input type="hidden" name="store" value="${esc(selected || "")}">
-    <button class="store-current" type="button" data-action="toggle-stores" aria-expanded="${state.storeOpen ? "true" : "false"}">
-      <span>Store</span><strong>${esc(storeLabel(selected))}</strong>
-    </button>
-    <div class="store-menu${open}">
-      <input class="field-box" name="storeQuery" maxlength="40" placeholder="Find or add a store" aria-label="Find or add a store" autocomplete="off" enterkeyhint="done" value="${esc(query)}">
-      <div class="store-list">${storeListHtml(selected, query)}</div>
-    </div>
-  </div>`;
+    <div class="store-drop${open}" role="listbox">${storeOptionsHtml(selected)}</div>
+    <div class="new-store${adding}"><input class="field-box" name="newStore" maxlength="40" placeholder="Store name" aria-label="New store" autocomplete="off" enterkeyhint="done"><button class="text-green" type="button" data-action="save-store">Add</button></div>
+    <div class="store-edit-menu${editing}">${editStoresHtml()}</div>`;
 }
 
-function storeListHtml(selected, query) {
-  const typed = String(query || "").trim().replace(/\s+/g, " ");
-  const needle = typed.toLowerCase();
-  const stores = state.stores || [];
-  const rows = [];
-  const exact = stores.some((store) => store.name.toLowerCase() === needle);
-  if (typed && !exact && needle !== "no store") {
-    rows.push(`<button class="store-line store-add" type="button" data-action="add-named-store" data-name="${esc(typed)}">Add "${esc(typed)}"</button>`);
-  }
-  if (!needle || "no store".includes(needle)) {
-    rows.push(`<button class="store-line${selected ? "" : " is-on"}" type="button" data-action="pick-store" data-store="">No store</button>`);
-  }
-  stores.forEach((store) => {
-    if (needle && !store.name.toLowerCase().includes(needle)) return;
-    if (state.storeConfirm === store.id) {
-      rows.push(`<div class="store-confirm" data-id="${esc(store.id)}"><span>Remove ${esc(store.name)}? Its items will have no store.</span><button class="text-btn" type="button" data-action="confirm-remove-store" data-id="${esc(store.id)}">Remove</button><button class="text-green" type="button" data-action="edit-store" data-id="${esc(store.id)}">Cancel</button></div>`);
-      return;
-    }
-    if (state.storeEdit === store.id) {
-      rows.push(`<div class="store-rename" data-id="${esc(store.id)}"><input class="field-box" name="renameStore" maxlength="40" value="${esc(store.name)}" aria-label="Rename ${esc(store.name)}"><button class="text-green" type="button" data-action="save-rename" data-id="${esc(store.id)}">Save</button><button class="text-btn" type="button" data-action="ask-remove-store" data-id="${esc(store.id)}">Remove</button></div>`);
-      return;
-    }
-    const on = store.id === selected ? " is-on" : "";
-    rows.push(`<div class="store-line${on}"><button class="store-pick" type="button" data-action="pick-store" data-store="${esc(store.id)}">${esc(store.name)}</button><button class="store-edit" type="button" data-action="edit-store" data-id="${esc(store.id)}" aria-label="Edit ${esc(store.name)}">${storeEditIcon()}</button></div>`);
+function storeOptionsHtml(selected) {
+  const current = selected || "";
+  const rows = [`<button class="store-option${current ? "" : " is-on"}" type="button" data-action="pick-store" data-store="">No store</button>`];
+  (state.stores || []).forEach((store) => {
+    const on = store.id === current ? " is-on" : "";
+    rows.push(`<button class="store-option${on}" type="button" data-action="pick-store" data-store="${esc(store.id)}">${esc(store.name)}</button>`);
   });
-  if (!rows.length) rows.push(`<p class="muted store-empty">No matching store</p>`);
+  rows.push(`<button class="store-option" type="button" data-action="add-store-row">Add store…</button>`);
+  rows.push(`<button class="store-option" type="button" data-action="edit-stores">Edit stores…</button>`);
   return rows.join("");
 }
 
-function paintStoreList(form) {
+function editStoresHtml() {
+  const stores = state.stores || [];
+  if (!stores.length) return `<p class="muted store-empty">No stores yet.</p>`;
+  return stores.map((store) => {
+    if (state.storeConfirm === store.id) {
+      return `<div class="store-confirm" data-id="${esc(store.id)}"><span>Remove ${esc(store.name)}? Its items will have no store.</span><button class="text-btn" type="button" data-action="confirm-remove-store" data-id="${esc(store.id)}">Remove</button><button class="text-green" type="button" data-action="edit-store" data-id="${esc(store.id)}">Cancel</button></div>`;
+    }
+    if (state.storeEdit === store.id) {
+      return `<div class="store-rename" data-id="${esc(store.id)}"><input class="field-box" name="renameStore" maxlength="40" value="${esc(store.name)}" aria-label="Rename ${esc(store.name)}"><button class="text-green" type="button" data-action="save-rename" data-id="${esc(store.id)}">Save</button><button class="text-btn" type="button" data-action="ask-remove-store" data-id="${esc(store.id)}">Remove</button></div>`;
+    }
+    return `<div class="store-line"><span class="store-pick">${esc(store.name)}</span><button class="store-edit" type="button" data-action="edit-store" data-id="${esc(store.id)}" aria-label="Edit ${esc(store.name)}">${storeEditIcon()}</button></div>`;
+  }).join("");
+}
+
+function paintStoreMenus(form) {
   if (!form) return;
-  const list = form.querySelector(".store-list");
-  if (!list) return;
   const selected = form.querySelector("[name=store]")?.value || "";
-  const query = form.querySelector("[name=storeQuery]")?.value || "";
-  list.innerHTML = storeListHtml(selected, query);
+  const drop = form.querySelector(".store-drop");
+  if (drop) drop.innerHTML = storeOptionsHtml(selected);
+  const menu = form.querySelector(".store-edit-menu");
+  if (menu) menu.innerHTML = editStoresHtml();
+  const label = form.querySelector("[data-action=toggle-stores]");
+  if (label) label.textContent = storeLabel(selected);
+}
+
+function closeStoreDrop() {
+  state.storeOpen = false;
+  document.querySelectorAll(".store-drop").forEach((menu) => menu.classList.add("is-hidden"));
+  document.querySelectorAll("[data-action=toggle-stores]").forEach((button) => button.setAttribute("aria-expanded", "false"));
 }
 
 function toggleStores(button) {
-  const field = button.closest(".store-field");
-  const menu = field?.querySelector(".store-menu");
+  const form = button.closest("form");
+  const menu = form?.querySelector(".store-drop");
   if (!menu) return;
-  const open = !menu.classList.contains("is-hidden");
-  menu.classList.toggle("is-hidden", open);
-  state.storeOpen = !open;
-  button.setAttribute("aria-expanded", state.storeOpen ? "true" : "false");
-  if (state.storeOpen) field.querySelector("[name=storeQuery]")?.focus();
-  else {
-    state.storeQuery = "";
-    state.storeEdit = null;
-    state.storeConfirm = null;
-    const query = field.querySelector("[name=storeQuery]");
-    if (query) query.value = "";
-    paintStoreList(button.closest("form"));
+  const open = menu.classList.contains("is-hidden");
+  menu.classList.toggle("is-hidden", !open);
+  state.storeOpen = open;
+  button.setAttribute("aria-expanded", open ? "true" : "false");
+  if (open) {
+    state.storeAdd = false;
+    state.storeEditOpen = false;
+    form.querySelector(".new-store")?.classList.add("is-hidden");
+    form.querySelector(".store-edit-menu")?.classList.add("is-hidden");
   }
 }
 
@@ -2514,31 +2517,69 @@ function pickStore(button) {
   const choice = button.dataset.store ?? "";
   const hidden = form.querySelector("[name=store]");
   if (hidden) hidden.value = choice;
-  const label = form.querySelector(".store-current strong");
+  const label = form.querySelector("[data-action=toggle-stores]");
   if (label) label.textContent = storeLabel(choice);
-  form.querySelector(".store-menu")?.classList.add("is-hidden");
-  const toggle = form.querySelector("[data-action=toggle-stores]");
-  if (toggle) toggle.setAttribute("aria-expanded", "false");
-  state.storeOpen = false;
-  state.storeQuery = "";
+  closeStoreDrop();
+  state.storeAdd = false;
+  state.storeEditOpen = false;
   state.storeEdit = null;
   state.storeConfirm = null;
+  form.querySelector(".new-store")?.classList.add("is-hidden");
+  form.querySelector(".store-edit-menu")?.classList.add("is-hidden");
   if (form.id === "add-form" && state.addDraft) state.addDraft.store = choice;
 }
 
-async function addNamedStore(button) {
+function showNewStore(button) {
   const form = button.closest("form");
-  const name = String(button.dataset.name || "").trim();
-  if (!form || !name) return;
+  if (!form) return;
+  closeStoreDrop();
+  state.storeAdd = true;
+  state.storeEditOpen = false;
+  form.querySelector(".store-edit-menu")?.classList.add("is-hidden");
+  const row = form.querySelector(".new-store");
+  row?.classList.remove("is-hidden");
+  row?.querySelector("[name=newStore]")?.focus();
+}
+
+async function saveStore(button) {
+  const form = button.closest("form");
+  if (!form) return;
+  const raw = String(form.querySelector("[name=newStore]")?.value || "").trim().replace(/\s+/g, " ");
+  if (!raw) {
+    showFormError(form, "Type a store name.");
+    return;
+  }
   try {
-    const data = await api("/api/stores", { method: "POST", body: { name } });
+    const data = await api("/api/stores", { method: "POST", body: { name: raw } });
     const saved = data.store;
     if (saved && !(state.stores || []).some((store) => store.id === saved.id)) state.stores.push(saved);
     showFormError(form, "");
-    button.dataset.store = saved?.id || "";
-    pickStore(button);
+    const input = form.querySelector("[name=newStore]");
+    if (input) input.value = "";
+    state.storeAdd = false;
+    form.querySelector(".new-store")?.classList.add("is-hidden");
+    const hidden = form.querySelector("[name=store]");
+    if (hidden) hidden.value = saved?.id || "";
+    if (form.id === "add-form" && state.addDraft) state.addDraft.store = saved?.id || "";
+    paintStoreMenus(form);
   } catch (error) {
     showFormError(form, error.message);
+  }
+}
+
+function showEditStores(button) {
+  const form = button.closest("form");
+  if (!form) return;
+  closeStoreDrop();
+  state.storeAdd = false;
+  state.storeEditOpen = true;
+  state.storeEdit = null;
+  state.storeConfirm = null;
+  form.querySelector(".new-store")?.classList.add("is-hidden");
+  const menu = form.querySelector(".store-edit-menu");
+  if (menu) {
+    menu.innerHTML = editStoresHtml();
+    menu.classList.remove("is-hidden");
   }
 }
 
@@ -2546,8 +2587,8 @@ function editStoreRow(button) {
   state.storeEdit = button.dataset.id || null;
   state.storeConfirm = null;
   const form = button.closest("form");
-  paintStoreList(form);
-  form?.querySelector("[name=renameStore]")?.focus();
+    paintStoreMenus(form);
+    form?.querySelector("[name=renameStore]")?.focus();
 }
 
 async function saveRename(button) {
@@ -2562,11 +2603,7 @@ async function saveRename(button) {
     state.storeEdit = null;
     state.storeConfirm = null;
     showFormError(form, "");
-    if ((form.querySelector("[name=store]")?.value || "") === id) {
-      const label = form.querySelector(".store-current strong");
-      if (label) label.textContent = storeLabel(id);
-    }
-    paintStoreList(form);
+    paintStoreMenus(form);
   } catch (error) {
     showFormError(form, error.message);
   }
@@ -2582,7 +2619,7 @@ function showFormError(form, message) {
   if (!node) {
     node = document.createElement("p");
     node.className = "error store-error";
-    const menu = form.querySelector(".store-menu");
+    const menu = form.querySelector(".new-store");
     if (menu) menu.insertAdjacentElement("afterend", node);
     else form.appendChild(node);
   }
@@ -2597,7 +2634,8 @@ async function removeStore(id) {
     if (state.addDraft?.store === id) state.addDraft.store = "";
     state.storeEdit = null;
     state.storeConfirm = null;
-    state.storeOpen = true;
+    state.storeOpen = false;
+    state.storeEditOpen = true;
     await refresh(true);
   } catch (error) {
     state.error = error.message;
@@ -2608,7 +2646,7 @@ async function removeStore(id) {
 function onKeyDown(event) {
   if (event.key !== "Enter") return;
   const name = event.target?.name;
-  if (name !== "storeQuery" && name !== "renameStore") return;
+  if (name !== "newStore" && name !== "renameStore") return;
   event.preventDefault();
   const form = event.target.form;
   if (name === "renameStore") {
@@ -2616,21 +2654,8 @@ function onKeyDown(event) {
     if (button) saveRename(button);
     return;
   }
-  const add = form?.querySelector("[data-action=add-named-store]");
-  if (add) {
-    addNamedStore(add);
-    return;
-  }
-  const typed = String(event.target.value || "").trim().toLowerCase();
-  if (!typed || typed === "no store") {
-    const none = form?.querySelector('[data-action="pick-store"][data-store=""]');
-    if (none) pickStore(none);
-    return;
-  }
-  const match = (state.stores || []).find((store) => store.name.toLowerCase() === typed);
-  if (!match) return;
-  const button = [...(form?.querySelectorAll("[data-action=pick-store]") || [])].find((entry) => entry.dataset.store === match.id);
-  if (button) pickStore(button);
+  const add = form?.querySelector("[data-action=save-store]");
+  if (add) saveStore(add);
 }
 
 function guessSection(name) {
@@ -2741,6 +2766,8 @@ function openEdit(id) {
   if (!id) return;
   state.swipeId = null;
   state.storeOpen = false;
+  state.storeAdd = false;
+  state.storeEditOpen = false;
   state.storeEdit = null;
   state.storeConfirm = null;
   state.sheet = { kind: "edit-item", id };
