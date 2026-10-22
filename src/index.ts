@@ -18,6 +18,8 @@ import {
   replaceEvents,
   savePlan,
   syncWindowGroceries,
+  listDueGroceries,
+  withFreshTiming,
   setPlanAlternates,
   updateRecipe,
   getRecipe,
@@ -29,7 +31,7 @@ import {
   deleteRecipeSourcedItems,
   withGroceryRecipes,
 } from "./food";
-import { cleanWeekStart, dateRange, parseEvent, parseEventList, parsePlan, parsePlanAlternates, parseRecipe, parseRecipePatch, parseServingsOverride, parseWeek } from "./food-validate";
+import { cleanDate, cleanWeekStart, dateRange, parseEvent, parseEventList, parsePlan, parsePlanAlternates, parseRecipe, parseRecipePatch, parseServingsOverride, parseWeek } from "./food-validate";
 import { HttpError, json, readJson, text } from "./http";
 import { importSharedRecipe, personForShareKey, shareNotice } from "./share";
 import { importRecipeFromUrl } from "./import-recipe";
@@ -181,7 +183,7 @@ async function handleApi(request: Request, env: Env, path: string): Promise<Resp
 
   if (path === "/api/items" && method === "GET") {
     await syncWindowGroceries(env.DB);
-    return json({ items: await withGroceryRecipes(env.DB, await listItems(env.DB)) });
+    return json({ items: await withFreshTiming(env.DB, await withGroceryRecipes(env.DB, await listItems(env.DB))) });
   }
   if (path === "/api/items" && method === "DELETE") {
     const source = new URL(request.url).searchParams.get("source");
@@ -277,6 +279,13 @@ async function handleApi(request: Request, env: Env, path: string): Promise<Resp
     if (method !== "DELETE") throw new HttpError(405, "That action isn't available.");
     await deleteOnHand(env.DB, onHandMatch[1]);
     return json({ ok: true });
+  }
+  if (path === "/api/groceries" && method === "GET") {
+    const dueRaw = new URL(request.url).searchParams.get("due");
+    if (!dueRaw) throw new HttpError(400, "Send a due date, like 2026-10-25.");
+    const due = cleanDate(dueRaw, "The due date");
+    await syncWindowGroceries(env.DB);
+    return json({ groceries: await listDueGroceries(env.DB, due) });
   }
   if (path === "/api/groceries/rebuild") {
     if (method !== "POST") throw new HttpError(405, "That action isn't available.");

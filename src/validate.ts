@@ -26,6 +26,7 @@ export type ItemInput = {
   notes?: string | null;
   storeTag?: string | null;
   storeRequest?: string;
+  fresh?: boolean;
 };
 
 export type ItemPatch = {
@@ -44,6 +45,7 @@ export type ItemPatch = {
   notes?: string | null;
   storeTag?: string | null;
   storeRequest?: string;
+  fresh?: boolean;
   deleted?: boolean;
 };
 
@@ -174,6 +176,7 @@ export function parseNewItem(body: Record<string, unknown>): ItemInput {
     imageUrl: cleanOptional(body.imageUrl, "The photo", 500),
     substitute: cleanOptional(body.substitute, "The substitute", 280),
     notes: cleanOptional(body.notes, "The note", 500),
+    fresh: body.fresh == null ? false : cleanBool(body.fresh, "Fresh"),
   };
 }
 
@@ -198,6 +201,7 @@ export function parseItemPatch(body: Record<string, unknown>): ItemPatch {
   if ("imageUrl" in body) patch.imageUrl = cleanOptional(body.imageUrl, "The photo", 500);
   if ("substitute" in body) patch.substitute = cleanOptional(body.substitute, "The substitute", 280);
   if ("notes" in body) patch.notes = cleanOptional(body.notes, "The note", 500);
+  if ("fresh" in body) patch.fresh = cleanBool(body.fresh, "Fresh");
   if ("deleted" in body) patch.deleted = cleanBool(body.deleted, "Deleted");
   if (Object.keys(patch).length === 0) {
     throw new HttpError(400, "Nothing to change.");

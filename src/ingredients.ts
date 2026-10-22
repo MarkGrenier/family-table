@@ -39,6 +39,7 @@ export type Ingredient = {
   section: FoodSection;
   buy: boolean;
   optional: boolean;
+  fresh: boolean;
   note: string | null;
 };
 
@@ -374,6 +375,7 @@ function parseOne(input: string): Omit<Ingredient, "text"> | null {
     section,
     buy,
     optional,
+    fresh: false,
     note: notes.length ? notes.join(", ").slice(0, 140) : null,
   };
 }
@@ -417,6 +419,7 @@ export function normalizeIngredient(raw: unknown): Ingredient | null {
   const optional = typeof body.optional === "boolean" ? body.optional : parsed?.optional ?? false;
   const buy = typeof body.buy === "boolean" ? body.buy : optional ? false : parsed?.buy ?? !isPantryBasic(nameSource);
   const note = typeof body.note === "string" ? body.note.trim() || null : body.note === null ? null : parsed?.note ?? null;
+  const fresh = typeof body.fresh === "boolean" ? body.fresh : parsed?.fresh ?? false;
   const name = nameSource.replace(/\s+/g, " ");
   const display = text || [formatQuantity(qty ?? 0), unit, name].filter(Boolean).join(" ");
   return {
@@ -428,6 +431,7 @@ export function normalizeIngredient(raw: unknown): Ingredient | null {
     section,
     buy,
     optional,
+    fresh,
     note,
   };
 }

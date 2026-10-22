@@ -39,6 +39,7 @@ const state = {
   todayServings: null,
   todayServingsOpen: false,
   todayId: null,
+  comingOpen: false,
 };
 
 const SECTIONS = [
@@ -64,7 +65,7 @@ const AISLE_GROUPS = [
 ];
 
 function blankAddDraft() {
-  return { quantityNote: "", store: "local", category: "shelf", section: "other", brand: "", notes: "", sectionTouched: false };
+  return { quantityNote: "", store: "local", category: "shelf", section: "other", brand: "", notes: "", fresh: false, sectionTouched: false };
 }
 
 const app = document.getElementById("app");
@@ -317,7 +318,8 @@ function bodyHtml() {
 }
 
 function tabsHtml() {
-  const count = state.items.filter((item) => !item.checked && item.id !== state.checking).length;
+  const today = nyToday();
+  const count = state.items.filter((item) => !item.checked && item.id !== state.checking && !(item.dueDate && item.dueDate > today)).length;
   return `<nav class="tabs">${tabBtn("today", "Today", sun())}${tabBtn("calendar", "Week", cal())}${tabBtn("recipes", "Recipes", book())}${tabBtn("groceries", "Groceries", cart(), count)}</nav>`;
 }
 
@@ -870,9 +872,18 @@ function cookHtml() {
 }
 
 function groceriesHtml() {
+  const today = nyToday();
   const open = state.items.filter((item) => !item.checked || item.id === state.checking);
-  const byStore = new Map();
+  const buyToday = [];
+  const coming = [];
+  const rest = [];
   for (const item of open) {
+    if (item.dueDate && item.dueDate <= today) buyToday.push(item);
+    else if (item.dueDate && item.dueDate > today) coming.push(item);
+    else rest.push(item);
+  }
+  const byStore = new Map();
+  for (const item of rest) {
     const id = storeIdOf(item);
     if (!byStore.has(id)) byStore.set(id, []);
     byStore.get(id).push(item);
@@ -897,8 +908,15 @@ function groceriesHtml() {
   }).filter((block) => block.aisles.length);
   const done = state.items.filter((item) => item.checked && item.id !== state.checking);
   const body = blocks.map((block) => `<h2 class="section-head store-head">${esc(block.label)}</h2>${block.aisles.map((aisle) => `<h3 class="aisle-head">${esc(aisle.label)}</h3>${aisle.items.map(groceryRow).join("")}`).join("")}`).join("");
+  const comingLine = coming.length
+    ? `${state.comingOpen ? coming.map(groceryRow).join("") : ""}<button class="coming-line${state.comingOpen ? "" : " is-docked"}" type="button" data-action="toggle-coming" aria-expanded="${state.comingOpen ? "true" : "false"}">Coming up <span class="coming-count">${coming.length}</span></button>`
+    : "";
+  const clear = !body && !buyToday.length && !coming.length;
   return `<div class="title-row"><h1>Groceries</h1><button class="icon-green" type="button" data-action="grocery-menu" aria-label="List options">${dots()}</button></div>
-    ${body || `<p class="empty">The list is clear.</p>`}
+    ${buyToday.length ? `<h2 class="section-head">Buy today</h2>${buyToday.map(groceryRow).join("")}` : ""}
+    ${body}
+    ${clear ? `<p class="empty">The list is clear.</p>` : ""}
+    ${comingLine}
     ${state.doneOpen && done.length ? `<h2 class="section-head">Completed</h2>${done.map(groceryRow).join("")}` : ""}
     <button class="fab" type="button" data-action="add-item" aria-label="Add">+</button>`;
 }
@@ -955,6 +973,7 @@ function addHtml() {
         <label class="field-label">Section<span class="select-wrap"><select class="box" name="section">${choiceHtml(SECTIONS, section)}</select></span></label>
         <label class="field-label">Brand<input class="field-box" name="brand" maxlength="80" value="${esc(draft.brand)}" enterkeyhint="done"></label>
         <label class="field-label">Note<input class="field-box" name="notes" maxlength="500" value="${esc(draft.notes)}" enterkeyhint="done"></label>
+        ${freshRowHtml(draft.fresh)}
         ${state.error ? `<p class="error">${esc(state.error)}</p>` : ""}
         <button class="green-btn" type="submit">Add</button>
         <div id="suggest-list">${suggestHtml(names)}</div>
@@ -1239,6 +1258,7 @@ function sheetHtml() {
         <label class="field-label">Section<span class="select-wrap"><select class="box" name="section">${choiceHtml(SECTIONS, item.section || "other")}</select></span></label>
         <label class="field-label">Brand<input class="field-box" name="brand" maxlength="80" value="${esc(item.brand || "")}" enterkeyhint="done"></label>
         <label class="field-label">Note<input class="field-box" name="notes" maxlength="500" value="${esc(item.notes || "")}" enterkeyhint="done"></label>
+        ${freshRowHtml(item.fresh)}
       </form></div>`;
   }
   if (state.sheet?.kind === "recipe-menu") {
@@ -1743,6 +1763,11 @@ async function onClick(event) {
   if (action === "toggle-done") {
     state.doneOpen = !state.doneOpen;
     state.sheet = null;
+    render();
+    return;
+  }
+  if (action === "toggle-coming") {
+    state.comingOpen = !state.comingOpen;
     render();
     return;
   }
@@ -2412,6 +2437,10 @@ function aisleOptions() {
   return AISLE_GROUPS;
 }
 
+function freshRowHtml(on) {
+  return `<label class="fresh-row"><span>Fresh</span><input class="fresh-box" type="checkbox" name="fresh"${on ? " checked" : ""}></label>`;
+}
+
 function aisleFor(_store, section) {
   if (section === "produce") return "produce";
   if (section === "frozen") return "frozen";
@@ -2687,6 +2716,10 @@ function onAddField(event) {
     draft[name] = event.target.value;
     return true;
   }
+  if (name === "fresh") {
+    draft.fresh = event.target.checked;
+    return true;
+  }
   if (name === "section") {
     draft.section = event.target.value;
     draft.sectionTouched = true;
@@ -2712,6 +2745,7 @@ async function submitAdd(form) {
     section,
     brand: String(data.get("brand") || "") || null,
     notes: String(data.get("notes") || "") || null,
+    fresh: data.get("fresh") === "on",
   });
   if (!ok) return;
   state.page = null;
@@ -2739,6 +2773,7 @@ async function addGrocery(name, extra) {
         quantityNote: extra?.quantityNote || null,
         brand: extra?.brand || null,
         notes: extra?.notes || null,
+        fresh: extra?.fresh === true,
       },
     });
     state.addQuery = "";
@@ -2780,6 +2815,7 @@ async function saveItem(form) {
         store,
         brand: String(form.get("brand") || "") || null,
         notes: String(form.get("notes") || "") || null,
+        fresh: form.get("fresh") === "on",
       },
     });
     state.sheet = null;

@@ -27,6 +27,7 @@ export type Item = {
   notes: string | null;
   storeTag: string | null;
   storeName: string | null;
+  fresh: boolean;
   createdAt: string;
   updatedAt: string;
 };
@@ -71,6 +72,7 @@ type ItemRow = {
   substitute: string | null;
   notes: string | null;
   store_tag: string | null;
+  fresh: number;
   created_at: string;
   updated_at: string;
 };
@@ -88,7 +90,7 @@ type StapleRow = {
 };
 
 const ITEM_COLUMNS =
-  "id, name, quantity_note, store, category, checked, brand, asin, barcode, staple, staple_id, section, image_url, substitute, notes, store_tag, created_at, updated_at";
+  "id, name, quantity_note, store, category, checked, brand, asin, barcode, staple, staple_id, section, image_url, substitute, notes, store_tag, fresh, created_at, updated_at";
 
 const STAPLE_COLUMNS = "id, name, store, category, brand, asin, barcode, created_at, updated_at";
 
@@ -115,6 +117,7 @@ function toItem(row: ItemRow): Item {
     notes: row.notes,
     storeTag: row.store_tag,
     storeName: null,
+    fresh: row.fresh === 1,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -354,7 +357,7 @@ export async function createItem(db: D1Database, input: ItemInput): Promise<Item
   const stapleFlag = remember ? 1 : 0;
   statements.push(
     db
-      .prepare(`INSERT INTO items (${ITEM_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .prepare(`INSERT INTO items (${ITEM_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .bind(
         id,
         input.name,
@@ -372,6 +375,7 @@ export async function createItem(db: D1Database, input: ItemInput): Promise<Item
         input.substitute ?? null,
         input.notes ?? null,
         input.storeTag === undefined ? null : input.storeTag,
+        input.fresh ? 1 : 0,
         now,
         now,
       ),
@@ -422,6 +426,7 @@ export async function updateItem(db: D1Database, id: string, patch: ItemPatch): 
     imageUrl: patch.imageUrl === undefined ? existing.imageUrl : patch.imageUrl,
     substitute: patch.substitute === undefined ? existing.substitute : patch.substitute,
     notes: patch.notes === undefined ? existing.notes : patch.notes,
+    fresh: patch.fresh === undefined ? existing.fresh : patch.fresh,
   };
 
   const now = nowIso();
@@ -481,7 +486,7 @@ export async function updateItem(db: D1Database, id: string, patch: ItemPatch): 
       .prepare(
         `UPDATE items
          SET name = ?, quantity_note = ?, store = ?, category = ?, checked = ?, brand = ?, asin = ?, barcode = ?, staple = ?, staple_id = ?,
-             section = ?, image_url = ?, substitute = ?, notes = ?, store_tag = ?, updated_at = ?
+             section = ?, image_url = ?, substitute = ?, notes = ?, store_tag = ?, fresh = ?, updated_at = ?
          WHERE id = ?`,
       )
       .bind(
@@ -500,6 +505,7 @@ export async function updateItem(db: D1Database, id: string, patch: ItemPatch): 
         next.substitute,
         next.notes,
         next.storeTag,
+        next.fresh ? 1 : 0,
         now,
         id,
       ),
@@ -589,7 +595,7 @@ export async function addStapleToList(
   const now = nowIso();
   try {
     await db
-      .prepare(`INSERT INTO items (${ITEM_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .prepare(`INSERT INTO items (${ITEM_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .bind(
         itemId,
         staple.name,
@@ -607,6 +613,7 @@ export async function addStapleToList(
         null,
         null,
         null,
+        0,
         now,
         now,
       )

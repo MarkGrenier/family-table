@@ -10,6 +10,7 @@ import {
   type ShoppingPart,
 } from "./ingredients";
 import { HttpError } from "./http";
+import { freshTiming, type FreshDinner } from "./fresh";
 import { addDays, type CookStep, type EventInput, type PlanInput, type RecipeInput, type RecipePatch, type WeekInput } from "./food-validate";
 
 export type Recipe = {
@@ -381,6 +382,7 @@ export async function updateRecipe(db: D1Database, id: string, patch: RecipePatc
       id,
     )
     .run();
+  if (patch.ingredients) await markFreshFromRecipe(db, id, next.ingredients);
   return next;
 }
 
@@ -854,6 +856,7 @@ type RebuildItemRow = {
   quantity_note: string | null;
   section: string | null;
   checked: number;
+  fresh: number;
   created_at: string;
 };
 
@@ -874,7 +877,9 @@ type MemItem = {
   checked: boolean;
   createdAt: string;
   removed: boolean;
-  fresh: boolean;
+  isNew: boolean;
+  buyFresh: boolean;
+  freshDirty: boolean;
   sources: MemSource[];
 };
 
@@ -892,7 +897,7 @@ export async function rebuildPlanGroceries(
     ),
     db.prepare(`SELECT id, ingredients_json FROM recipes`),
     db.prepare(
-      `SELECT id, name, quantity_note, section, checked, created_at
+      `SELECT id, name, quantity_note, section, checked, fresh, created_at
        FROM items WHERE deleted_at IS NULL ORDER BY created_at ASC`,
     ),
     db.prepare(`SELECT item_id, source_key, quantity, unit FROM grocery_sources`),
@@ -936,7 +941,9 @@ export async function rebuildPlanGroceries(
     checked: Number(row.checked) === 1,
     createdAt: row.created_at,
     removed: false,
-    fresh: false,
+    isNew: false,
+    buyFresh: Number(row.fresh) === 1,
+    freshDirty: false,
     sources: [],
   }));
   const itemById = new Map(items.map((item) => [item.id, item]));
@@ -1053,7 +1060,9 @@ export async function rebuildPlanGroceries(
         checked: false,
         createdAt: created,
         removed: false,
-        fresh: true,
+        isNew: true,
+        buyFresh: ingredient.fresh === true,
+        freshDirty: false,
         sources: [{ sourceKey, quantity: ingredient.quantity ?? null, unit: ingredient.unit ?? null }],
       };
       item.quantityNote = noteFor(item);
@@ -1067,6 +1076,10 @@ export async function rebuildPlanGroceries(
       liveKeys.add(handKey);
     }
     if (existing.section == null) existing.section = ingredient.section;
+    if (ingredient.fresh && !existing.buyFresh) {
+      existing.buyFresh = true;
+      existing.freshDirty = true;
+    }
     existing.sources.push({ sourceKey, quantity: ingredient.quantity ?? null, unit: ingredient.unit ?? null });
     liveKeys.add(sourceKey);
     existing.quantityNote = noteFor(existing);
@@ -1095,14 +1108,23 @@ export async function rebuildPlanGroceries(
       .prepare(`INSERT INTO grocery_sources (item_id, source_key, quantity, unit) VALUES (?, ?, ?, ?)`)
       .bind(itemId, source.sourceKey, source.quantity, source.unit);
   for (const item of items) {
-    if (item.fresh) {
+    if (item.isNew) {
       statements.push(
         db
           .prepare(
-            `INSERT INTO items (id, name, quantity_note, store, category, checked, brand, asin, barcode, staple, staple_id, section, image_url, substitute, notes, created_at, updated_at)
-             VALUES (?, ?, ?, 'local', ?, 0, NULL, NULL, NULL, 0, NULL, ?, NULL, NULL, NULL, ?, ?)`,
+            `INSERT INTO items (id, name, quantity_note, store, category, checked, brand, asin, barcode, staple, staple_id, section, image_url, substitute, notes, fresh, created_at, updated_at)
+             VALUES (?, ?, ?, 'local', ?, 0, NULL, NULL, NULL, 0, NULL, ?, NULL, NULL, NULL, ?, ?, ?)`,
           )
-          .bind(item.id, item.name, item.quantityNote, categoryForSection(item.section ?? "pantry"), item.section, item.createdAt, item.createdAt),
+          .bind(
+            item.id,
+            item.name,
+            item.quantityNote,
+            categoryForSection(item.section ?? "pantry"),
+            item.section,
+            item.buyFresh ? 1 : 0,
+            item.createdAt,
+            item.createdAt,
+          ),
       );
       for (const source of item.sources) statements.push(insertSource(item.id, source));
       continue;
@@ -1122,9 +1144,11 @@ export async function rebuildPlanGroceries(
     for (const source of item.sources) {
       if (!snap.keys.has(source.sourceKey)) statements.push(insertSource(item.id, source));
     }
-    if (item.quantityNote !== snap.quantityNote || item.section !== snap.section) {
+    if (item.quantityNote !== snap.quantityNote || item.section !== snap.section || item.freshDirty) {
       statements.push(
-        db.prepare(`UPDATE items SET quantity_note = ?, section = ?, updated_at = ? WHERE id = ?`).bind(item.quantityNote, item.section, now, item.id),
+        db
+          .prepare(`UPDATE items SET quantity_note = ?, section = ?, fresh = ?, updated_at = ? WHERE id = ?`)
+          .bind(item.quantityNote, item.section, item.buyFresh ? 1 : 0, now, item.id),
       );
     }
   }
@@ -1403,6 +1427,7 @@ async function addOneIngredient(
       barcode: null,
       staple: false,
       section: ingredient.section,
+      fresh: ingredient.fresh === true,
     });
     list.push(item);
     await insertContribution(db, item.id, sourceKey, ingredient);
@@ -1422,6 +1447,10 @@ async function addOneIngredient(
   if (existing.section == null) {
     await updateItem(db, existing.id, { section: ingredient.section });
     existing.section = ingredient.section;
+  }
+  if (ingredient.fresh && !existing.fresh) {
+    await updateItem(db, existing.id, { fresh: true });
+    existing.fresh = true;
   }
   await insertContribution(db, existing.id, sourceKey, ingredient);
   await refreshItemQuantity(db, existing.id);
@@ -1548,4 +1577,111 @@ export async function addFeedback(
 export async function withGroceryRecipes<T extends Item>(db: D1Database, items: T[]): Promise<Array<T & { recipes: ItemRecipe[] }>> {
   const linked = await recipesForGroceries(db);
   return items.map((item) => ({ ...item, recipes: linked[item.id] ?? [] }));
+}
+
+async function markFreshFromRecipe(db: D1Database, recipeId: string, ingredients: Ingredient[]): Promise<void> {
+  const freshIndexes = new Set<number>();
+  ingredients.forEach((ingredient, index) => {
+    if (ingredient.fresh) freshIndexes.add(index);
+  });
+  if (!freshIndexes.size) return;
+  const loaded = await db.batch([
+    db.prepare(`SELECT item_id, source_key FROM grocery_sources`),
+    db.prepare(`SELECT id FROM plan_entries WHERE recipe_id = ?`).bind(recipeId),
+  ]);
+  const sources = (loaded[0]?.results ?? []) as { item_id: string; source_key: string }[];
+  const planIds = new Set(((loaded[1]?.results ?? []) as { id: string }[]).map((row) => row.id));
+  const itemIds = new Set<string>();
+  for (const source of sources) {
+    const parts = source.source_key.split(":");
+    let index = Number.NaN;
+    let matches = false;
+    if (parts[0] === "recipe" && parts[1] === recipeId) {
+      index = Number(parts[2]);
+      matches = true;
+    } else if (parts[0] === "plan" && parts[2] === "also" && parts[3] === recipeId) {
+      index = Number(parts[4]);
+      matches = true;
+    } else if (parts[0] === "plan" && planIds.has(parts[1] ?? "") && parts[2] !== "also") {
+      index = Number(parts[2]);
+      matches = true;
+    }
+    if (matches && freshIndexes.has(index)) itemIds.add(source.item_id);
+  }
+  if (!itemIds.size) return;
+  const now = nowIso();
+  await db.batch(
+    [...itemIds].map((id) => db.prepare(`UPDATE items SET fresh = 1, updated_at = ? WHERE id = ? AND fresh = 0`).bind(now, id)),
+  );
+}
+
+type PlanLite = { recipe_id: string | null; plan_date: string };
+
+function dinnerFromSource(
+  sourceKey: string,
+  planById: Map<string, PlanLite>,
+  recipeNameById: Map<string, string>,
+): FreshDinner | null {
+  const parts = sourceKey.split(":");
+  if (parts[0] !== "plan" || !parts[1]) return null;
+  const plan = planById.get(parts[1]);
+  if (!plan?.plan_date) return null;
+  const recipeId = parts[2] === "also" && parts[3] ? parts[3] : plan.recipe_id;
+  if (!recipeId) return null;
+  const recipeName = recipeNameById.get(recipeId);
+  if (!recipeName) return null;
+  return { date: plan.plan_date, recipeName };
+}
+
+export type FreshFields = { dueDate: string | null; dinnerDate: string | null; recipeName: string | null };
+
+export async function withFreshTiming<T extends { id: string; fresh: boolean }>(
+  db: D1Database,
+  items: T[],
+): Promise<Array<T & FreshFields>> {
+  const empty = (item: T): T & FreshFields => ({ ...item, dueDate: null, dinnerDate: null, recipeName: null });
+  if (!items.length) return [];
+  const loaded = await db.batch([
+    db.prepare(`SELECT item_id, source_key FROM grocery_sources`),
+    db.prepare(`SELECT id, recipe_id, plan_date FROM plan_entries`),
+    db.prepare(`SELECT id, name FROM recipes`),
+  ]);
+  const sources = (loaded[0]?.results ?? []) as { item_id: string; source_key: string }[];
+  const planById = new Map(
+    ((loaded[1]?.results ?? []) as { id: string; recipe_id: string | null; plan_date: string }[]).map((row) => [
+      row.id,
+      { recipe_id: row.recipe_id, plan_date: row.plan_date },
+    ]),
+  );
+  const recipeNameById = new Map(
+    ((loaded[2]?.results ?? []) as { id: string; name: string }[]).map((row) => [row.id, row.name]),
+  );
+  const byItem = new Map<string, FreshDinner[]>();
+  for (const source of sources) {
+    const dinner = dinnerFromSource(source.source_key, planById, recipeNameById);
+    if (!dinner) continue;
+    const list = byItem.get(source.item_id) ?? [];
+    list.push(dinner);
+    byItem.set(source.item_id, list);
+  }
+  return items.map((item) => ({ ...item, ...freshTiming(item.fresh, byItem.get(item.id) ?? []) }));
+}
+
+export async function listDueGroceries(db: D1Database, due: string) {
+  const items = await withFreshTiming(db, await listItems(db));
+  return items
+    .filter((item) => !item.checked && item.dueDate != null && item.dueDate <= due)
+    .sort(
+      (a, b) =>
+        (a.dinnerDate ?? "").localeCompare(b.dinnerDate ?? "") ||
+        a.name.localeCompare(b.name) ||
+        (a.recipeName ?? "").localeCompare(b.recipeName ?? ""),
+    )
+    .map((item) => ({
+      name: item.name,
+      quantity: item.quantityNote,
+      store: item.storeName,
+      dinnerDate: item.dinnerDate,
+      recipeName: item.recipeName,
+    }));
 }

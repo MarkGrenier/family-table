@@ -2027,6 +2027,118 @@ describe("grocery API", () => {
     expect(returnedAgain.filter((item) => item.name === "Lemon")).toHaveLength(1);
   });
 
+  it("times fresh groceries the day before the meal, across a week boundary", async () => {
+    const token = env.API_TOKEN;
+    const window = shopWindow();
+    const monday = shiftDay(window.from, 7);
+    const sunday = shiftDay(window.from, 13);
+    const salmonDue = shiftDay(monday, -1);
+    const shrimpDue = shiftDay(sunday, -1);
+
+    const salmonRecipe = await call("/api/recipes", {
+      method: "POST",
+      token,
+      body: {
+        name: "Sheet-pan salmon",
+        servings: 4,
+        ingredients: [
+          { text: "1 lb salmon", name: "salmon", qty: 1, unit: "lb", section: "meat", buy: true, fresh: true },
+          { text: "1 onion", name: "onion", qty: 1, section: "produce", buy: true, fresh: false },
+        ],
+        steps: ["Roast the salmon."],
+      },
+    });
+    expect(salmonRecipe.status).toBe(201);
+    const salmonId = (salmonRecipe.json?.recipe as Json).id as string;
+    const savedLines = (salmonRecipe.json?.recipe as Json).ingredients as Json[];
+    expect(savedLines.find((line) => line.name === "salmon")).toMatchObject({ fresh: true });
+    expect(savedLines.find((line) => line.name === "onion")).toMatchObject({ fresh: false });
+
+    const shrimpRecipe = await call("/api/recipes", {
+      method: "POST",
+      token,
+      body: {
+        name: "Garlic shrimp",
+        servings: 4,
+        ingredients: [{ text: "1 lb shrimp", name: "shrimp", qty: 1, unit: "lb", section: "meat", buy: true, fresh: true }],
+        steps: ["Saute the shrimp."],
+      },
+    });
+    const shrimpId = (shrimpRecipe.json?.recipe as Json).id as string;
+
+    expect(
+      (await call("/api/plan", { method: "POST", token, body: { date: monday, meal: "dinner", type: "recipe", recipeId: salmonId } })).status,
+    ).toBe(200);
+    expect(
+      (await call("/api/plan", { method: "POST", token, body: { date: sunday, meal: "dinner", type: "recipe", recipeId: shrimpId } })).status,
+    ).toBe(200);
+
+    const items = ((await call("/api/items", { token })).json?.items ?? []) as Json[];
+    const salmon = items.find((item) => item.name === "Salmon");
+    const onion = items.find((item) => item.name === "Onion");
+    const shrimp = items.find((item) => item.name === "Shrimp");
+    expect(salmon).toMatchObject({
+      fresh: true,
+      dueDate: salmonDue,
+      dinnerDate: monday,
+      recipeName: "Sheet-pan salmon",
+      storeName: "Local store",
+      quantityNote: "1 lb",
+    });
+    expect(onion).toMatchObject({ fresh: false, dueDate: null, dinnerDate: null });
+    expect(shrimp).toMatchObject({ fresh: true, dueDate: shrimpDue, dinnerDate: sunday, recipeName: "Garlic shrimp" });
+
+    const names = async (due: string) => {
+      const response = await call(`/api/groceries?due=${due}`, { token });
+      expect(response.status).toBe(200);
+      return ((response.json?.groceries ?? []) as Json[]).map((item) => item.name);
+    };
+    expect(await names(shiftDay(salmonDue, -1))).toEqual([]);
+    expect(await names(salmonDue)).toEqual(["Salmon"]);
+    const both = await call(`/api/groceries?due=${shrimpDue}`, { token });
+    expect(both.json?.groceries).toEqual([
+      { name: "Salmon", quantity: "1 lb", store: "Local store", dinnerDate: monday, recipeName: "Sheet-pan salmon" },
+      { name: "Shrimp", quantity: "1 lb", store: "Local store", dinnerDate: sunday, recipeName: "Garlic shrimp" },
+    ]);
+
+    const basil = await call("/api/items", {
+      method: "POST",
+      token,
+      body: { name: "Basil", store: "local", category: "produce", section: "produce", fresh: true },
+    });
+    expect((basil.json?.item as Json).fresh).toBe(true);
+    expect(await names(shrimpDue)).toEqual(["Salmon", "Shrimp"]);
+
+    const quiet = await call(`/api/items/${salmon?.id}`, { method: "PATCH", token, body: { fresh: false } });
+    expect((quiet.json?.item as Json).fresh).toBe(false);
+    expect(await names(shrimpDue)).toEqual(["Shrimp"]);
+
+    const again = await call(`/api/items/${salmon?.id}`, { method: "PATCH", token, body: { fresh: true } });
+    expect((again.json?.item as Json).fresh).toBe(true);
+    expect(await names(salmonDue)).toEqual(["Salmon"]);
+
+    await call(`/api/items/${salmon?.id}`, { method: "PATCH", token, body: { checked: true } });
+    expect(await names(shrimpDue)).toEqual(["Shrimp"]);
+
+    expect((await call("/api/groceries?due=2026-13-40", { token })).status).toBe(400);
+    expect((await call("/api/groceries", { token })).status).toBe(400);
+    expect((await call(`/api/groceries?due=${salmonDue}`)).status).toBe(401);
+
+    const marked = await call(`/api/recipes/${salmonId}`, {
+      method: "PATCH",
+      token,
+      body: {
+        ingredients: [
+          { text: "1 lb salmon", name: "salmon", qty: 1, unit: "lb", section: "meat", buy: true, fresh: true },
+          { text: "1 onion", name: "onion", qty: 1, section: "produce", buy: true, fresh: true },
+        ],
+      },
+    });
+    expect(marked.status).toBe(200);
+    const after = ((await call("/api/items", { token })).json?.items ?? []) as Json[];
+    expect(after.find((item) => item.name === "Onion")).toMatchObject({ fresh: true, dueDate: salmonDue, dinnerDate: monday });
+  });
+
   it("serves the phone page", async () => {
     const response = await exports.default.fetch("https://grocery.test/");
     expect(response.status).toBe(200);
@@ -2156,6 +2268,10 @@ describe("grocery API", () => {
     expect(js).toContain("storeTag");
     expect(addForm).toContain('name="brand"');
     expect(addForm).toContain('name="notes"');
+    expect(addForm).toContain("freshRowHtml(draft.fresh)");
+    const freshRow = js.slice(js.indexOf("function freshRowHtml"), js.indexOf("function aisleFor"));
+    expect(freshRow).toContain(">Fresh</span>");
+    expect(freshRow).toContain('name="fresh"');
     expect(addForm).not.toContain("checkIcon");
     const editItem = js.slice(js.indexOf('state.sheet?.kind === "edit-item"'), js.indexOf('state.sheet?.kind === "recipe-menu"'));
     expect(editItem).not.toContain("usedInHtml");
@@ -2165,6 +2281,7 @@ describe("grocery API", () => {
     expect(editItem).not.toContain("sheet-delete");
     expect(editItem).not.toContain('name="category"');
     expect(editItem).not.toContain("More details");
+    expect(editItem).toContain("freshRowHtml");
     expect(js).toContain('data-action="delete-item"');
     expect(js).toContain('name="ing-name"');
     expect(js).toContain("raised && cooked");
@@ -2197,8 +2314,14 @@ describe("grocery API", () => {
     expect(js).not.toContain("sourceUrl");
     expect(js).toContain("/photos/leftovers-hero.jpg");
     expect(js).toContain("Tomorrow: leftovers");
-    expect(js).not.toContain("Coming up");
-    expect(js).not.toContain("coming-up");
+    const calendarCopy = js.slice(js.indexOf("function weekListHtml"), js.indexOf("function groceriesHtml"));
+    expect(calendarCopy).not.toContain("Coming up");
+    expect(calendarCopy).not.toContain("coming-up");
+    const groceries = js.slice(js.indexOf("function groceriesHtml"), js.indexOf("function groceryRow"));
+    expect(groceries).toContain("Buy today");
+    expect(groceries).toContain("Coming up");
+    expect(groceries).toContain('data-action="toggle-coming"');
+    expect(groceries).toContain('class="section-head">Buy today');
     expect(js).toContain("month-screen");
     const toggleItem = js.slice(js.indexOf("async function toggleItem"), js.indexOf("async function undoCheck"));
     expect(toggleItem).not.toContain("wait(");
@@ -2245,10 +2368,12 @@ describe("grocery API", () => {
     expect(css).toContain("opacity 300ms");
     expect(css).toContain(".month-panel-head.is-today .week-date");
     const shell = await (await exports.default.fetch("https://grocery.test/sw.js")).text();
-    expect(shell).toContain("grocery-shell-v62");
-    expect(shell).toContain("/styles.css?v=56");
-    expect(shell).toContain("/app.js?v=60");
+    expect(shell).toContain("grocery-shell-v63");
+    expect(shell).toContain("/styles.css?v=57");
+    expect(shell).toContain("/app.js?v=61");
     expect(css).toContain(".section-head.store-head { font-weight: 400; }");
+    expect(css).toContain(".fresh-row {");
+    expect(css).toContain(".coming-line.is-docked {");
     expect(css).toContain(".store-option {");
     expect(css).toContain(".store-pick { flex: 1; min-height: 40px; padding: 0.3rem 0.75rem; text-align: left; font-weight: 400; }");
     expect(js).toContain('class="section-head store-head"');
