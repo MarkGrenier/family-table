@@ -2439,10 +2439,12 @@ describe("grocery API", () => {
     expect(css).toContain("opacity 300ms");
     expect(css).toContain(".month-panel-head.is-today .week-date");
     const shell = await (await exports.default.fetch("https://grocery.test/sw.js")).text();
-    expect(shell).toContain("grocery-shell-v69");
-    expect(shell).toContain("/styles.css?v=60");
-    expect(shell).toContain("/app.js?v=66");
+    expect(shell).toContain("grocery-shell-v70");
+    expect(shell).toContain("/styles.css?v=61");
+    expect(shell).toContain("/app.js?v=67");
     expect(js).toContain("const EDGE_PX = 30");
+    expect(js).toContain("const BACK_SNAP_MS = 200");
+    expect(js).toContain("swipe-under");
     expect(js).toContain("can-swipe-back");
     expect(js).toContain('kind: "back"');
     expect(js).toContain('[data-action="back"], [data-action="close-sheet"], [data-action="close-cook"], [data-action="close-feedback"], [data-action="cancel-pick"], [data-action="plan-cancel"]');
@@ -2450,6 +2452,7 @@ describe("grocery API", () => {
     expect(edgeDown.indexOf("beginEdgeBack(event)")).toBeGreaterThan(-1);
     expect(edgeDown.indexOf("beginEdgeBack(event)")).toBeLessThan(edgeDown.indexOf("cal-board"));
     expect(css).toContain(".can-swipe-back { touch-action: pan-y; overscroll-behavior-x: none; }");
+    expect(css).toContain(".swipe-under {");
     expect(css).toContain(".is-swipe-back { transition: none; }");
     expect(js).toContain("const CHECK_HOLD_MS = 600");
     expect(js).toContain("is-checking-out");

@@ -76,6 +76,15 @@ app.addEventListener("pointerdown", onPointerDown);
 app.addEventListener("pointermove", onPointerMove);
 app.addEventListener("pointerup", onPointerUp);
 app.addEventListener("pointercancel", onPointerCancel);
+app.addEventListener("touchmove", (event) => {
+  if (gesture?.kind !== "back") return;
+  const touch = event.touches[0];
+  if (!touch) return;
+  const dx = touch.clientX - gesture.x;
+  const dy = touch.clientY - gesture.y;
+  if (!gesture.dragging && !(dx > 8 && dx > Math.abs(dy))) return;
+  if (event.cancelable) event.preventDefault();
+}, { passive: false });
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible" && state.page?.kind === "cook") lockScreen();
 });
@@ -93,9 +102,10 @@ const CHECK_HOLD_MS = 600;
 const CHECK_LEAVE_MS = 380;
 const EDGE_PX = 30;
 const BACK_LOCK_PX = 10;
-const BACK_FLICK_PX = 24;
-const BACK_FLICK_V = 0.55;
-const BACK_SNAP_MS = 280;
+const BACK_FLICK_PX = 16;
+const BACK_FLICK_V = 0.35;
+const BACK_SNAP_MS = 200;
+const BACK_UNDER = 0.28;
 const BACK_SELECTOR = '[data-action="back"], [data-action="close-sheet"], [data-action="close-cook"], [data-action="close-feedback"], [data-action="cancel-pick"], [data-action="plan-cancel"]';
 let noticeTimer = null;
 let renderQueued = false;
@@ -289,11 +299,14 @@ function render(force = false) {
     finish();
     return;
   }
-  if (state.page?.kind === "cook") {
-    app.innerHTML = cookHtml() + sheetHtml();
-    finish();
-    return;
-  }
+  app.innerHTML = appHtml();
+  const focus = document.getElementById("add-search");
+  if (focus && state.page?.kind === "add-item") focus.focus();
+  finish();
+}
+
+function appHtml() {
+  if (state.page?.kind === "cook") return cookHtml() + sheetHtml();
   const bare = ["recipe", "feedback", "item", "add-item"].includes(state.page?.kind);
   const dinnerTonight = state.tab === "today" && !state.page ? mealOn(nyToday(), "dinner") : null;
   const dayDinner = state.page?.kind === "day" ? mealOn(state.page.date, "dinner") : null;
@@ -304,10 +317,7 @@ function render(force = false) {
   const monthOn = state.tab === "calendar" && state.calMode === "month" && !state.page;
   const groceryOn = state.tab === "groceries" && !state.page;
   const mainClass = bare ? "bare" : todayCook ? "screen today-screen" : leftoversNightOn ? "screen today-screen no-dock night-screen" : monthOn ? "screen month-screen" : groceryOn ? "screen grocery-screen" : "screen";
-  app.innerHTML = `<main class="${mainClass}">${bodyHtml()}</main>${bare ? "" : tabsHtml()}${sheetHtml()}${toastHtml()}`;
-  const focus = document.getElementById("add-search");
-  if (focus && state.page?.kind === "add-item") focus.focus();
-  finish();
+  return `<main class="${mainClass}">${bodyHtml()}</main>${bare ? "" : tabsHtml()}${sheetHtml()}${toastHtml()}`;
 }
 
 function loginHtml() {
@@ -1361,12 +1371,12 @@ function findBackLayer() {
     const sheet = sheets[i];
     const control = backControl(sheet);
     if (!control) continue;
-    return { layer: sheet.querySelector(".sheet-card") || sheet, touch: sheet, backdrop: sheet, control };
+    return { layer: sheet, touch: sheet, control, overlay: sheet.parentElement === app };
   }
   const main = app.querySelector("main");
   const control = backControl(main);
   if (!control || !main) return null;
-  return { layer: main, touch: main, backdrop: null, control };
+  return { layer: main, touch: main, control, overlay: false };
 }
 
 function backControl(root) {
@@ -1391,7 +1401,7 @@ function beginEdgeBack(event) {
   const found = findBackLayer();
   if (!found) return false;
   clearGesture();
-  gesture = {
+    gesture = {
     kind: "back",
     pointerId: event.pointerId,
     x: event.clientX,
@@ -1404,8 +1414,10 @@ function beginEdgeBack(event) {
     dragging: false,
     layer: found.layer,
     touch: found.touch,
-    backdrop: found.backdrop,
     control: found.control,
+    overlay: found.overlay,
+    under: null,
+    dim: null,
   };
   return true;
 }
@@ -1430,6 +1442,7 @@ function moveEdgeBack(event) {
       return;
     }
     gesture.dragging = true;
+    gesture.dx = Math.max(0, dx);
     backSettle += 1;
     try {
       gesture.touch?.setPointerCapture?.(event.pointerId);
@@ -1437,15 +1450,16 @@ function moveEdgeBack(event) {
       // Pointer capture can throw if the pointer already ended.
     }
     document.documentElement.classList.add("is-edge-dragging");
+    if (event.cancelable) event.preventDefault();
     if (reduceMotion()) return;
-    gesture.layer.classList.add("is-swipe-back");
-    gesture.layer.style.transition = "none";
+    mountEdgeUnder(gesture);
+    paintEdge(gesture, gesture.dx, false);
+    return;
   }
   gesture.dx = Math.max(0, dx);
   if (reduceMotion()) return;
   if (event.cancelable) event.preventDefault();
-  gesture.layer.style.transform = `translateX(${gesture.dx}px)`;
-  paintEdgeBackdrop(gesture.backdrop, gesture.layer, gesture.dx, true);
+  paintEdge(gesture, gesture.dx, false);
 }
 
 function endEdgeBack(event) {
@@ -1467,22 +1481,19 @@ function endEdgeBack(event) {
   }
   if (!commit) {
     swallowNextClick();
-    if (reduceMotion()) clearBackStyles(current.layer, current.backdrop);
-    else snapEdgeBack(current.layer, current.backdrop);
+    if (reduceMotion()) clearEdge(current);
+    else snapEdgeBack(current);
     return;
   }
   if (reduceMotion()) {
-    clearBackStyles(current.layer, current.backdrop);
+    clearEdge(current);
     runBackControl(current.control);
     swallowNextClick();
     return;
   }
   swallowNextClick();
-  current.layer.classList.add("is-swipe-back");
-  current.layer.style.transition = `transform ${BACK_SNAP_MS}ms ease`;
-  current.layer.style.transform = `translateX(${width}px)`;
-  paintEdgeBackdrop(current.backdrop, current.layer, width, false);
-  settleEdgeBack(current.layer, current.backdrop, () => runBackControl(current.control));
+  paintEdge(current, width, true);
+  settleEdge(current, () => finishEdge(current));
 }
 
 function cancelEdgeBack() {
@@ -1493,8 +1504,8 @@ function cancelEdgeBack() {
     return;
   }
   swallowNextClick();
-  if (reduceMotion()) clearBackStyles(current.layer, current.backdrop);
-  else snapEdgeBack(current.layer, current.backdrop);
+  if (reduceMotion()) clearEdge(current);
+  else snapEdgeBack(current);
 }
 
 function backWidth(layer) {
@@ -1502,29 +1513,134 @@ function backWidth(layer) {
   return Math.max(1, width);
 }
 
-function paintEdgeBackdrop(backdrop, layer, dx, instant) {
-  if (!backdrop || backdrop === layer) return;
-  const alpha = 0.45 * Math.max(0, 1 - dx / backWidth(layer));
-  backdrop.style.transition = instant ? "none" : `background-color ${BACK_SNAP_MS}ms ease`;
-  backdrop.style.backgroundColor = `rgba(0, 0, 0, ${alpha})`;
+function underShift(progress, width) {
+  return Math.round(-width * BACK_UNDER * (1 - progress));
 }
 
-function snapEdgeBack(layer, backdrop) {
-  if (!layer?.isConnected) {
-    clearBackStyles(layer, backdrop);
+function cloneState() {
+  return structuredClone(state);
+}
+
+function restoreState(copy) {
+  for (const key of Object.keys(state)) {
+    if (!Object.prototype.hasOwnProperty.call(copy, key)) delete state[key];
+  }
+  Object.assign(state, copy);
+}
+
+function applyBackState(action) {
+  if (action === "cancel-pick" || (action === "back" && state.page?.kind === "pick")) {
+    const back = state.pickBack;
+    state.addOrigin = null;
+    state.recipeQuery = "";
+    state.error = "";
+    state.sheet = null;
+    state.pickBack = null;
+    state.tab = back?.tab || state.tab;
+    state.page = back?.page || null;
     return;
   }
-  layer.style.transition = `transform ${BACK_SNAP_MS}ms ease`;
-  layer.style.transform = "translateX(0px)";
-  if (backdrop && backdrop !== layer) {
-    backdrop.style.transition = `background-color ${BACK_SNAP_MS}ms ease`;
-    backdrop.style.backgroundColor = "rgba(0, 0, 0, 0.45)";
+  if (action === "close-cook") {
+    const back = state.cookReturn;
+    state.page = back?.page || null;
+    if (back?.tab) state.tab = back.tab;
+    state.sheet = null;
+    return;
   }
-  settleEdgeBack(layer, backdrop);
+  if (action === "close-feedback") {
+    state.page = state.feedbackFrom === "recipe"
+      ? { kind: "recipe", id: state.page.id, servings: state.page.servings || recipeById(state.page.id)?.servings, panel: "ingredients", planDate: state.page.planDate || null, planMeal: state.page.planMeal || null }
+      : null;
+    return;
+  }
+  if (action === "close-sheet" || action === "plan-cancel") {
+    if (state.sheet?.kind === "plan-choice" || state.sheet?.back) {
+      state.error = "";
+      state.sheet = state.sheet.back || null;
+      return;
+    }
+    state.sheet = null;
+    state.error = "";
+    return;
+  }
+  const kind = state.page?.kind;
+  state.sheet = null;
+  if (kind === "recipe" && state.recipeBack) {
+    state.tab = state.recipeBack.tab;
+    state.page = state.recipeBack.page;
+  } else if (kind === "item" || kind === "add-item") {
+    state.page = null;
+    state.tab = "groceries";
+  } else {
+    state.page = null;
+    if (kind === "recipe" || kind === "new-recipe") state.tab = "recipes";
+  }
 }
 
-function settleEdgeBack(layer, backdrop, run) {
+function previewBackHtml(action) {
+  const backup = cloneState();
+  try {
+    applyBackState(action);
+    return appHtml();
+  } finally {
+    restoreState(backup);
+  }
+}
+
+function mountEdgeUnder(gesture) {
+  gesture.layer.classList.add("is-swipe-back");
+  app.querySelector(".swipe-under")?.remove();
+  if (gesture.overlay) return;
+  const under = document.createElement("div");
+  under.className = "swipe-under";
+  under.setAttribute("aria-hidden", "true");
+  under.inert = true;
+  try {
+    under.innerHTML = previewBackHtml(gesture.control?.dataset.action || "back");
+  } catch {
+    under.innerHTML = "";
+  }
+  const dim = document.createElement("div");
+  dim.className = "swipe-dim";
+  under.appendChild(dim);
+  const width = backWidth(gesture.layer);
+  const progress = Math.max(0, Math.min(1, gesture.dx / width));
+  under.style.transform = `translate3d(${underShift(progress, width)}px,0,0)`;
+  dim.style.opacity = (0.16 * (1 - progress)).toFixed(3);
+  gesture.under = under;
+  gesture.dim = dim;
+  app.insertBefore(under, app.firstChild);
+}
+
+function paintEdge(gesture, dx, animate) {
+  if (!gesture?.layer?.isConnected) return;
+  const width = backWidth(gesture.layer);
+  const progress = Math.max(0, Math.min(1, dx / width));
+  const timing = `transform ${BACK_SNAP_MS}ms ease-out`;
+  gesture.layer.style.transition = animate ? timing : "none";
+  gesture.layer.style.transform = `translate3d(${Math.round(dx)}px,0,0)`;
+  if (gesture.under) {
+    gesture.under.style.transition = animate ? timing : "none";
+    gesture.under.style.transform = `translate3d(${underShift(progress, width)}px,0,0)`;
+  }
+  if (gesture.dim) {
+    gesture.dim.style.transition = animate ? `opacity ${BACK_SNAP_MS}ms ease-out` : "none";
+    gesture.dim.style.opacity = (0.16 * (1 - progress)).toFixed(3);
+  }
+}
+
+function snapEdgeBack(gesture) {
+  if (!gesture?.layer?.isConnected) {
+    clearEdge(gesture);
+    return;
+  }
+  paintEdge(gesture, 0, true);
+  settleEdge(gesture, () => clearEdge(gesture));
+}
+
+function settleEdge(gesture, run) {
   const token = ++backSettle;
+  const layer = gesture?.layer;
   let finished = false;
   edgeAnimating += 1;
   const finish = () => {
@@ -1533,7 +1649,6 @@ function settleEdgeBack(layer, backdrop, run) {
     edgeAnimating = Math.max(0, edgeAnimating - 1);
     layer?.removeEventListener("transitionend", onEnd);
     if (token !== backSettle) return;
-    clearBackStyles(layer, backdrop);
     run?.();
   };
   const onEnd = (event) => {
@@ -1541,20 +1656,46 @@ function settleEdgeBack(layer, backdrop, run) {
     finish();
   };
   layer?.addEventListener("transitionend", onEnd);
-  setTimeout(finish, BACK_SNAP_MS + 50);
+  setTimeout(finish, BACK_SNAP_MS + 40);
 }
 
-function clearBackStyles(layer, backdrop) {
+function clearEdge(gesture) {
   document.documentElement.classList.remove("is-edge-dragging");
-  if (layer) {
-    layer.classList.remove("is-swipe-back");
-    layer.style.transition = "";
-    layer.style.transform = "";
+  gesture?.under?.remove();
+  if (gesture) {
+    gesture.under = null;
+    gesture.dim = null;
   }
-  if (backdrop) {
-    backdrop.style.transition = "";
-    backdrop.style.backgroundColor = "";
+  if (gesture?.layer) {
+    gesture.layer.classList.remove("is-swipe-back");
+    gesture.layer.style.transition = "";
+    gesture.layer.style.transform = "";
   }
+}
+
+function finishEdge(gesture) {
+  document.documentElement.classList.remove("is-edge-dragging");
+  const action = gesture?.control?.dataset.action;
+  const stacked = state.sheet?.kind === "plan-choice" || state.sheet?.back;
+  if (gesture?.overlay && (action === "close-sheet" || action === "plan-cancel") && !stacked) {
+    gesture.layer?.remove();
+    state.sheet = null;
+    state.error = "";
+    markSwipeBack();
+    return;
+  }
+  if (gesture?.under) {
+    gesture.under.style.transition = "none";
+    gesture.under.style.transform = "none";
+  }
+  if (gesture?.dim) gesture.dim.style.opacity = "0";
+  const control = gesture?.control;
+  if (control?.isConnected) {
+    edgeClick = true;
+    control.click();
+    edgeClick = false;
+  }
+  if (gesture?.layer?.isConnected) clearEdge(gesture);
 }
 
 function runBackControl(control) {

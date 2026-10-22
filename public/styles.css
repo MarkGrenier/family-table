@@ -557,7 +557,22 @@ button.box { display: block; width: 100%; text-align: left; font-weight: 400; }
 }
 
 .can-swipe-back { touch-action: pan-y; overscroll-behavior-x: none; }
-.is-swipe-back { box-shadow: -12px 0 28px rgba(0, 0, 0, 0.16); }
+.is-swipe-back { box-shadow: -8px 0 16px rgba(0, 0, 0, 0.12); }
+main.is-swipe-back { background: var(--bg); position: relative; z-index: 2; min-height: 100vh; }
+.swipe-under {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  background: var(--bg);
+  pointer-events: none;
+}
+.swipe-dim {
+  position: absolute;
+  inset: 0;
+  background: #000;
+  pointer-events: none;
+}
 html.is-edge-dragging { overflow-x: hidden; }
 
 .sheet-delete {
