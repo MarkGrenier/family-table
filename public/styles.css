@@ -369,6 +369,7 @@ h1, .title {
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
+.section-head.store-head { font-weight: 400; }
 
 .g-swipe {
   position: relative;
@@ -464,7 +465,7 @@ h1, .title {
   text-align: left;
 }
 .store-current span { color: var(--muted); font-weight: 650; }
-.store-current strong { font-weight: 700; }
+.store-current strong { font-weight: 400; }
 .store-menu { margin-top: 0.35rem; }
 .store-menu.is-hidden, .more-details.is-hidden { display: none; }
 .store-list {
@@ -488,7 +489,7 @@ h1, .title {
   min-height: 40px;
   padding: 0.3rem 0.75rem;
   text-align: left;
-  font-weight: 650;
+  font-weight: 400;
 }
 .store-add { color: var(--green-dark); }
 .store-edit {

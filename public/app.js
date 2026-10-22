@@ -896,7 +896,7 @@ function groceriesHtml() {
     return { label, aisles };
   }).filter((block) => block.aisles.length);
   const done = state.items.filter((item) => item.checked && item.id !== state.checking);
-  const body = blocks.map((block) => `<h2 class="section-head">${esc(block.label)}</h2>${block.aisles.map((aisle) => `<h3 class="aisle-head">${esc(aisle.label)}</h3>${aisle.items.map(groceryRow).join("")}`).join("")}`).join("");
+  const body = blocks.map((block) => `<h2 class="section-head store-head">${esc(block.label)}</h2>${block.aisles.map((aisle) => `<h3 class="aisle-head">${esc(aisle.label)}</h3>${aisle.items.map(groceryRow).join("")}`).join("")}`).join("");
   return `<div class="title-row"><h1>Groceries</h1><button class="icon-green" type="button" data-action="grocery-menu" aria-label="List options">${dots()}</button></div>
     ${body || `<p class="empty">The list is clear.</p>`}
     ${state.doneOpen && done.length ? `<h2 class="section-head">Completed</h2>${done.map(groceryRow).join("")}` : ""}
