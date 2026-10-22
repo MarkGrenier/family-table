@@ -1239,7 +1239,6 @@ function sheetHtml() {
         <label class="field-label">Section<span class="select-wrap"><select class="box" name="section">${choiceHtml(SECTIONS, item.section || "other")}</select></span></label>
         <label class="field-label">Brand<input class="field-box" name="brand" maxlength="80" value="${esc(item.brand || "")}" enterkeyhint="done"></label>
         <label class="field-label">Note<input class="field-box" name="notes" maxlength="500" value="${esc(item.notes || "")}" enterkeyhint="done"></label>
-        ${usedInHtml(item)}
       </form></div>`;
   }
   if (state.sheet?.kind === "recipe-menu") {
@@ -2751,15 +2750,6 @@ async function addGrocery(name, extra) {
     render();
     return false;
   }
-}
-
-function usedInHtml(item) {
-  const rows = (item.recipes || []).filter((recipe) => recipe && recipe.name);
-  if (!rows.length) return "";
-  return `<div class="used-in"><p class="field-label">Used in</p>${rows.map((recipe) => {
-    const when = recipe.date ? formatUtc(recipe.date, { weekday: "short", month: "short", day: "numeric" }) : "";
-    return `<p class="used-line"><span>${esc(recipe.name)}</span>${when ? `<span class="used-when">${esc(when)}</span>` : ""}</p>`;
-  }).join("")}</div>`;
 }
 
 function openEdit(id) {

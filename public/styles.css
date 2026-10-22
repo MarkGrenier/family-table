@@ -492,18 +492,6 @@ button.box { display: block; width: 100%; text-align: left; font-weight: 400; }
 .store-confirm { font-size: 0.84rem; color: var(--muted); }
 .store-confirm span { flex: 1; }
 .store-empty { margin: 0.45rem 0.75rem; }
-.used-in { margin-top: 0.85rem; }
-.used-line {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 0.7rem;
-  margin: 0;
-  padding: 0.55rem 0;
-  border-top: 1px solid var(--line);
-  font-size: 0.98rem;
-}
-.used-when { color: var(--muted); font-size: 0.88rem; flex: none; }
 
 .topbar {
   display: flex;

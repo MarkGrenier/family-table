@@ -2111,7 +2111,7 @@ describe("grocery API", () => {
     expect(detailHero).toContain('data-action="add-to-date"');
     expect(js).toContain("Edit recipe");
     expect(js).not.toContain("Delete item");
-    expect(js).toContain("Used in");
+    expect(js).not.toContain("Used in");
     expect(js).toContain('data-form="add-item"');
     expect(js).toContain(">Add</button>");
     expect(js).not.toContain("add-done");
@@ -2158,7 +2158,8 @@ describe("grocery API", () => {
     expect(addForm).toContain('name="notes"');
     expect(addForm).not.toContain("checkIcon");
     const editItem = js.slice(js.indexOf('state.sheet?.kind === "edit-item"'), js.indexOf('state.sheet?.kind === "recipe-menu"'));
-    expect(editItem).toContain("usedInHtml");
+    expect(editItem).not.toContain("usedInHtml");
+    expect(editItem).not.toContain("Used in");
     expect(editItem).toContain('name="section"');
     expect(editItem).toContain('name="brand"');
     expect(editItem).not.toContain("sheet-delete");
@@ -2244,9 +2245,9 @@ describe("grocery API", () => {
     expect(css).toContain("opacity 300ms");
     expect(css).toContain(".month-panel-head.is-today .week-date");
     const shell = await (await exports.default.fetch("https://grocery.test/sw.js")).text();
-    expect(shell).toContain("grocery-shell-v61");
-    expect(shell).toContain("/styles.css?v=55");
-    expect(shell).toContain("/app.js?v=59");
+    expect(shell).toContain("grocery-shell-v62");
+    expect(shell).toContain("/styles.css?v=56");
+    expect(shell).toContain("/app.js?v=60");
     expect(css).toContain(".section-head.store-head { font-weight: 400; }");
     expect(css).toContain(".store-option {");
     expect(css).toContain(".store-pick { flex: 1; min-height: 40px; padding: 0.3rem 0.75rem; text-align: left; font-weight: 400; }");
