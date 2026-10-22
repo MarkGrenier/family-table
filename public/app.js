@@ -65,7 +65,7 @@ const AISLE_GROUPS = [
 ];
 
 function blankAddDraft() {
-  return { quantityNote: "", store: "local", category: "shelf", section: "other", brand: "", notes: "", fresh: false, sectionTouched: false };
+  return { quantityNote: "", store: "local", category: "shelf", section: "other", notes: "", fresh: false, sectionTouched: false };
 }
 
 const app = document.getElementById("app");
@@ -969,9 +969,8 @@ function addHtml() {
       <div class="pad">
         <input id="add-search" name="name" class="search-box" type="text" placeholder="Add something..." value="${esc(state.addQuery)}" maxlength="80" autocomplete="off" enterkeyhint="done" aria-label="Name">
         <label class="field-label">Quantity<input class="field-box" name="quantityNote" maxlength="140" value="${esc(draft.quantityNote)}" placeholder="2 lb, a bunch" enterkeyhint="done"></label>
-        ${storeFieldHtml(draft.store)}
         <label class="field-label">Section<span class="select-wrap"><select class="box" name="section">${choiceHtml(SECTIONS, section)}</select></span></label>
-        <label class="field-label">Brand<input class="field-box" name="brand" maxlength="80" value="${esc(draft.brand)}" enterkeyhint="done"></label>
+        ${storeFieldHtml(draft.store)}
         <label class="field-label">Note<input class="field-box" name="notes" maxlength="500" value="${esc(draft.notes)}" enterkeyhint="done"></label>
         ${freshRowHtml(draft.fresh)}
         ${state.error ? `<p class="error">${esc(state.error)}</p>` : ""}
@@ -1254,9 +1253,8 @@ function sheetHtml() {
         <div class="sheet-head"><button class="text-green" type="button" data-action="close-sheet">Cancel</button><button class="text-green" type="submit">Done</button></div>
         <label class="field-label">Name<input class="field-box" name="name" required maxlength="80" value="${esc(item.name)}"></label>
         <label class="field-label">Quantity<input class="field-box" name="quantityNote" maxlength="140" value="${esc(qtyOf(item))}"></label>
-        ${storeFieldHtml(storeIdOf(item))}
         <label class="field-label">Section<span class="select-wrap"><select class="box" name="section">${choiceHtml(SECTIONS, item.section || "other")}</select></span></label>
-        <label class="field-label">Brand<input class="field-box" name="brand" maxlength="80" value="${esc(item.brand || "")}" enterkeyhint="done"></label>
+        ${storeFieldHtml(storeIdOf(item))}
         <label class="field-label">Note<input class="field-box" name="notes" maxlength="500" value="${esc(item.notes || "")}" enterkeyhint="done"></label>
         ${freshRowHtml(item.fresh)}
       </form></div>`;
@@ -2712,7 +2710,7 @@ function onAddField(event) {
   if (!form || !state.addDraft) return false;
   const draft = state.addDraft;
   const name = event.target.name;
-  if (name === "quantityNote" || name === "brand" || name === "notes") {
+  if (name === "quantityNote" || name === "notes") {
     draft[name] = event.target.value;
     return true;
   }
@@ -2743,7 +2741,6 @@ async function submitAdd(form) {
     store,
     category,
     section,
-    brand: String(data.get("brand") || "") || null,
     notes: String(data.get("notes") || "") || null,
     fresh: data.get("fresh") === "on",
   });
@@ -2771,7 +2768,6 @@ async function addGrocery(name, extra) {
         category,
         section,
         quantityNote: extra?.quantityNote || null,
-        brand: extra?.brand || null,
         notes: extra?.notes || null,
         fresh: extra?.fresh === true,
       },
@@ -2813,7 +2809,6 @@ async function saveItem(form) {
         quantityNote: String(form.get("quantityNote") || "") || null,
         section,
         store,
-        brand: String(form.get("brand") || "") || null,
         notes: String(form.get("notes") || "") || null,
         fresh: form.get("fresh") === "on",
       },
