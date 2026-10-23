@@ -485,7 +485,7 @@ h1, .title {
 .add-form .green-btn { width: 100%; margin: 0.45rem 0 0.9rem; }
 .add-sheet .sheet-card,
 .pick-sheet .sheet-card { max-height: calc(100dvh - 4.25rem); }
-.aisle-head { margin: 0.45rem 0 0.1rem; color: #b4b4b8; font-size: 0.72rem; font-weight: 400; letter-spacing: 0.06em; text-transform: uppercase; }
+.aisle-head { margin: 0.45rem 0 0.1rem; color: #8a8a90; font-size: 0.72rem; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; }
 button.box { display: block; width: 100%; text-align: left; font-weight: 400; }
 .store-drop, .store-edit-menu {
   margin: 0.25rem 0 0.45rem;
@@ -696,12 +696,19 @@ html.is-edge-dragging { overflow-x: hidden; }
 .fresh-box:checked { background: var(--green); }
 .fresh-box:checked::after { left: 20px; }
 .buy-hint {
-  display: block;
-  margin-top: 0.08rem;
-  color: var(--muted);
-  font-size: 0.78rem;
-  font-weight: 500;
+  display: inline-block;
+  margin-top: 0.22rem;
+  padding: 0.12rem 0.48rem;
+  border-radius: 999px;
+  background: var(--green-soft);
+  color: var(--green-dark);
+  font-size: 0.75rem;
+  font-weight: 750;
+  letter-spacing: 0.01em;
+  line-height: 1.2;
 }
+.g-name .buy-hint { display: table; }
+.g-row.is-done .buy-hint { background: #f0f0f1; color: #b0b0b4; }
 
 .field-box, .search-box, textarea.box, select.box, button.box {
   width: 100%;
