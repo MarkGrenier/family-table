@@ -27,6 +27,7 @@ const state = {
   calMode: "week",
   calStart: null,
   monthPick: null,
+  weekAnchor: null,
   weekPick: null,
   scrollTo: null,
   prepDone: {},
@@ -521,11 +522,15 @@ function calendarHtml() {
 
 function weekListHtml() {
   const today = nyToday();
-  const end = addDays(today, 6);
-  const title = `${shortMonth(today)} ${Number(today.slice(8))} – ${shortMonth(end)} ${Number(end.slice(8))}`;
-  const days = Array.from({ length: 7 }, (_, index) => addDays(today, index));
+  const start = weekStart();
+  const end = addDays(start, 6);
+  const title = `${shortMonth(start)} ${Number(start.slice(8))} – ${shortMonth(end)} ${Number(end.slice(8))}`;
+  const days = Array.from({ length: 7 }, (_, index) => addDays(start, index));
+  const next = start < today;
   return `<div class="week-head">
+      <button type="button" data-action="week-shift" data-delta="-1" aria-label="Previous week">${chevLeft()}</button>
       <h1>${esc(title)}</h1>
+      <button type="button" data-action="week-shift" data-delta="1" aria-label="Next week"${next ? "" : " disabled"}>${chevRight()}</button>
       <button class="icon-btn" type="button" data-action="cal-mode" aria-label="Open month">${cal()}</button>
     </div>
     <div class="week-list">${days.map(weekDay).join("")}</div>`;
@@ -533,9 +538,8 @@ function weekListHtml() {
 
 function monthHtml() {
   const anchor = state.calStart || `${nyToday().slice(0, 7)}-01`;
-  const prev = canShiftMonth(-1);
   return `<div class="month-bar">
-      <button type="button" data-action="cal-shift" data-delta="-1" aria-label="Previous month" ${prev ? "" : "disabled"}>${chevLeft()}</button>
+      <button type="button" data-action="cal-shift" data-delta="-1" aria-label="Previous month">${chevLeft()}</button>
       <h1>${esc(monthTitle(anchor))}</h1>
       <button type="button" data-action="cal-shift" data-delta="1" aria-label="Next month">${chevRight()}</button>
       <button class="icon-btn is-on" type="button" data-action="cal-mode" aria-label="Back to this week">${cal()}</button>
@@ -547,10 +551,12 @@ function monthHtml() {
 function monthSelection(anchor) {
   const month = String(anchor || "").slice(0, 7);
   const today = nyToday();
-  if (state.monthPick && state.monthPick.slice(0, 7) === month && state.monthPick >= today) return state.monthPick;
+  if (state.monthPick && state.monthPick.slice(0, 7) === month) return state.monthPick;
   if (today.slice(0, 7) === month) return today;
   const first = `${month}-01`;
-  return first >= today ? first : today;
+  if (first > today) return first;
+  const [year, mon] = month.split("-").map(Number);
+  return new Date(Date.UTC(year, mon, 0)).toISOString().slice(0, 10);
 }
 
 function monthPanel(date) {
@@ -575,13 +581,20 @@ function shortMonth(iso) {
 
 function weekDay(date) {
   const today = date === nyToday();
+  const past = date < nyToday();
   const meals = mealsOn(date);
   const events = eventsOn(date);
   const label = today ? `Today · ${shortDate(date)}` : shortDate(date);
   const picked = state.weekPick === date;
-  return `<section class="week-day${today ? " is-today" : ""}${picked ? " is-picked" : ""}" id="week-${esc(date)}">
-      <div class="week-day-head"><button class="week-date" type="button" data-action="open-day" data-date="${esc(date)}">${esc(label)}</button>${addDinnerButton(date)}</div>
-      ${meals.length ? meals.map((entry) => mealRow(entry, "calendar")).join("") : `<button class="week-empty" type="button" data-action="open-day" data-date="${esc(date)}">Nothing planned</button>`}
+  const dateLabel = past
+    ? `<p class="week-date">${esc(label)}</p>`
+    : `<button class="week-date" type="button" data-action="open-day" data-date="${esc(date)}">${esc(label)}</button>`;
+  const empty = past
+    ? `<p class="week-empty">Nothing planned</p>`
+    : `<button class="week-empty" type="button" data-action="open-day" data-date="${esc(date)}">Nothing planned</button>`;
+  return `<section class="week-day${today ? " is-today" : ""}${past ? " is-past" : ""}${picked ? " is-picked" : ""}" id="week-${esc(date)}">
+      <div class="week-day-head">${dateLabel}${addDinnerButton(date)}</div>
+      ${meals.length ? meals.map((entry) => mealRow(entry, "calendar")).join("") : empty}
       ${events.map((event) => `<p class="event-line">${event.time ? `<time>${esc(event.time)}</time>` : ""}${esc(event.title)}</p>`).join("")}
     </section>`;
 }
@@ -592,6 +605,7 @@ function addDinnerButton(date) {
 }
 
 function mealMenu(entry, scope) {
+  if (entry?.date && entry.date < nyToday()) return "";
   const from = scope ? ` data-from="${scope}"` : "";
   return `<button class="icon-btn" type="button" data-action="recipe-menu" data-id="${esc(entry.id)}" data-date="${esc(entry.date)}" data-meal="${esc(entry.meal)}"${from} aria-label="More">${dots()}</button>`;
 }
@@ -631,8 +645,9 @@ function monthGrid(iso, selected, action = "select-day") {
 function monthCell(date, inMonth, selected, action = "select-day") {
   const today = date === nyToday();
   const past = date < nyToday();
-  const planned = inMonth && !past && (mealsOn(date).length > 0 || eventsOn(date).length > 0);
-  const open = inMonth && !past;
+  const canOpenPast = action === "select-day";
+  const planned = inMonth && (canOpenPast || !past) && (mealsOn(date).length > 0 || eventsOn(date).length > 0);
+  const open = inMonth && (canOpenPast || !past);
   const picked = open && date === selected;
   return `<div class="month-cell${inMonth ? "" : " is-out"}${today ? " is-today" : ""}${past ? " is-past" : ""}${picked ? " is-picked" : ""}">
       <button type="button" ${open ? `data-action="${action}" data-date="${esc(date)}" aria-pressed="${picked ? "true" : "false"}"` : "disabled"}>${Number(date.slice(8))}<span class="dot${planned ? " is-on" : ""}"></span></button>
@@ -801,15 +816,13 @@ function hero(recipe, showBack, prepTag = "", entry = null) {
     ? ` data-from="today" data-id="${esc(entry.id)}" data-date="${esc(entry.date)}" data-meal="${esc(entry.meal)}"`
     : "";
   const menu = `<button class="float right" type="button" data-action="recipe-menu"${today} aria-label="More">${dots()}</button>`;
-  const add = showBack && !entry ? `<button class="float right add-float" type="button" data-action="add-to-date" data-id="${esc(recipe.id)}" aria-label="Add to date">${plus()}</button>` : "";
   const back = showBack ? `<button class="float left" type="button" data-action="back" aria-label="Back">${chevLeft()}</button>` : "";
   if (!recipe.imageUrl) {
-    return `<div class="hero hero-empty">${back}<span class="hero-mark" aria-hidden="true">${plateIcon()}</span>${prepTag}${add}${menu}</div>`;
+    return `<div class="hero hero-empty">${back}<span class="hero-mark" aria-hidden="true">${plateIcon()}</span>${prepTag}${menu}</div>`;
   }
   return `<div class="hero"><img class="fallback-photo" src="${esc(safeSrc(recipe.imageUrl))}" alt="">
       ${back}
       ${prepTag}
-      ${add}
       ${menu}
     </div>`;
 }
@@ -1926,7 +1939,10 @@ async function onClick(event) {
   }
   if (action === "tab") {
     state.tab = button.dataset.tab;
-    if (state.tab === "calendar") state.calMode = "week";
+    if (state.tab === "calendar") {
+      state.calMode = "week";
+      state.weekAnchor = null;
+    }
     if (state.tab === "today") state.todayPanel = "ingredients";
     state.page = null;
     state.sheet = null;
@@ -1969,12 +1985,13 @@ async function onClick(event) {
     return;
   }
   if (action === "cal-shift") return shiftCalendar(Number(button.dataset.delta));
+  if (action === "week-shift") return shiftWeek(Number(button.dataset.delta));
   if (action === "cal-mode") {
     state.calMode = state.calMode === "month" ? "week" : "month";
     if (state.calMode === "month") {
-      state.calStart = `${nyToday().slice(0, 7)}-01`;
+      state.calStart = `${weekStart().slice(0, 7)}-01`;
       state.monthPick = null;
-    }
+    } else state.weekAnchor = null;
     state.page = null;
     render();
     refresh(true);
@@ -1982,7 +1999,7 @@ async function onClick(event) {
   }
   if (action === "select-day") {
     const date = button.dataset.date;
-    if (!date || date < nyToday()) return;
+    if (!date) return;
     state.monthPick = date;
     render();
     return;
@@ -2333,8 +2350,7 @@ function canShiftDateMonth(delta) {
 }
 
 function recipeMenuRows(recipeId) {
-  return `<button class="menu-row" type="button" data-action="add-to-date" data-id="${esc(recipeId)}">Add to date</button>
-        <button class="menu-row" type="button" data-action="edit-recipe" data-id="${esc(recipeId)}">Edit recipe</button>`;
+  return `<button class="menu-row" type="button" data-action="edit-recipe" data-id="${esc(recipeId)}">Edit recipe</button>`;
 }
 
 function dateSheetHtml() {
@@ -3559,12 +3575,26 @@ function tonightRecipe() {
   return recipeForEntry(mealOn(nyToday(), "dinner"));
 }
 
-function canShiftMonth(delta) {
-  if (delta > 0) return true;
-  const current = state.calStart || `${nyToday().slice(0, 7)}-01`;
-  const [year, month] = current.split("-").map(Number);
-  const previousLast = new Date(Date.UTC(year, month - 1, 0)).toISOString().slice(0, 10);
-  return previousLast >= nyToday();
+function canShiftMonth() {
+  return true;
+}
+
+function weekStart() {
+  const today = nyToday();
+  if (!state.weekAnchor || state.weekAnchor >= today) return today;
+  return state.weekAnchor;
+}
+
+function shiftWeek(delta) {
+  if (state.calMode === "month") return;
+  const today = nyToday();
+  const start = weekStart();
+  if (delta > 0 && start >= today) return;
+  const next = addDays(start, delta * 7);
+  state.weekAnchor = next >= today ? null : next;
+  state.weekPick = null;
+  render();
+  refresh(true);
 }
 
 function shiftCalendar(delta) {
@@ -3630,8 +3660,10 @@ function visibleRange() {
     if (daysBetween(from, to) > 60) from = addDays(to, -60);
   } else {
     const focus = state.page?.kind === "day" || state.page?.kind === "pick" ? state.page.date : "";
-    const end = focus > addDays(today, 6) ? focus : addDays(today, 6);
-    from = today;
+    const start = weekStart();
+    const windowEnd = addDays(start, 6);
+    const end = focus > windowEnd ? focus : windowEnd;
+    from = focus && focus < start ? focus : start;
     to = addDays(end, 1);
   }
   if (state.sheet?.kind === "pick-date" && state.sheet.month) {

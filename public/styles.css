@@ -1199,6 +1199,9 @@ body:has(.night-screen),
   text-align: left;
   font-size: 1.65rem;
 }
+.week-head h1 { text-align: center; font-size: 1.25rem; }
+.week-head > button { min-width: 44px; min-height: 44px; }
+.week-head > button:disabled { opacity: 0.28; }
 
 .month-bar h1 { text-align: center; font-size: 1.25rem; }
 .month-bar button, .icon-btn { min-width: 44px; min-height: 44px; }
@@ -1216,7 +1219,7 @@ body:has(.night-screen),
 .add-plus { color: var(--green-dark); background: var(--green-soft); border-radius: 12px; }
 
 .week-day-head, .day-head { display: flex; align-items: center; justify-content: space-between; gap: 0.25rem; }
-.week-day-head .week-date { flex: 1; width: auto; }
+.week-day-head .week-date { flex: 1; width: auto; margin: 0; }
 
 .week-day { padding: 0.85rem 0 0.45rem; border-top: 1px solid var(--line); }
 .week-day.is-picked .week-date { color: var(--green-dark); }
@@ -1238,7 +1241,7 @@ body:has(.night-screen),
 }
 
 .week-day.is-today .week-date { color: var(--green-dark); }
-.week-empty { color: var(--muted); font-size: 1rem; font-weight: 500; text-transform: none; letter-spacing: 0; }
+.week-empty { margin: 0; color: var(--muted); font-size: 1rem; font-weight: 500; text-transform: none; letter-spacing: 0; }
 
 .meal-row {
   display: flex;
@@ -1364,6 +1367,7 @@ body:has(.month-screen),
 .month-cell.is-picked > button { box-shadow: inset 0 0 0 2px var(--green); }
 .month-cell.is-out { opacity: 0.35; }
 .month-cell.is-past { opacity: 0.4; }
+.month-cell.is-past.is-picked { opacity: 1; }
 
 .month-panel { margin-top: 0.15rem; padding-top: 0.15rem; border-top: 1px solid var(--line); text-align: left; }
 .month-panel-head { display: flex; align-items: center; justify-content: space-between; gap: 0.6rem; }
