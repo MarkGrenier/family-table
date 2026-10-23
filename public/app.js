@@ -901,6 +901,7 @@ function cookHtml() {
       <div class="cook-dock">
         <div class="cook-actions">
           <button class="list-btn" type="button" data-action="cook-list" aria-label="Ingredients">${listIcon()}<span>Ingredients</span></button>
+          <button class="outline-btn cook-back" type="button" data-action="cook-step" data-delta="-1"${index === 0 ? " disabled" : ""}>Back</button>
           <button class="green-btn" type="button" data-action="cook-step" data-delta="1">${index === steps.length - 1 ? "Done" : "Next"}</button>
         </div>
         <div class="dashes">${steps.map((_, i) => `<i class="${i <= index ? "is-on" : ""}"></i>`).join("")}</div>
@@ -2603,7 +2604,8 @@ function openCook(id) {
 function moveCook(delta) {
   const steps = cookSequence(recipeById(state.page.id));
   const next = (state.page.step || 0) + delta;
-  if (next >= steps.length || next < 0) return closeCook();
+  if (next >= steps.length) return closeCook();
+  if (next < 0) return;
   stopTimer(false);
   state.page.step = next;
   render();

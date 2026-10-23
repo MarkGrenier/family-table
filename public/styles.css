@@ -819,6 +819,8 @@ select.box, button.box { appearance: none; padding-right: 2.2rem; }
 
 .cook-actions { display: flex; gap: 0.7rem; align-items: center; }
 .cook-actions .green-btn { flex: 1; }
+.cook-actions .cook-back { flex: none; min-width: 5.2rem; padding: 0 0.85rem; }
+.cook-actions .cook-back:disabled { color: #b0b0b4; border-color: #e4e4e4; background: #fafafa; }
 
 .list-btn {
   min-width: 44px;

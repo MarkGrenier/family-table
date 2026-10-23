@@ -2354,6 +2354,13 @@ describe("grocery API", () => {
     expect(js).toContain('name="ing-name"');
     expect(js).toContain("raised && cooked");
     expect(js).toContain("Cooked</button>");
+    expect(js).toContain('class="outline-btn cook-back"');
+    expect(js).toContain(">Back</button>");
+    expect(js).toContain('data-delta="-1"');
+    expect(js).toContain('index === 0 ? " disabled" : ""');
+    const moveCook = js.slice(js.indexOf("function moveCook"), js.indexOf("function closeCook"));
+    expect(moveCook).toContain("if (next >= steps.length) return closeCook();");
+    expect(moveCook).toContain("if (next < 0) return;");
     expect(js).not.toContain("Mark cooked");
     expect(js).not.toContain("Marked cooked");
     expect(js).not.toContain("Mark as cooked");
@@ -2448,9 +2455,9 @@ describe("grocery API", () => {
     expect(css).toContain("opacity 300ms");
     expect(css).toContain(".month-panel-head.is-today .week-date");
     const shell = await (await exports.default.fetch("https://grocery.test/sw.js")).text();
-    expect(shell).toContain("grocery-shell-v74");
-    expect(shell).toContain("/styles.css?v=63");
-    expect(shell).toContain("/app.js?v=70");
+    expect(shell).toContain("grocery-shell-v75");
+    expect(shell).toContain("/styles.css?v=64");
+    expect(shell).toContain("/app.js?v=71");
     expect(js).toContain("const EDGE_PX = 30");
     expect(js).toContain("const BACK_SNAP_MS = 200");
     expect(js).toContain("swipe-under");
