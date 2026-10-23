@@ -2441,8 +2441,8 @@ describe("grocery API", () => {
     expect(css).toContain("opacity 300ms");
     expect(css).toContain(".month-panel-head.is-today .week-date");
     const shell = await (await exports.default.fetch("https://grocery.test/sw.js")).text();
-    expect(shell).toContain("grocery-shell-v71");
-    expect(shell).toContain("/styles.css?v=62");
+    expect(shell).toContain("grocery-shell-v72");
+    expect(shell).toContain("/styles.css?v=63");
     expect(shell).toContain("/app.js?v=68");
     expect(js).toContain("const EDGE_PX = 30");
     expect(js).toContain("const BACK_SNAP_MS = 200");
@@ -2454,6 +2454,12 @@ describe("grocery API", () => {
     expect(edgeDown.indexOf("beginEdgeBack(event)")).toBeGreaterThan(-1);
     expect(edgeDown.indexOf("beginEdgeBack(event)")).toBeLessThan(edgeDown.indexOf("cal-board"));
     expect(css).toContain(".today-head h1");
+    expect(css).toContain(".today-head {\n  flex: none;\n  margin-bottom: 0.8rem;\n}");
+    expect(css).toContain(".search { display: block; margin: 0.8rem 0; }");
+    const todayCss = css.slice(css.indexOf(".today-screen {"), css.indexOf(".today-screen.no-dock"));
+    expect(todayCss).not.toContain("padding-left: 0");
+    expect(css).toContain(".today-screen .tomorrow {\n  width: 100%;\n  margin-left: 0;\n  margin-right: 0;\n}");
+    expect(css).toContain(".today-screen .hero {\n  border-radius: 12px;\n  overflow: hidden;\n}");
     expect(css).toContain(".can-swipe-back { touch-action: pan-y; overscroll-behavior-x: none; }");
     expect(css).toContain(".swipe-under {");
     expect(css).toContain(".is-swipe-back { transition: none; }");

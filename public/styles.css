@@ -70,8 +70,6 @@ a { color: var(--green-dark); }
 .bare { padding-bottom: calc(var(--dock-btn) + var(--dock-pad) + var(--dock-pad) + 1.1rem + var(--safe-b)); }
 
 .today-screen {
-  padding-left: 0;
-  padding-right: 0;
   padding-bottom: calc(var(--tab-bar) + var(--dock-pad) + var(--dock-btn) + 1.15rem);
 }
 
@@ -81,11 +79,24 @@ a { color: var(--green-dark); }
 
 .today-screen .pad,
 .today-screen .today-events,
-.today-screen .empty-night { padding-left: 1.15rem; padding-right: 1.15rem; }
+.today-screen .empty-night { padding-left: 0; padding-right: 0; }
+
+.today-screen .empty-night { padding-top: 0; }
 
 .today-head {
   flex: none;
-  padding: 0 1.15rem 0.2rem;
+  margin-bottom: 0.8rem;
+}
+
+.today-screen .hero {
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.today-screen .tomorrow {
+  width: 100%;
+  margin-left: 0;
+  margin-right: 0;
 }
 
 .today-head h1 {
