@@ -899,8 +899,8 @@ function cookHtml() {
       ${lines.length ? `<ul>${lines.map((line) => `<li>${esc(unicodeFractions(line))}</li>`).join("")}</ul>` : ""}
       ${timerHtml(step, index)}
       <div class="cook-dock">
+        <button class="list-btn cook-ings" type="button" data-action="cook-list" aria-label="Ingredients">${listIcon()}<span>Ingredients</span></button>
         <div class="cook-actions">
-          <button class="list-btn" type="button" data-action="cook-list" aria-label="Ingredients">${listIcon()}<span>Ingredients</span></button>
           <button class="outline-btn cook-back" type="button" data-action="cook-step" data-delta="-1"${index === 0 ? " disabled" : ""}>Back</button>
           <button class="green-btn" type="button" data-action="cook-step" data-delta="1">${index === steps.length - 1 ? "Done" : "Next"}</button>
         </div>

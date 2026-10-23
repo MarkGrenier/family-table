@@ -783,7 +783,7 @@ select.box, button.box { appearance: none; padding-right: 2.2rem; }
 .cook {
   min-height: 100vh;
   background: white;
-  padding: calc(1rem + env(safe-area-inset-top)) 1.3rem calc(8.5rem + env(safe-area-inset-bottom));
+  padding: calc(1rem + env(safe-area-inset-top)) 1.3rem calc(12.4rem + env(safe-area-inset-bottom));
 }
 
 .cook-x {
@@ -818,9 +818,10 @@ select.box, button.box { appearance: none; padding-right: 2.2rem; }
 }
 
 .cook-actions { display: flex; gap: 0.7rem; align-items: center; }
+.cook-actions .cook-back,
 .cook-actions .green-btn { flex: 1; }
-.cook-actions .cook-back { flex: none; min-width: 5.2rem; padding: 0 0.85rem; }
 .cook-actions .cook-back:disabled { color: #b0b0b4; border-color: #e4e4e4; background: #fafafa; }
+.cook-dock .cook-ings { justify-content: center; width: 100%; }
 
 .list-btn {
   min-width: 44px;
