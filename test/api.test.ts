@@ -2461,8 +2461,8 @@ describe("grocery API", () => {
     expect(css).toContain("opacity 300ms");
     expect(css).toContain(".month-panel-head.is-today .week-date");
     const shell = await (await exports.default.fetch("https://grocery.test/sw.js")).text();
-    expect(shell).toContain("grocery-shell-v77");
-    expect(shell).toContain("/styles.css?v=65");
+    expect(shell).toContain("grocery-shell-v78");
+    expect(shell).toContain("/styles.css?v=66");
     expect(shell).toContain("/app.js?v=73");
     const weekTab = js.slice(js.indexOf('if (action === "tab")'), js.indexOf('if (action === "back")'));
     expect(weekTab).toContain('if (state.tab === "calendar") state.calMode = "week";');
@@ -2494,7 +2494,8 @@ describe("grocery API", () => {
     expect(css).toContain(".g-swipe.is-checking-out");
     expect(css).toContain("grid-template-rows: 0fr");
     expect(css).toContain(".g-swipe.is-checking-out { transition: none; transform: none; }");
-    expect(css).toContain(".section-head.store-head { font-weight: 400; }");
+    expect(css).toContain(".section-head.store-head { color: var(--ink); font-weight: 750; }");
+    expect(css).toContain(".aisle-head { margin: 0.45rem 0 0.1rem; color: #b4b4b8; font-size: 0.72rem; font-weight: 400;");
     expect(css).toContain(".fresh-row {");
     expect(css).toContain(".buy-hint {");
     expect(css).not.toContain(".coming-line");

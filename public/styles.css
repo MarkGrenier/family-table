@@ -391,7 +391,7 @@ h1, .title {
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
-.section-head.store-head { font-weight: 400; }
+.section-head.store-head { color: var(--ink); font-weight: 750; }
 
 .g-swipe {
   position: relative;
@@ -485,7 +485,7 @@ h1, .title {
 .add-form .green-btn { width: 100%; margin: 0.45rem 0 0.9rem; }
 .add-sheet .sheet-card,
 .pick-sheet .sheet-card { max-height: calc(100dvh - 4.25rem); }
-.aisle-head { margin: 0.45rem 0 0.1rem; color: #9a9aa0; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }
+.aisle-head { margin: 0.45rem 0 0.1rem; color: #b4b4b8; font-size: 0.72rem; font-weight: 400; letter-spacing: 0.06em; text-transform: uppercase; }
 button.box { display: block; width: 100%; text-align: left; font-weight: 400; }
 .store-drop, .store-edit-menu {
   margin: 0.25rem 0 0.45rem;
