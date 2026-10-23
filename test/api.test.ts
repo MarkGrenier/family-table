@@ -2461,9 +2461,11 @@ describe("grocery API", () => {
     expect(css).toContain("opacity 300ms");
     expect(css).toContain(".month-panel-head.is-today .week-date");
     const shell = await (await exports.default.fetch("https://grocery.test/sw.js")).text();
-    expect(shell).toContain("grocery-shell-v76");
+    expect(shell).toContain("grocery-shell-v77");
     expect(shell).toContain("/styles.css?v=65");
-    expect(shell).toContain("/app.js?v=72");
+    expect(shell).toContain("/app.js?v=73");
+    const weekTab = js.slice(js.indexOf('if (action === "tab")'), js.indexOf('if (action === "back")'));
+    expect(weekTab).toContain('if (state.tab === "calendar") state.calMode = "week";');
     expect(js).toContain("const EDGE_PX = 30");
     expect(js).toContain("const BACK_SNAP_MS = 200");
     expect(js).toContain("swipe-under");

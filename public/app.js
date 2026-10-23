@@ -1935,6 +1935,7 @@ async function onClick(event) {
   }
   if (action === "tab") {
     state.tab = button.dataset.tab;
+    if (state.tab === "calendar") state.calMode = "week";
     if (state.tab === "today") state.todayPanel = "ingredients";
     state.page = null;
     state.sheet = null;
