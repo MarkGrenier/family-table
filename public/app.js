@@ -912,14 +912,19 @@ function groceriesHtml() {
   const today = nyToday();
   const open = state.items.filter((item) => !item.checked || checkouts.has(item.id));
   const buyToday = [];
-  const fresh = [];
+  const freshByStore = new Map();
   const rest = [];
   for (const item of open) {
     if (item.fresh && item.dueDate && item.dueDate <= today) buyToday.push(item);
-    else if (freshWaiting(item, today)) fresh.push(item);
-    else rest.push(item);
+    else if (freshWaiting(item, today)) {
+      const id = storeIdOf(item);
+      if (!freshByStore.has(id)) freshByStore.set(id, []);
+      freshByStore.get(id).push(item);
+    } else rest.push(item);
   }
-  fresh.sort((a, b) => (a.dueDate || "9999").localeCompare(b.dueDate || "9999") || a.name.localeCompare(b.name));
+  for (const waiting of freshByStore.values()) {
+    waiting.sort((a, b) => (a.dueDate || "9999").localeCompare(b.dueDate || "9999") || a.name.localeCompare(b.name));
+  }
   const byStore = new Map();
   for (const item of rest) {
     const id = storeIdOf(item);
@@ -927,13 +932,16 @@ function groceriesHtml() {
     byStore.get(id).push(item);
   }
   const ordered = [];
-  for (const store of state.stores || []) {
-    if (byStore.has(store.id)) ordered.push(store.id);
-  }
-  for (const id of byStore.keys()) {
-    if (id && !ordered.includes(id)) ordered.push(id);
-  }
-  if (byStore.has("")) ordered.push("");
+  const seen = new Set();
+  const consider = (id) => {
+    if (seen.has(id) || (!byStore.has(id) && !freshByStore.has(id))) return;
+    seen.add(id);
+    ordered.push(id);
+  };
+  for (const store of state.stores || []) consider(store.id);
+  for (const id of byStore.keys()) if (id) consider(id);
+  for (const id of freshByStore.keys()) if (id) consider(id);
+  consider("");
   const blocks = ordered.map((id) => {
     const items = byStore.get(id) || [];
     const store = (state.stores || []).find((entry) => entry.id === id);
@@ -942,19 +950,20 @@ function groceriesHtml() {
       label: aisleLabel,
       items: items.filter((item) => aisleOf(item) === aisle),
     })).filter((group) => group.items.length);
-    return { label, aisles };
-  }).filter((block) => block.aisles.length);
+    return { label, aisles, waiting: freshByStore.get(id) || [] };
+  }).filter((block) => block.aisles.length || block.waiting.length);
   const done = state.items.filter((item) => item.checked && !checkouts.has(item.id));
-  const body = blocks.map((block) => `<h2 class="section-head store-head">${esc(block.label)}</h2>${block.aisles.map((aisle) => `<h3 class="aisle-head">${esc(aisle.label)}</h3>${aisle.items.map((item) => groceryRow(item)).join("")}`).join("")}`).join("");
-  const freshBlock = fresh.length
-    ? `<h2 class="section-head">Fresh</h2>${fresh.map((item) => groceryRow(item, buyHint(item))).join("")}`
-    : "";
-  const clear = !body && !buyToday.length && !fresh.length;
+  const body = blocks.map((block) => {
+    const aisles = block.aisles.map((aisle) => `<h3 class="aisle-head">${esc(aisle.label)}</h3>${aisle.items.map((item) => groceryRow(item)).join("")}`).join("");
+    const waiting = block.waiting.map((item) => groceryRow(item, buyHint(item))).join("");
+    const fresh = waiting ? `<h3 class="aisle-head">Fresh</h3>${waiting}` : "";
+    return `<h2 class="section-head store-head">${esc(block.label)}</h2>${aisles}${fresh}`;
+  }).join("");
+  const clear = !body && !buyToday.length;
   return `<div class="title-row"><h1>Groceries</h1><button class="icon-green" type="button" data-action="grocery-menu" aria-label="List options">${dots()}</button></div>
     ${buyToday.length ? `<h2 class="section-head">Buy today</h2>${buyToday.map((item) => groceryRow(item)).join("")}` : ""}
     ${body}
     ${clear ? `<p class="empty">The list is clear.</p>` : ""}
-    ${freshBlock}
     ${state.doneOpen && done.length ? `<h2 class="section-head">Completed</h2>${done.map((item) => groceryRow(item)).join("")}` : ""}
     <button class="fab" type="button" data-action="add-item" aria-label="Add">+</button>`;
 }

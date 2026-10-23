@@ -2388,8 +2388,11 @@ describe("grocery API", () => {
     expect(calendarCopy).not.toContain("coming-up");
     const groceries = js.slice(js.indexOf("function groceriesHtml"), js.indexOf("function groceryRow"));
     expect(groceries).toContain("Buy today");
-    expect(groceries).toContain('class="section-head">Fresh');
-    expect(groceries).toContain("buyHint");
+    expect(groceries).not.toContain('class="section-head">Fresh');
+    expect(groceries).toContain('class="aisle-head">Fresh');
+    expect(groceries).toContain("store-head\">${esc(block.label)}</h2>${aisles}${fresh}");
+    expect(groceries).toContain("freshWaiting(item, today)");
+    expect(groceries).toContain("buyHint(item)");
     expect(groceries).not.toContain("Coming up");
     expect(groceries).not.toContain('data-action="toggle-coming"');
     expect(groceries).toContain('class="section-head">Buy today');
@@ -2441,9 +2444,9 @@ describe("grocery API", () => {
     expect(css).toContain("opacity 300ms");
     expect(css).toContain(".month-panel-head.is-today .week-date");
     const shell = await (await exports.default.fetch("https://grocery.test/sw.js")).text();
-    expect(shell).toContain("grocery-shell-v72");
+    expect(shell).toContain("grocery-shell-v73");
     expect(shell).toContain("/styles.css?v=63");
-    expect(shell).toContain("/app.js?v=68");
+    expect(shell).toContain("/app.js?v=69");
     expect(js).toContain("const EDGE_PX = 30");
     expect(js).toContain("const BACK_SNAP_MS = 200");
     expect(js).toContain("swipe-under");
