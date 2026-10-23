@@ -792,7 +792,7 @@ function cookDock(recipe, raised) {
     return `<div class="dock dock-raised">${start}<div class="cooked-pill">✓ Cooked</div></div>`;
   }
   return `<div class="dock${raised ? " dock-raised" : ""}">
-      ${cooked ? `<div class="cooked-pill">✓ Cooked</div><button class="gray-btn" type="button" data-action="feedback" data-id="${esc(recipe.id)}">Give Feedback</button>` : `<button class="outline-btn" type="button" data-action="mark-cooked" data-id="${esc(recipe.id)}">${checkOutline()} Mark cooked</button>${start}`}
+      ${cooked ? `<div class="cooked-pill">✓ Cooked</div><button class="gray-btn" type="button" data-action="feedback" data-id="${esc(recipe.id)}">Give Feedback</button>` : `<button class="outline-btn" type="button" data-action="mark-cooked" data-id="${esc(recipe.id)}">${checkOutline()} Cooked</button>${start}`}
     </div>`;
 }
 
