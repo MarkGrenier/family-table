@@ -2229,6 +2229,7 @@ describe("grocery API", () => {
     expect(menu).not.toContain("Add to date");
     const todayScreen = js.slice(js.indexOf("function todayHtml"), js.indexOf("function leftoversNight"));
     expect(todayScreen).toContain("nyToday()");
+    expect(todayScreen).toContain('<div class="today-head"><h1>Today</h1></div>');
     expect(todayScreen).not.toContain("monthPick");
     const kept = js.slice(js.indexOf("function mergeDated"), js.indexOf("function visibleRange"));
     expect(kept).toContain("entry.date < range.from");
@@ -2363,6 +2364,7 @@ describe("grocery API", () => {
     expect(night.indexOf('class="lo-pill"')).toBeLessThan(night.indexOf("<h1>"));
     expect(night).toContain('class="night-gap"');
     expect(js).toContain("leftoversNight(dinner, recipe);");
+    expect(night).not.toContain("<h1>Today</h1>");
     expect(js).toContain('data-action="remove-meal"');
     expect(js).toContain(">Remove</button>");
     expect(js).toContain('kind: "plan"');
@@ -2439,9 +2441,9 @@ describe("grocery API", () => {
     expect(css).toContain("opacity 300ms");
     expect(css).toContain(".month-panel-head.is-today .week-date");
     const shell = await (await exports.default.fetch("https://grocery.test/sw.js")).text();
-    expect(shell).toContain("grocery-shell-v70");
-    expect(shell).toContain("/styles.css?v=61");
-    expect(shell).toContain("/app.js?v=67");
+    expect(shell).toContain("grocery-shell-v71");
+    expect(shell).toContain("/styles.css?v=62");
+    expect(shell).toContain("/app.js?v=68");
     expect(js).toContain("const EDGE_PX = 30");
     expect(js).toContain("const BACK_SNAP_MS = 200");
     expect(js).toContain("swipe-under");
@@ -2451,6 +2453,7 @@ describe("grocery API", () => {
     const edgeDown = js.slice(js.indexOf("function onPointerDown"), js.indexOf('const row = event.target.closest(".g-row")'));
     expect(edgeDown.indexOf("beginEdgeBack(event)")).toBeGreaterThan(-1);
     expect(edgeDown.indexOf("beginEdgeBack(event)")).toBeLessThan(edgeDown.indexOf("cal-board"));
+    expect(css).toContain(".today-head h1");
     expect(css).toContain(".can-swipe-back { touch-action: pan-y; overscroll-behavior-x: none; }");
     expect(css).toContain(".swipe-under {");
     expect(css).toContain(".is-swipe-back { transition: none; }");

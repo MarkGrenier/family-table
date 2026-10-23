@@ -362,7 +362,10 @@ function todayHtml() {
   const dinner = mealOn(today, "dinner");
   const recipe = recipeForEntry(dinner);
   const events = eventsOn(today);
-  if (dinner?.type === "leftovers" && !(dinner.also || []).length) return leftoversNight(dinner, recipe);
+  if (dinner?.type === "leftovers" && !(dinner.also || []).length) {
+    const night = leftoversNight(dinner, recipe);
+    return `${todayHead()}${night}`;
+  }
   if (recipe && dinner) {
     if (state.todayId !== recipe.id) {
       state.todayId = recipe.id;
@@ -371,9 +374,13 @@ function todayHtml() {
       state.todayServingsOpen = false;
     }
   }
-  return `${recipe && dinner ? recipeView(recipe, "today") : emptyTonight()}
+  return `${todayHead()}${recipe && dinner ? recipeView(recipe, "today") : emptyTonight()}
     ${eventsHtml(events)}
     ${recipe ? cookDock(recipe, true) : ""}`;
+}
+
+function todayHead() {
+  return `<div class="today-head"><h1>Today</h1></div>`;
 }
 
 function leftoversNight(entry, recipe, options = {}) {

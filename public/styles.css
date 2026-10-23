@@ -83,6 +83,17 @@ a { color: var(--green-dark); }
 .today-screen .today-events,
 .today-screen .empty-night { padding-left: 1.15rem; padding-right: 1.15rem; }
 
+.today-head {
+  flex: none;
+  padding: 0 1.15rem 0.2rem;
+}
+
+.today-head h1 {
+  font-size: 2rem;
+  font-weight: 800;
+  letter-spacing: -0.035em;
+}
+
 h1, .title {
   margin: 0;
   color: var(--ink);
