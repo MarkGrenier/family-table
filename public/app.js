@@ -44,7 +44,7 @@ const state = {
   todayId: null,
 };
 
-const APP_VERSION = "93";
+const APP_VERSION = "94";
 
 const SECTIONS = [
   ["produce", "Produce"],
