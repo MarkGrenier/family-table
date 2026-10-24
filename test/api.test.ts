@@ -2556,9 +2556,11 @@ describe("grocery API", () => {
     expect(css).toContain("opacity 300ms");
     expect(css).toContain(".month-panel-head.is-today .week-date");
     const shell = await (await exports.default.fetch("https://grocery.test/sw.js")).text();
-    expect(shell).toContain("grocery-shell-v94");
-    expect(shell).toContain("/styles.css?v=82");
-    expect(shell).toContain("/app.js?v=89");
+    expect(js).toContain('root.classList.toggle("kb-open", kb > 80)');
+    expect(css).toContain(".kb-open .add-sheet .sheet-card");
+    expect(shell).toContain("grocery-shell-v95");
+    expect(shell).toContain("/styles.css?v=83");
+    expect(shell).toContain("/app.js?v=90");
     const weekTab = js.slice(js.indexOf('if (action === "tab")'), js.indexOf('if (action === "back")'));
     expect(weekTab).toContain('state.calMode = "week";');
     expect(weekTab).toContain("state.weekAnchor = null;");

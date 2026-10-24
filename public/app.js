@@ -92,8 +92,11 @@ function pinSheets() {
   const vv = window.visualViewport;
   if (!vv) return;
   const root = document.documentElement;
+  const kb = Math.max(0, Math.round(window.innerHeight - vv.offsetTop - vv.height));
   root.style.setProperty("--vvt", `${Math.round(vv.offsetTop)}px`);
   root.style.setProperty("--vvh", `${Math.round(vv.height)}px`);
+  root.style.setProperty("--kb", `${kb}px`);
+  root.classList.toggle("kb-open", kb > 80);
 }
 if (window.visualViewport) {
   window.visualViewport.addEventListener("resize", pinSheets);
