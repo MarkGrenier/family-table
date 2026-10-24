@@ -41,7 +41,7 @@ const state = {
   todayId: null,
 };
 
-const APP_VERSION = "91";
+const APP_VERSION = "92";
 
 const SECTIONS = [
   ["produce", "Produce"],
@@ -452,8 +452,8 @@ function tomorrowCard(date) {
       </button>`;
   }
   if (!recipe) return "";
-  const steps = (recipe.nightBefore || []).filter(Boolean);
-  const prep = steps.length ? `<span class="prep-mini">Prep for tomorrow · ${steps.length} ${steps.length === 1 ? "step" : "steps"}</span>` : "";
+  const count = recipePrepAhead(recipe).length;
+  const prep = count ? `<span class="prep-mini">Prep for tomorrow · ${count} ${count === 1 ? "step" : "steps"}</span>` : "";
   return `<button class="tomorrow" type="button" data-action="open-recipe" data-id="${esc(recipe.id)}" data-date="${esc(entry.date)}" data-meal="${esc(entry.meal)}">
       ${recipeThumb(recipe)}
       <span class="tomorrow-copy"><span class="kicker">Tomorrow</span><strong>${esc(dishName(entry, recipe))}</strong>${prep}</span>
@@ -494,6 +494,19 @@ function emptyTonight() {
     </div>`;
 }
 
+function recipePrepAhead(recipe) {
+  if (!recipe) return [];
+  const seen = new Set();
+  const steps = [];
+  for (const text of [...(recipe.nightBefore || []), ...(recipe.prepSteps || [])]) {
+    const line = String(text || "").trim();
+    if (!line || seen.has(line)) continue;
+    seen.add(line);
+    steps.push(line);
+  }
+  return steps;
+}
+
 function duePrepSteps() {
   const tomorrow = addDays(nyToday(), 1);
   const steps = [];
@@ -501,8 +514,8 @@ function duePrepSteps() {
     const entry = mealOn(tomorrow, meal);
     const recipe = recipeForEntry(entry);
     if (!recipe) continue;
-    (recipe.nightBefore || []).filter(Boolean).forEach((text, index) => {
-      steps.push({ text: String(text), meal, key: `${tomorrow}:${meal}:${recipe.id}:${index}` });
+    recipePrepAhead(recipe).forEach((text, index) => {
+      steps.push({ text, meal, key: `${tomorrow}:${meal}:${recipe.id}:${index}` });
     });
   }
   return steps;

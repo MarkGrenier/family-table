@@ -2506,9 +2506,9 @@ describe("grocery API", () => {
     expect(css).toContain("opacity 300ms");
     expect(css).toContain(".month-panel-head.is-today .week-date");
     const shell = await (await exports.default.fetch("https://grocery.test/sw.js")).text();
-    expect(shell).toContain("grocery-shell-v91");
-    expect(shell).toContain("/styles.css?v=79");
-    expect(shell).toContain("/app.js?v=86");
+    expect(shell).toContain("grocery-shell-v92");
+    expect(shell).toContain("/styles.css?v=80");
+    expect(shell).toContain("/app.js?v=87");
     const weekTab = js.slice(js.indexOf('if (action === "tab")'), js.indexOf('if (action === "back")'));
     expect(weekTab).toContain('state.calMode = "week";');
     expect(weekTab).toContain("state.weekAnchor = null;");
@@ -2566,6 +2566,15 @@ describe("grocery API", () => {
     const today = js.slice(js.indexOf("function todayHtml"), js.indexOf("function todayShowsPhotoPrep"));
     expect(today).toContain('if (dinner?.type === "note") return `${todayHead()}${prep}${nightCard(dinner, null)}');
     expect(today.indexOf("prepLine()")).toBeLessThan(today.indexOf('dinner?.type === "note"'));
+    const ahead = js.slice(js.indexOf("function recipePrepAhead"), js.indexOf("function duePrepSteps"));
+    expect(ahead).toContain("recipe.nightBefore");
+    expect(ahead).toContain("recipe.prepSteps");
+    expect(ahead).toContain("seen.has(line)");
+    const due = js.slice(js.indexOf("function duePrepSteps"), js.indexOf("function prepPhotoTag"));
+    expect(due).toContain("recipePrepAhead(recipe)");
+    const cookMode = js.slice(js.indexOf("function cookSequence"), js.indexOf("function resolveIngredient"));
+    expect(cookMode).toContain("recipe.prepSteps");
+    expect(cookMode).not.toContain("recipe.nightBefore");
     expect(css).toContain(".fresh-row {");
     expect(css).toContain(".buy-hint {");
     expect(css).not.toContain(".coming-line");
