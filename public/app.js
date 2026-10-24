@@ -8,10 +8,13 @@ const state = {
   plan: [],
   events: [],
   items: [],
+  memory: { items: [], staples: [] },
   stores: [],
   recipeQuery: "",
   recipeSort: "favorites",
   addQuery: "",
+  addFocus: "name",
+  addSectionOpen: false,
   pickBack: null,
   addOrigin: null,
   notice: "",
@@ -41,7 +44,7 @@ const state = {
   todayId: null,
 };
 
-const APP_VERSION = "92";
+const APP_VERSION = "93";
 
 const SECTIONS = [
   ["produce", "Produce"],
@@ -190,15 +193,17 @@ async function refresh(force) {
   const serial = ++refreshSerial;
   try {
     const range = visibleRange();
-    const [items, recipes, plan, events, stores] = await Promise.all([
+    const [items, recipes, plan, events, stores, memory] = await Promise.all([
       api("/api/items"),
       api("/api/recipes"),
       api(`/api/plan?from=${range.from}&to=${range.to}`),
       api(`/api/events?from=${range.from}&to=${range.to}`),
       api("/api/stores"),
+      api("/api/items/history").catch(() => null),
     ]);
     if (serial !== refreshSerial) return;
     state.items = items.items || [];
+    if (memory) state.memory = { items: memory.items || [], staples: memory.staples || [] };
     state.stores = stores.stores || [];
     state.recipes = recipes.recipes || [];
     state.plan = applyPlanPending(mergeDated(state.plan, plan.plan || [], range));
@@ -1068,32 +1073,81 @@ function itemHtml(id) {
 }
 
 function filteredSuggestions() {
-  const query = state.addQuery.trim().toLowerCase();
-  return frequentNames().filter((name) => !query || name.toLowerCase().includes(query)).slice(0, 12);
+  const query = memoryKey(state.addQuery);
+  if (!query) return [];
+  const open = new Set(state.items.map((item) => memoryKey(item.name)));
+  return suggestionRows()
+    .filter((row) => row.key.includes(query))
+    .sort((a, b) => {
+      const aStart = a.key.startsWith(query) ? 1 : 0;
+      const bStart = b.key.startsWith(query) ? 1 : 0;
+      if (aStart !== bStart) return bStart - aStart;
+      if (a.count !== b.count) return b.count - a.count;
+      if (a.recency !== b.recency) return a.recency < b.recency ? 1 : -1;
+      return a.name.localeCompare(b.name);
+    })
+    .slice(0, 5)
+    .map((row) => ({ ...row, onList: open.has(row.key) }));
 }
 
-function suggestHtml(names) {
-  return names.map((name) => `<button class="suggest" type="button" data-action="quick-add" data-name="${esc(name)}">+ ${esc(name)}</button>`).join("");
+function suggestHtml(rows) {
+  return rows.map((row) => {
+    const meta = row.onList ? "On the list" : suggestionMeta(row);
+    return `<button class="suggest${row.onList ? " is-onlist" : ""}" type="button" data-action="use-suggest" data-onlist="${row.onList ? "1" : "0"}" data-name="${esc(row.name)}" data-store="${esc(row.store)}" data-section="${esc(row.section || "")}" data-category="${esc(row.category || "")}" data-brand="${esc(row.brand || "")}" data-asin="${esc(row.asin || "")}"><span class="suggest-name">${esc(row.name)}</span><span class="suggest-meta">${esc(meta)}</span></button>`;
+  }).join("");
+}
+
+function addTyping() {
+  if (state.storeAdd) return "new-store";
+  if (state.storeEdit) return "rename-store";
+  return state.addFocus || "name";
+}
+
+function addRow(field, label, value, placeholder) {
+  return `<button class="add-row" type="button" data-action="add-focus" data-field="${field}"><span>${label}</span><strong>${esc(value || placeholder)}</strong></button>`;
 }
 
 function addHtml() {
   const draft = state.addDraft || blankAddDraft();
-  const names = filteredSuggestions();
-  const section = draft.sectionTouched ? draft.section : state.addQuery.trim() ? guessSection(state.addQuery) : "other";
+  const typing = addTyping();
+  const section = draft.sectionTouched ? draft.section : state.addQuery.trim() ? guessSection(state.addQuery) : draft.section || "other";
+  const nameControl = typing === "name"
+    ? `<input id="add-search" name="name" class="search-box" type="text" placeholder="Add something..." value="${esc(state.addQuery)}" maxlength="80" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="done" aria-label="Name">`
+    : addRow("name", "Name", state.addQuery, "Add something...");
+  const qtyControl = typing === "quantity"
+    ? `<input id="add-search" name="quantityNote" class="field-box" type="text" placeholder="2 lb, a bunch" value="${esc(draft.quantityNote)}" maxlength="140" autocomplete="off" enterkeyhint="done" aria-label="Quantity">`
+    : addRow("quantity", "Quantity", draft.quantityNote, "Optional");
+  const noteTyping = typing === "note";
   return `<div class="sheet add-sheet"><form id="add-form" class="add-form sheet-card" data-form="add-item">
       <div class="topbar"><button class="back" type="button" data-action="back" aria-label="Close">✕</button><h1>Add</h1><span></span></div>
       <div class="pad">
-        <input id="add-search" name="name" class="search-box" type="text" placeholder="Add something..." value="${esc(state.addQuery)}" maxlength="80" autocomplete="off" enterkeyhint="done" aria-label="Name">
-        <label class="field-label">Quantity<input class="field-box" name="quantityNote" maxlength="140" value="${esc(draft.quantityNote)}" placeholder="2 lb, a bunch" enterkeyhint="done"></label>
-        <label class="field-label">Section<span class="select-wrap"><select class="box" name="section">${choiceHtml(SECTIONS, section)}</select></span></label>
+        ${nameControl}
+        <div id="suggest-list" class="suggest-list">${typing === "name" ? suggestHtml(filteredSuggestions()) : ""}</div>
+        ${qtyControl}
+        <input type="hidden" name="section" value="${esc(section)}">
+        ${sectionFieldHtml(section)}
         ${storeFieldHtml(draft.store)}
         ${freshRowHtml(draft.fresh)}
-        <label class="field-label">Note<input class="field-box" name="notes" maxlength="500" value="${esc(draft.notes)}" enterkeyhint="done"></label>
+        ${noteTyping
+          ? `<input id="add-search" name="notes" class="field-box" type="text" placeholder="Note" value="${esc(draft.notes)}" maxlength="500" autocomplete="off" enterkeyhint="done" aria-label="Note">`
+          : addRow("note", "Note", draft.notes, "Optional")}
+        ${typing === "name" ? "" : `<input type="hidden" name="name" value="${esc(state.addQuery)}">`}
+        ${typing === "quantity" ? "" : `<input type="hidden" name="quantityNote" value="${esc(draft.quantityNote)}">`}
+        ${typing === "note" ? "" : `<input type="hidden" name="notes" value="${esc(draft.notes)}">`}
         ${state.error ? `<p class="error">${esc(state.error)}</p>` : ""}
         <button class="green-btn" type="submit">Add</button>
-        <div id="suggest-list">${suggestHtml(names)}</div>
       </div>
     </form></div>`;
+}
+
+function sectionFieldHtml(section) {
+  const open = state.addSectionOpen ? "" : " is-hidden";
+  const options = SECTIONS.map(([id, label]) => {
+    const on = id === section ? " is-on" : "";
+    return `<button class="store-option${on}" type="button" data-action="pick-section" data-section="${esc(id)}">${esc(label)}</button>`;
+  }).join("");
+  return `<button class="add-row" type="button" data-action="toggle-section" aria-expanded="${state.addSectionOpen ? "true" : "false"}"><span>Section</span><strong data-section-value>${esc(sectionLabel(section))}</strong></button>
+    <div class="section-drop${open}">${options}</div>`;
 }
 
 function newRecipeHtml() {
@@ -1970,9 +2024,6 @@ function beginSheetPull(event) {
   const card = event.target.closest?.(".sheet-card");
   if (!card) return false;
   if (event.target.closest?.("input, textarea, select, [contenteditable='true']")) return false;
-  const chrome = event.target.closest?.(".sheet-grab, .sheet-head, .pick-bar, .topbar");
-  const onCardEdge = event.target === card && event.clientY - card.getBoundingClientRect().top < 36;
-  if ((!chrome || !card.contains(chrome)) && !onCardEdge) return false;
   const scroller = sheetScroller(card, event.target);
   if (scroller.scrollTop > 0) return false;
   clearGesture();
@@ -2113,6 +2164,8 @@ function closePresented() {
     state.page = null;
     state.tab = "groceries";
     state.addQuery = "";
+    state.addFocus = "name";
+    state.addSectionOpen = false;
     state.addDraft = blankAddDraft();
     state.error = "";
     render();
@@ -2413,6 +2466,8 @@ async function onClick(event) {
   if (action === "add-item") {
     state.page = { kind: "add-item" };
     state.addQuery = "";
+    state.addFocus = "name";
+    state.addSectionOpen = false;
     state.addDraft = blankAddDraft();
     state.storeOpen = false;
     state.storeAdd = false;
@@ -2425,6 +2480,23 @@ async function onClick(event) {
     render();
     return;
   }
+  if (action === "add-focus") {
+    state.addFocus = button.dataset.field || "name";
+    state.storeAdd = false;
+    state.storeEdit = null;
+    state.storeEditOpen = false;
+    state.addSectionOpen = false;
+    render();
+    return;
+  }
+  if (action === "toggle-section") {
+    state.addSectionOpen = !state.addSectionOpen;
+    render();
+    return;
+  }
+  if (action === "pick-section") return pickSection(button);
+  if (action === "toggle-fresh") return toggleFresh(button);
+  if (action === "use-suggest") return useSuggestion(button);
   if (action === "toggle-stores") return toggleStores(button);
   if (action === "pick-store") return pickStore(button);
   if (action === "add-store-row") return showNewStore(button);
@@ -2438,7 +2510,6 @@ async function onClick(event) {
     return;
   }
   if (action === "confirm-remove-store") return removeStore(button.dataset.id);
-  if (action === "quick-add") return addGrocery(button.dataset.name);
   if (action === "edit-item") {
     state.swipeId = null;
     state.storeOpen = false;
@@ -2479,15 +2550,23 @@ function onInput(event) {
     return;
   }
   if (event.target.id === "add-search") {
+    const field = event.target.name;
+    const draft = state.addDraft;
+    if (field === "quantityNote" || field === "notes") {
+      if (draft) draft[field] = event.target.value;
+      return;
+    }
+    if (field !== "name") return;
     state.addQuery = event.target.value;
     const list = document.getElementById("suggest-list");
     if (list) list.innerHTML = suggestHtml(filteredSuggestions());
     const form = event.target.form;
-    const draft = state.addDraft;
     if (form && draft && !draft.sectionTouched) {
       draft.section = state.addQuery.trim() ? guessSection(state.addQuery) : "other";
       const section = form.querySelector("[name=section]");
       if (section) section.value = draft.section;
+      const label = form.querySelector("[data-section-value]");
+      if (label) label.textContent = sectionLabel(draft.section);
       draft.category = aisleFor(draft.store, draft.section);
     }
     return;
@@ -3268,7 +3347,11 @@ function aisleOptions() {
 }
 
 function freshRowHtml(on) {
-  return `<label class="fresh-row"><span>Fresh</span><input class="fresh-box" type="checkbox" name="fresh"${on ? " checked" : ""}></label>`;
+  return `<div class="fresh-field">
+      <p class="field-label">Fresh</p>
+      <button class="fresh-row" type="button" data-action="toggle-fresh" aria-pressed="${on ? "true" : "false"}"><span>Fresh</span><span class="fresh-box${on ? " is-on" : ""}" aria-hidden="true"></span></button>
+      <input type="hidden" name="fresh" value="${on ? "on" : ""}">
+    </div>`;
 }
 
 function aisleFor(_store, section) {
@@ -3303,11 +3386,15 @@ function storeFieldHtml(selected) {
   const open = state.storeOpen ? "" : " is-hidden";
   const adding = state.storeAdd ? "" : " is-hidden";
   const editing = state.storeEditOpen ? "" : " is-hidden";
-  return `<label class="field-label">Store<span class="select-wrap"><button class="box" type="button" data-action="toggle-stores" aria-haspopup="listbox" aria-expanded="${state.storeOpen ? "true" : "false"}">${esc(storeLabel(selected))}</button></span></label>
+  const onAdd = state.page?.kind === "add-item";
+  const newStore = !onAdd || state.storeAdd;
+  const editMenu = !onAdd || state.storeEditOpen;
+  const typingId = onAdd && state.storeAdd ? " id=\"add-search\"" : "";
+  return `<div class="store-field"><label class="field-label">Store<span class="select-wrap"><button class="box" type="button" data-action="toggle-stores" aria-haspopup="listbox" aria-expanded="${state.storeOpen ? "true" : "false"}">${esc(storeLabel(selected))}</button></span></label>
     <input type="hidden" name="store" value="${esc(selected || "")}">
     <div class="store-drop${open}" role="listbox">${storeOptionsHtml(selected)}</div>
-    <div class="new-store${adding}"><input class="field-box" name="newStore" maxlength="40" placeholder="Store name" aria-label="New store" autocomplete="off" enterkeyhint="done"><button class="text-green" type="button" data-action="save-store">Add</button></div>
-    <div class="store-edit-menu${editing}">${editStoresHtml()}</div>`;
+    ${newStore ? `<div class="new-store${adding}"><input${typingId} class="field-box" name="newStore" maxlength="40" placeholder="Store name" aria-label="New store" autocomplete="off" enterkeyhint="done"><button class="text-green" type="button" data-action="save-store">Add</button></div>` : ""}
+    ${editMenu ? `<div class="store-edit-menu${editing}">${editStoresHtml()}</div>` : ""}</div>`;
 }
 
 function storeOptionsHtml(selected) {
@@ -3330,7 +3417,8 @@ function editStoresHtml() {
       return `<div class="store-confirm" data-id="${esc(store.id)}"><span>Remove ${esc(store.name)}? Its items will have no store.</span><button class="text-btn" type="button" data-action="confirm-remove-store" data-id="${esc(store.id)}">Remove</button><button class="text-green" type="button" data-action="edit-store" data-id="${esc(store.id)}">Cancel</button></div>`;
     }
     if (state.storeEdit === store.id) {
-      return `<div class="store-rename" data-id="${esc(store.id)}"><input class="field-box" name="renameStore" maxlength="40" value="${esc(store.name)}" aria-label="Rename ${esc(store.name)}"><button class="text-green" type="button" data-action="save-rename" data-id="${esc(store.id)}">Save</button><button class="text-btn" type="button" data-action="ask-remove-store" data-id="${esc(store.id)}">Remove</button></div>`;
+      const typingId = state.page?.kind === "add-item" ? " id=\"add-search\"" : "";
+      return `<div class="store-rename" data-id="${esc(store.id)}"><input${typingId} class="field-box" name="renameStore" maxlength="40" value="${esc(store.name)}" aria-label="Rename ${esc(store.name)}"><button class="text-green" type="button" data-action="save-rename" data-id="${esc(store.id)}">Save</button><button class="text-btn" type="button" data-action="ask-remove-store" data-id="${esc(store.id)}">Remove</button></div>`;
     }
     return `<div class="store-line"><span class="store-pick">${esc(store.name)}</span><button class="store-edit" type="button" data-action="edit-store" data-id="${esc(store.id)}" aria-label="Edit ${esc(store.name)}">${storeEditIcon()}</button></div>`;
   }).join("");
@@ -3390,6 +3478,16 @@ function pickStore(button) {
 function showNewStore(button) {
   const form = button.closest("form");
   if (!form) return;
+  if (form.id === "add-form") {
+    closeStoreDrop();
+    state.storeAdd = true;
+    state.storeEditOpen = false;
+    state.storeEdit = null;
+    state.storeConfirm = null;
+    state.addSectionOpen = false;
+    render();
+    return;
+  }
   closeStoreDrop();
   state.storeAdd = true;
   state.storeEditOpen = false;
@@ -3418,7 +3516,12 @@ async function saveStore(button) {
     form.querySelector(".new-store")?.classList.add("is-hidden");
     const hidden = form.querySelector("[name=store]");
     if (hidden) hidden.value = saved?.id || "";
-    if (form.id === "add-form" && state.addDraft) state.addDraft.store = saved?.id || "";
+    if (form.id === "add-form" && state.addDraft) {
+      state.addDraft.store = saved?.id || "";
+      state.addFocus = "name";
+      render();
+      return;
+    }
     paintStoreMenus(form);
   } catch (error) {
     showFormError(form, error.message);
@@ -3445,8 +3548,15 @@ function editStoreRow(button) {
   state.storeEdit = button.dataset.id || null;
   state.storeConfirm = null;
   const form = button.closest("form");
-    paintStoreMenus(form);
-    form?.querySelector("[name=renameStore]")?.focus();
+  if (form?.id === "add-form") {
+    state.storeAdd = false;
+    state.storeEditOpen = true;
+    state.addSectionOpen = false;
+    render();
+    return;
+  }
+  paintStoreMenus(form);
+  form?.querySelector("[name=renameStore]")?.focus();
 }
 
 async function saveRename(button) {
@@ -3461,6 +3571,11 @@ async function saveRename(button) {
     state.storeEdit = null;
     state.storeConfirm = null;
     showFormError(form, "");
+    if (form.id === "add-form") {
+      state.addFocus = "name";
+      render();
+      return;
+    }
     paintStoreMenus(form);
   } catch (error) {
     showFormError(form, error.message);
@@ -3579,6 +3694,57 @@ async function submitAdd(form) {
   if (!ok) return;
   state.page = null;
   state.tab = "groceries";
+  state.addFocus = "name";
+  state.addSectionOpen = false;
+  state.addDraft = blankAddDraft();
+  render();
+}
+
+function savedCategory(store, section, category) {
+  if (store === "amazon") return "general";
+  const allowed = aisleOptions(store).map(([id]) => id);
+  if (allowed.includes(category)) return category;
+  return aisleFor(store, section);
+}
+
+function pickSection(button) {
+  const section = button.dataset.section || "other";
+  if (state.addDraft) {
+    state.addDraft.section = section;
+    state.addDraft.sectionTouched = true;
+    state.addDraft.category = aisleFor(state.addDraft.store, section);
+  }
+  state.addSectionOpen = false;
+  render();
+}
+
+function toggleFresh(button) {
+  const form = button.closest("form");
+  const hidden = form?.querySelector("[name=fresh]");
+  const on = hidden?.value !== "on";
+  if (hidden) hidden.value = on ? "on" : "";
+  button.setAttribute("aria-pressed", on ? "true" : "false");
+  button.querySelector(".fresh-box")?.classList.toggle("is-on", on);
+  if (form?.id === "add-form" && state.addDraft) state.addDraft.fresh = on;
+}
+
+async function useSuggestion(button) {
+  if (button.dataset.onlist === "1") return;
+  const name = button.dataset.name || "";
+  const store = button.dataset.store ?? "local";
+  const section = button.dataset.section || guessSection(name);
+  const ok = await addGrocery(name, {
+    store,
+    section,
+    category: savedCategory(store, section, button.dataset.category || ""),
+    brand: button.dataset.brand || null,
+    asin: button.dataset.asin || null,
+  });
+  if (!ok) return;
+  state.page = null;
+  state.tab = "groceries";
+  state.addFocus = "name";
+  state.addSectionOpen = false;
   state.addDraft = blankAddDraft();
   render();
 }
@@ -3588,9 +3754,7 @@ async function addGrocery(name, extra) {
   if (!clean) return false;
   const section = extra?.section || guessSection(clean);
   const store = extra && Object.prototype.hasOwnProperty.call(extra, "store") ? extra.store : "local";
-  let category = extra?.category || aisleFor(store, section);
-  const allowed = aisleOptions(store).map(([id]) => id);
-  if (!allowed.includes(category)) category = aisleFor(store, section);
+  const category = savedCategory(store, section, extra?.category || "");
   try {
     await api("/api/items", {
       method: "POST",
@@ -3602,6 +3766,8 @@ async function addGrocery(name, extra) {
         quantityNote: extra?.quantityNote || null,
         notes: extra?.notes || null,
         fresh: extra?.fresh === true,
+        brand: extra?.brand || null,
+        asin: extra?.asin || null,
       },
     });
     state.addQuery = "";
@@ -3734,14 +3900,89 @@ function sectionLabel(id) {
   return SECTIONS.find(([key]) => key === (id || "other"))?.[1] || "Other";
 }
 
-function frequentNames() {
-  const counts = new Map();
-  for (const item of state.items) {
-    const key = item.name.trim();
-    counts.set(key, (counts.get(key) || 0) + (item.checked ? 2 : 1));
+function memoryKey(name) {
+  return String(name || "").trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function suggestionRows() {
+  const groups = new Map();
+  const remember = (name, row) => {
+    const key = memoryKey(name);
+    if (!key) return;
+    let group = groups.get(key);
+    if (!group) {
+      group = { key, name: String(name).trim().replace(/\s+/g, " "), count: 0, recency: "", store: "", section: "", category: "", brand: "", asin: "" };
+      groups.set(key, group);
+    }
+    const when = row.updatedAt || row.createdAt || "";
+    if (row.fromItem) group.count += 1;
+    if (when >= group.recency) {
+      group.recency = when;
+      group.name = String(name).trim().replace(/\s+/g, " ");
+      if (row.storeId !== undefined) group.store = row.storeId;
+      if (row.category) group.category = row.category;
+    }
+    if (row.section && when >= (group.sectionAt || "")) {
+      group.section = row.section;
+      group.sectionAt = when;
+    }
+    if (row.brand && when >= (group.brandAt || "")) {
+      group.brand = row.brand;
+      group.brandAt = when;
+    }
+    if (row.asin && when >= (group.asinAt || "")) {
+      group.asin = row.asin;
+      group.asinAt = when;
+    }
+  };
+  const history = state.memory?.items;
+  const source = Array.isArray(history) ? history : state.items;
+  for (const item of source) {
+    remember(item.name, {
+      fromItem: true,
+      updatedAt: item.updatedAt,
+      createdAt: item.createdAt,
+      storeId: item.storeTag === "" ? "" : item.storeTag || item.store || "",
+      section: item.section || "",
+      category: item.category || "",
+      brand: item.brand || "",
+      asin: item.asin || "",
+    });
   }
-  const open = new Set(state.items.filter((item) => !item.checked).map((item) => item.name.toLowerCase()));
-  return [...counts.entries()].filter(([name]) => !open.has(name.toLowerCase())).sort((a, b) => b[1] - a[1]).map(([name]) => name);
+  for (const staple of state.memory?.staples || []) {
+    const key = memoryKey(staple.name);
+    const group = groups.get(key);
+    if (!group || group.count === 0) {
+      remember(staple.name, {
+        fromItem: !group,
+        updatedAt: staple.updatedAt,
+        storeId: staple.store || "",
+        category: staple.category || "",
+        brand: staple.brand || "",
+        asin: staple.asin || "",
+      });
+    } else {
+      remember(staple.name, {
+        updatedAt: staple.updatedAt,
+        storeId: staple.store || "",
+        category: staple.category || "",
+        brand: staple.brand || "",
+        asin: staple.asin || "",
+      });
+    }
+  }
+  for (const group of groups.values()) {
+    if (!group.count) group.count = 1;
+  }
+  return [...groups.values()];
+}
+
+function suggestionMeta(row) {
+  const place = row.store ? storeLabel(row.store) : "";
+  const section = row.section ? sectionLabel(row.section) : "";
+  if (place && place !== "No store" && section) return `${place} · ${section}`;
+  if (place && place !== "No store") return place;
+  return section;
 }
 
 function lastMadeText(recipe) {

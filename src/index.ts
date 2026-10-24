@@ -1,5 +1,5 @@
 import { bearerOk, clearSessionCookie, passcodeMatches, requestAuthed, rollingSessionCookie, sessionCookie, sessionOk, sessionToken } from "./auth";
-import { addOnHand, addStapleToList, clearChecked, createItem, createStaple, deleteItem, deleteOnHand, deleteOnHandByName, deleteStaple, deleteStore, ensureStore, findStore, listItems, listOnHand, listStaples, listStores, lookupBarcode, placeStore, renameStore, updateItem } from "./db";
+import { addOnHand, addStapleToList, clearChecked, createItem, createStaple, deleteItem, deleteOnHand, deleteOnHandByName, deleteStaple, deleteStore, ensureStore, findStore, listItemHistory, listItems, listOnHand, listStaples, listStores, lookupBarcode, placeStore, renameStore, updateItem } from "./db";
 import {
   addPlanGroceries,
   addRecipeToGroceries,
@@ -195,6 +195,20 @@ async function handleApi(request: Request, env: Env, path: string): Promise<Resp
     const placed = await placeStore(env.DB, parsed.storeRequest || "", parsed.category);
     const item = await createItem(env.DB, { ...parsed, ...placed });
     return json({ item }, 201);
+  }
+  if (path === "/api/items/history" && method === "GET") {
+    const [items, staples] = await Promise.all([listItemHistory(env.DB), listStaples(env.DB)]);
+    return json({
+      items,
+      staples: staples.map((staple) => ({
+        name: staple.name,
+        store: staple.store,
+        category: staple.category,
+        brand: staple.brand,
+        asin: staple.asin,
+        updatedAt: staple.updatedAt,
+      })),
+    });
   }
   if (path === "/api/items/clear-checked" && method === "POST") {
     const body = await readJson(request);

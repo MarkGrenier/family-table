@@ -252,6 +252,40 @@ describe("grocery API", () => {
     expect((await call("/api/items", { token })).json).toEqual({ items: [] });
   });
 
+  it("remembers hidden groceries and staples for suggestions", async () => {
+    const token = env.API_TOKEN;
+    const created = await call("/api/items", {
+      method: "POST",
+      token,
+      body: { name: "Mandarin orange cups", store: "costco", category: "shelf", section: "pantry", brand: "Dole", asin: "B0MANDARIN" },
+    });
+    expect(created.status).toBe(201);
+    const item = created.json?.item as Json;
+    expect((await call(`/api/items/${item.id}`, { method: "PATCH", token, body: { deleted: true } })).status).toBe(200);
+    const staple = await call("/api/staples", {
+      method: "POST",
+      token,
+      body: { name: "Jessica's sourdough bread", store: "costco", category: "shelf", brand: "Kirkland", asin: "B00SOURDOU" },
+    });
+    expect(staple.status).toBe(201);
+    const stapleId = (staple.json?.staple as Json).id as string;
+    const history = await call("/api/items/history", { token });
+    expect(history.status).toBe(200);
+    const rows = (history.json?.items ?? []) as Json[];
+    const saved = rows.find((entry) => entry.name === "Mandarin orange cups");
+    expect(saved?.deletedAt).toBeTruthy();
+    expect(saved?.brand).toBe("Dole");
+    expect(saved?.asin).toBe("B0MANDARIN");
+    expect(saved?.storeTag).toBe("costco");
+    expect(saved?.section).toBe("pantry");
+    const staples = (history.json?.staples ?? []) as Json[];
+    expect(staples.some((entry) => entry.name === "Jessica's sourdough bread" && entry.brand === "Kirkland")).toBe(true);
+    const listed = (history.json && ((await call("/api/items", { token })).json?.items ?? [])) as Json[];
+    expect(listed.some((entry) => entry.name === "Mandarin orange cups")).toBe(false);
+    expect((await call(`/api/items/${item.id}`, { method: "DELETE", token })).status).toBe(200);
+    expect((await call(`/api/staples/${stapleId}`, { method: "DELETE", token })).status).toBe(200);
+  });
+
   it("hides a grocery item and puts the same one back", async () => {
     const token = env.API_TOKEN;
     const created = await call("/api/items", {
@@ -2348,6 +2382,19 @@ describe("grocery API", () => {
     const freshRow = js.slice(js.indexOf("function freshRowHtml"), js.indexOf("function aisleFor"));
     expect(freshRow).toContain(">Fresh</span>");
     expect(freshRow).toContain('name="fresh"');
+    expect(freshRow).toContain("fresh-field");
+    expect(freshRow.indexOf("field-label")).toBeLessThan(freshRow.indexOf("fresh-row"));
+    expect(addForm).not.toContain("<select");
+    expect(addForm).not.toContain("checkbox");
+    expect(addForm).toContain("suggestHtml(filteredSuggestions())");
+    const suggestions = js.slice(js.indexOf("function filteredSuggestions"), js.indexOf("function suggestHtml"));
+    expect(suggestions).toContain("if (!query) return []");
+    expect(suggestions).toContain(".slice(0, 5)");
+    expect(suggestions).toContain("onList");
+    const pull = js.slice(js.indexOf("function beginSheetPull"), js.indexOf("function moveSheetPull"));
+    expect(pull).toContain('closest?.("input, textarea, select, [contenteditable=\'true\']")');
+    expect(pull).toContain("scroller.scrollTop > 0");
+    expect(pull).not.toContain(".sheet-grab, .sheet-head");
     expect(addForm).not.toContain("checkIcon");
     const editItem = js.slice(js.indexOf('state.sheet?.kind === "edit-item"'), js.indexOf('state.sheet?.kind === "pick-date"'));
     expect(editItem).not.toContain("usedInHtml");
@@ -2506,9 +2553,9 @@ describe("grocery API", () => {
     expect(css).toContain("opacity 300ms");
     expect(css).toContain(".month-panel-head.is-today .week-date");
     const shell = await (await exports.default.fetch("https://grocery.test/sw.js")).text();
-    expect(shell).toContain("grocery-shell-v92");
-    expect(shell).toContain("/styles.css?v=80");
-    expect(shell).toContain("/app.js?v=87");
+    expect(shell).toContain("grocery-shell-v93");
+    expect(shell).toContain("/styles.css?v=81");
+    expect(shell).toContain("/app.js?v=88");
     const weekTab = js.slice(js.indexOf('if (action === "tab")'), js.indexOf('if (action === "back")'));
     expect(weekTab).toContain('state.calMode = "week";');
     expect(weekTab).toContain("state.weekAnchor = null;");

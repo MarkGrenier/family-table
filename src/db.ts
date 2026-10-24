@@ -241,6 +241,56 @@ export async function listItems(db: D1Database): Promise<Item[]> {
   return attachStoreNames(db, result.results.map(toItem));
 }
 
+export type ItemHistory = {
+  name: string;
+  store: Store;
+  storeTag: string | null;
+  category: string;
+  section: string | null;
+  brand: string | null;
+  asin: string | null;
+  checked: boolean;
+  deletedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type HistoryRow = {
+  name: string;
+  store: Store;
+  store_tag: string | null;
+  category: string;
+  section: string | null;
+  brand: string | null;
+  asin: string | null;
+  checked: number;
+  deleted_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export async function listItemHistory(db: D1Database): Promise<ItemHistory[]> {
+  const result = await db
+    .prepare(
+      `SELECT name, store, store_tag, category, section, brand, asin, checked, deleted_at, created_at, updated_at
+       FROM items ORDER BY updated_at DESC`,
+    )
+    .all<HistoryRow>();
+  return (result.results ?? []).map((row) => ({
+    name: row.name,
+    store: row.store,
+    storeTag: row.store_tag,
+    category: row.category,
+    section: row.section,
+    brand: row.brand,
+    asin: row.asin,
+    checked: row.checked === 1,
+    deletedAt: row.deleted_at,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  }));
+}
+
 export async function listStaples(db: D1Database): Promise<Staple[]> {
   const result = await db
     .prepare(`SELECT ${STAPLE_COLUMNS} FROM staples ORDER BY name COLLATE NOCASE ASC`)
