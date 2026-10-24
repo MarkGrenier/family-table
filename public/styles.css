@@ -792,14 +792,6 @@ select.box, button.box { appearance: none; padding-right: 2.2rem; }
   margin-right: 0.1rem;
   border-radius: 50%;
 }
-.recipe-actions .row-edit {
-  min-width: 44px;
-  min-height: 44px;
-  padding: 0 0.2rem 0 0.35rem;
-  color: var(--green);
-  font-size: 0.95rem;
-  font-weight: 750;
-}
 .recipe-actions .icon-btn svg { width: 18px; height: 18px; }
 .recipe-actions .add-plus svg { width: 16px; height: 16px; }
 .recipe-actions .heart svg { width: 18px; height: 18px; }
@@ -1025,7 +1017,6 @@ body:has(.night-screen),
 .leftover-night .lo-pill { margin: 0 0 0.45rem; font-size: 0.84rem; padding: 0.22rem 0.7rem; }
 .leftover-night h1 { margin-top: 0; }
 .night-line { margin: 0.65rem 0 0; color: #6f6f74; font-size: 1.05rem; }
-.night-remove { margin-top: 0.35rem; }
 .night-gap { flex: 0 0 auto; height: 1.25rem; min-height: 1.25rem; }
 .leftover-night .tomorrow { margin-top: 0; margin-bottom: 0; }
 .tomorrow {

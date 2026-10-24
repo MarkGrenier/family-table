@@ -387,19 +387,16 @@ function todayHead() {
 function leftoversNight(entry, recipe, options = {}) {
   const photo = foodPhoto(recipe, entry);
   const back = options.back ? `<button class="float left" type="button" data-action="back" aria-label="Back">${chevLeft()}</button>` : "";
-  const remove = options.remove ? `<button class="text-green night-remove" type="button" data-action="clear-meal" data-id="${esc(entry.id)}">Remove</button>` : "";
   return `<article class="leftover-night">
       <div class="hero night-hero">
         <img class="fallback-photo" src="${esc(photo || "/photos/leftovers-hero.jpg")}" alt="">
         ${back}
-        <button class="float right" type="button" data-action="recipe-menu" data-id="${esc(entry.id)}" data-date="${esc(entry.date)}" data-meal="${esc(entry.meal)}"${options.back ? "" : ` data-from="today"`} aria-label="More">${dots()}</button>
       </div>
       <div class="pad">
         ${options.back ? `<p class="kicker meal-kicker">${esc(mealLabel(entry.meal))}</p>` : ""}
         <span class="lo-pill">Leftovers</span>
         <h1>${esc(dishName(entry, recipe))}</h1>
         <p class="night-line">Night off. Enjoy the leftovers.</p>
-        ${remove}
       </div>
       <div class="night-gap"></div>
       ${tomorrowCard(entry.date)}
@@ -440,14 +437,14 @@ function tomorrowCard(date) {
     </button>`;
 }
 
-function leftoversRow(entry, recipe, scope) {
+function leftoversRow(entry, recipe) {
   const thumb = recipe ? recipeThumb(recipe) : `<span class="thumb-tile" aria-hidden="true">${plateIcon()}</span>`;
   return `<div class="leftover-row">${thumb}
       <button class="copy" type="button" data-action="open-day" data-date="${esc(entry.date)}">
         <strong>${esc(dishName(entry, recipe))}</strong>
         <span class="leftover-meta"><span class="meal-kind">${esc(mealLabel(entry.meal))}</span><span class="lo-pill">Leftovers</span></span>
       </button>
-      ${mealMenu(entry, scope)}
+      ${removeMealButton(entry)}
     </div>`;
 }
 
@@ -566,7 +563,7 @@ function monthPanel(date) {
   const label = today ? `Today · ${shortDate(date)}` : shortDate(date);
   return `<section class="month-panel" id="month-panel">
       <div class="month-panel-head${today ? " is-today" : ""}"><p class="week-date">${esc(label)}</p>${addDinnerButton(date)}</div>
-      ${meals.length ? meals.map((entry) => mealRow(entry, "calendar")).join("") : `<p class="week-empty">Nothing planned</p>`}
+      ${meals.length ? meals.map((entry) => mealRow(entry)).join("") : `<p class="week-empty">Nothing planned</p>`}
       ${events.map((event) => `<p class="event-line">${event.time ? `<time>${esc(event.time)}</time>` : ""}${esc(event.title)}</p>`).join("")}
     </section>`;
 }
@@ -594,7 +591,7 @@ function weekDay(date) {
     : `<button class="week-empty" type="button" data-action="open-day" data-date="${esc(date)}">Nothing planned</button>`;
   return `<section class="week-day${today ? " is-today" : ""}${past ? " is-past" : ""}${picked ? " is-picked" : ""}" id="week-${esc(date)}">
       <div class="week-day-head">${dateLabel}${addDinnerButton(date)}</div>
-      ${meals.length ? meals.map((entry) => mealRow(entry, "calendar")).join("") : empty}
+      ${meals.length ? meals.map((entry) => mealRow(entry)).join("") : empty}
       ${events.map((event) => `<p class="event-line">${event.time ? `<time>${esc(event.time)}</time>` : ""}${esc(event.title)}</p>`).join("")}
     </section>`;
 }
@@ -604,21 +601,20 @@ function addDinnerButton(date) {
   return `<button class="icon-btn add-plus" type="button" data-action="add-meal" data-date="${esc(date)}" data-meal="dinner" aria-label="Add dinner">${plus()}</button>`;
 }
 
-function mealMenu(entry, scope) {
-  if (entry?.date && entry.date < nyToday()) return "";
-  const from = scope ? ` data-from="${scope}"` : "";
-  return `<button class="icon-btn" type="button" data-action="recipe-menu" data-id="${esc(entry.id)}" data-date="${esc(entry.date)}" data-meal="${esc(entry.meal)}"${from} aria-label="More">${dots()}</button>`;
+function removeMealButton(entry) {
+  if (!entry?.date || entry.date < nyToday()) return "";
+  return `<button class="icon-btn add-plus" type="button" data-action="remove-meal" data-id="${esc(entry.id)}" aria-label="Remove">${minus()}</button>`;
 }
 
-function mealRow(entry, scope) {
+function mealRow(entry) {
   const recipe = recipeForEntry(entry);
-  if (entry.type === "leftovers") return leftoversRow(entry, recipe, scope);
+  if (entry.type === "leftovers") return leftoversRow(entry, recipe);
   const title = planTitle(entry);
   const meal = mealLabel(entry.meal);
   if (!recipe) {
-    return `<div class="meal-row meal-line"><button class="meal-open" type="button" data-action="open-day" data-date="${esc(entry.date)}"><span class="meal-copy"><strong>${esc(title)}</strong><span>${esc(meal)}</span></span></button>${mealMenu(entry, scope)}</div>`;
+    return `<div class="meal-row meal-line"><button class="meal-open" type="button" data-action="open-day" data-date="${esc(entry.date)}"><span class="meal-copy"><strong>${esc(title)}</strong><span>${esc(meal)}</span></span></button>${removeMealButton(entry)}</div>`;
   }
-  return `<div class="meal-row meal-line"><button class="meal-open" type="button" data-action="open-recipe" data-id="${esc(recipe.id)}" data-date="${esc(entry.date)}" data-meal="${esc(entry.meal)}">${recipeThumb(recipe)}<span class="meal-copy"><strong>${esc(title)}</strong><span>${esc(meal)}</span></span></button>${mealMenu(entry, scope)}</div>`;
+  return `<div class="meal-row meal-line"><button class="meal-open" type="button" data-action="open-recipe" data-id="${esc(recipe.id)}" data-date="${esc(entry.date)}" data-meal="${esc(entry.meal)}">${recipeThumb(recipe)}<span class="meal-copy"><strong>${esc(title)}</strong><span>${esc(meal)}</span></span></button>${removeMealButton(entry)}</div>`;
 }
 
 function mealLabel(meal) {
@@ -761,7 +757,7 @@ function recipeRows(recipes, options = {}) {
         ${recipeThumb(recipe)}
         <span class="recipe-copy"><span class="recipe-name">${esc(recipe.name)}</span>${recipe.needsReview ? `<span class="review-pill">Needs a look</span>` : ""}${lastMadeText(recipe) ? `<span class="small">${esc(lastMadeText(recipe))}</span>` : ""}</span>
       </button>
-      ${options.pick ? "" : `<span class="recipe-actions"><button class="icon-btn add-plus" type="button" data-action="add-to-date" data-id="${esc(recipe.id)}" aria-label="Add to date">${plus()}</button><button class="row-edit" type="button" data-action="edit-recipe" data-id="${esc(recipe.id)}">Edit</button><button class="heart${recipe.favorite ? " is-on" : ""}" type="button" data-action="favorite" data-id="${esc(recipe.id)}" aria-label="${recipe.favorite ? "Unfavorite" : "Favorite"}">${heart(recipe.favorite)}</button></span>`}
+      ${options.pick ? "" : `<span class="recipe-actions"><button class="icon-btn add-plus" type="button" data-action="add-to-date" data-id="${esc(recipe.id)}" aria-label="Add to date">${plus()}</button><button class="heart${recipe.favorite ? " is-on" : ""}" type="button" data-action="favorite" data-id="${esc(recipe.id)}" aria-label="${recipe.favorite ? "Unfavorite" : "Favorite"}">${heart(recipe.favorite)}</button></span>`}
     </div>`).join("");
 }
 
@@ -780,8 +776,7 @@ function recipeView(recipe, mode) {
   const panel = embedded ? state.todayPanel || "ingredients" : state.page.panel || "ingredients";
   const open = embedded ? state.todayServingsOpen : state.page.servingsOpen;
   const tag = embedded ? prepPhotoTag() : "";
-  const tonight = mode === "today" ? mealOn(nyToday(), "dinner") : null;
-  return `${hero(recipe, !embedded, tag, tonight)}
+  return `${hero(recipe, !embedded, tag, mode === "page")}
     <div class="pad">
       ${mode === "leftovers" ? `<span class="lo-pill">Leftovers</span>` : ""}
       <div class="title-row"><h1>${esc(recipe.name)}</h1>
@@ -811,10 +806,10 @@ function cookDock(recipe, raised) {
     </div>`;
 }
 
-function hero(recipe, showBack, prepTag = "", entry = null) {
-  const menu = entry
-    ? `<button class="float right" type="button" data-action="recipe-menu" data-from="today" data-id="${esc(entry.id)}" data-date="${esc(entry.date)}" data-meal="${esc(entry.meal)}" aria-label="More">${dots()}</button>`
-    : `<button class="float right edit-float" type="button" data-action="edit-recipe" data-id="${esc(recipe.id)}">Edit</button>`;
+function hero(recipe, showBack, prepTag = "", showEdit = false) {
+  const menu = showEdit
+    ? `<button class="float right edit-float" type="button" data-action="edit-recipe" data-id="${esc(recipe.id)}">Edit</button>`
+    : "";
   const back = showBack ? `<button class="float left" type="button" data-action="back" aria-label="Back">${chevLeft()}</button>` : "";
   if (!recipe.imageUrl) {
     return `<div class="hero hero-empty">${back}<span class="hero-mark" aria-hidden="true">${plateIcon()}</span>${prepTag}${menu}</div>`;
@@ -1051,7 +1046,7 @@ function newRecipeHtml() {
 
 function mealContext() {
   const sheet = state.sheet;
-  if (sheet?.date && sheet?.meal && (sheet.kind === "recipe-menu" || sheet.kind === "edit-recipe")) {
+  if (sheet?.date && sheet?.meal && sheet.kind === "edit-recipe") {
     return { date: sheet.date, meal: sheet.meal };
   }
   if (state.page?.kind === "recipe" && state.page.planDate && state.page.planMeal) {
@@ -1321,19 +1316,6 @@ function sheetHtml() {
         ${freshRowHtml(item.fresh)}
         <label class="field-label">Note<input class="field-box" name="notes" maxlength="500" value="${esc(item.notes || "")}" enterkeyhint="done"></label>
       </form></div>`;
-  }
-  if (state.sheet?.kind === "recipe-menu") {
-    if (!state.sheet.date || !state.sheet.meal) return "";
-    const onToday = state.sheet.from === "today";
-    const hideAdd = onToday || state.sheet.from === "calendar";
-    const planned = state.sheet.entryId ? entryById(state.sheet.entryId) : mealOn(state.sheet.date, state.sheet.meal);
-    const recipe = activeRecipe();
-    return `<div class="sheet"><div class="sheet-card" role="dialog" aria-label="Meal">
-        <div class="sheet-head"><span></span><button type="button" data-action="close-sheet" aria-label="Close">✕</button></div>
-        ${planned && !hideAdd ? `<button class="menu-row" type="button" data-action="add-meal" data-date="${esc(planned.date)}" data-meal="${esc(planned.meal)}">Add</button>` : ""}
-        ${planned ? `<button class="menu-row" type="button" data-action="remove-meal" data-id="${esc(planned.id)}">Remove</button>` : ""}
-        ${recipe ? `<button class="menu-row" type="button" data-action="edit-recipe">Edit recipe</button>` : ""}
-      </div></div>`;
   }
   if (state.sheet?.kind === "pick-date") return dateSheetHtml();
   if (state.sheet?.kind === "plan-choice") {
@@ -1721,20 +1703,6 @@ function onPointerDown(event) {
     gesture = { kind: "cal", x: event.clientX, y: event.clientY };
     return;
   }
-  const recipeRow = event.target.closest(".recipe-row[data-id]");
-  if (recipeRow && state.page?.kind !== "pick" && !event.target.closest(".heart") && !event.target.closest(".icon-btn") && !event.target.closest(".row-edit")) {
-    clearGesture();
-    const id = recipeRow.dataset.id;
-    gesture = { kind: "recipe", id, x: event.clientX, y: event.clientY, long: false, pointerId: event.pointerId };
-    gesture.timer = setTimeout(() => {
-      if (!gesture || gesture.kind !== "recipe") return;
-      if (!recipeById(id)) return;
-      gesture.long = true;
-      state.sheet = { kind: "edit-recipe", id, error: "", date: null, meal: null };
-      render();
-    }, 520);
-    return;
-  }
   const row = event.target.closest(".g-row");
   if (!row || event.target.closest(".g-check") || event.target.closest(".g-delete")) return;
   clearGesture();
@@ -1748,16 +1716,6 @@ function onPointerMove(event) {
     return;
   }
   if (gesture.kind === "cal") return;
-  if (gesture.kind === "recipe") {
-    const dx = event.clientX - gesture.x;
-    const dy = event.clientY - gesture.y;
-    if (Math.abs(dx) > 10 || Math.abs(dy) > 10) {
-      if (gesture.timer) clearTimeout(gesture.timer);
-      gesture.timer = null;
-      gesture.scroll = true;
-    }
-    return;
-  }
   const dx = event.clientX - gesture.x;
   const dy = event.clientY - gesture.y;
   if (!gesture.dragging) {
@@ -1808,12 +1766,6 @@ function onPointerUp(event) {
   }
   const dx = event.clientX - gesture.x;
   const dy = event.clientY - gesture.y;
-  if (gesture.kind === "recipe") {
-    const long = gesture.long;
-    clearGesture();
-    if (long) swallowNextClick();
-    return;
-  }
   if (gesture.kind === "cal") {
     clearGesture();
     if (Math.abs(dx) > 56 && Math.abs(dx) > Math.abs(dy)) {
@@ -1859,7 +1811,7 @@ function onPointerCancel(event) {
     cancelEdgeBack();
     return;
   }
-  if (gesture.kind === "cal" || gesture.kind === "recipe") {
+  if (gesture.kind === "cal") {
     clearGesture();
     return;
   }
@@ -2073,17 +2025,6 @@ async function onClick(event) {
       const recipe = tonightRecipe();
       state.todayServings = Math.min(99, Math.max(1, (state.todayServings || recipe?.servings || 4) + delta));
     }
-    render();
-    return;
-  }
-  if (action === "recipe-menu") {
-    state.sheet = {
-      kind: "recipe-menu",
-      date: button.dataset.date || null,
-      meal: button.dataset.meal || null,
-      entryId: button.dataset.id || null,
-      from: button.dataset.from || null,
-    };
     render();
     return;
   }
@@ -3790,6 +3731,9 @@ function chevLeft() { return `<svg viewBox="0 0 24 24" width="22" height="22" fi
 function chevRight() { return `<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="#222" stroke-width="2.4"><path d="m9 5 7 7-7 7"/></svg>`; }
 function plus() {
   return `<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>`;
+}
+function minus() {
+  return `<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M5 12h14"/></svg>`;
 }
 function dots() { return `<svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><circle cx="6" cy="12" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="18" cy="12" r="1.7"/></svg>`; }
 function checkIcon() { return `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="white" stroke-width="3"><path d="m5 12 5 5 9-10"/></svg>`; }
