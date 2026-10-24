@@ -2615,6 +2615,8 @@ describe("grocery API", () => {
     expect(css).toContain("scroll-snap-type: x mandatory");
     expect(css).toContain("overflow-x: scroll");
     expect(css).toContain("overflow-y: auto");
+    expect(css).toContain("min-width: 0");
+    expect(js).toContain("function pinPeriodPanes");
     expect(css).toContain("100cqi");
     const paneRule = css.slice(css.indexOf(".period-pane {"), css.indexOf(".month-screen .period-snap"));
     expect(paneRule).toContain("overflow: visible");

@@ -1887,6 +1887,20 @@ function aboutHtml() {
     </div>`;
 }
 
+function pinPeriodPanes(node) {
+  const width = node?.clientWidth || 0;
+  if (!width) return 0;
+  const px = `${width}px`;
+  for (const pane of node.children) {
+    if (pane.style.minWidth === px) continue;
+    pane.style.flexBasis = px;
+    pane.style.width = px;
+    pane.style.minWidth = px;
+    pane.style.maxWidth = px;
+  }
+  return width;
+}
+
 function periodScrollBusy() {
   if (snapSeating || snapFinger) return true;
   const scroller = document.querySelector(".period-snap");
@@ -1903,8 +1917,8 @@ function seatPeriodSnap() {
   const place = () => {
     if (snapFinger) return true;
     const node = document.querySelector(".period-snap");
-    if (!node?.clientWidth) return false;
-    const width = node.clientWidth;
+    const width = pinPeriodPanes(node);
+    if (!width) return false;
     if (Math.abs(node.scrollLeft - width) > 1) node.scrollLeft = width;
     return Math.abs(node.scrollLeft - width) <= 1;
   };
