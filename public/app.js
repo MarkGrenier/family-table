@@ -327,8 +327,6 @@ function render(force = false) {
   }
   app.innerHTML = appHtml();
   keepOneAddField();
-  const focus = document.getElementById("add-search");
-  if (focus && state.page?.kind === "add-item") focus.focus();
   finish();
 }
 
