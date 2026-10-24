@@ -2506,9 +2506,9 @@ describe("grocery API", () => {
     expect(css).toContain("opacity 300ms");
     expect(css).toContain(".month-panel-head.is-today .week-date");
     const shell = await (await exports.default.fetch("https://grocery.test/sw.js")).text();
-    expect(shell).toContain("grocery-shell-v90");
-    expect(shell).toContain("/styles.css?v=78");
-    expect(shell).toContain("/app.js?v=85");
+    expect(shell).toContain("grocery-shell-v91");
+    expect(shell).toContain("/styles.css?v=79");
+    expect(shell).toContain("/app.js?v=86");
     const weekTab = js.slice(js.indexOf('if (action === "tab")'), js.indexOf('if (action === "back")'));
     expect(weekTab).toContain('state.calMode = "week";');
     expect(weekTab).toContain("state.weekAnchor = null;");
@@ -2560,6 +2560,12 @@ describe("grocery API", () => {
     expect(css).toContain(".section-head.store-head { color: var(--ink); font-weight: 750; }");
     expect(css).toContain(".aisle-head { margin: 0.45rem 0 0.1rem; color: #8a8a90; font-size: 0.72rem; font-weight: 600;");
     expect(css).toContain(".buy-hint {\n  display: inline-block;\n  margin-top: 0.22rem;\n  padding: 0.12rem 0.48rem;\n  border-radius: 999px;\n  background: var(--green-soft);");
+    const buyHintCss = css.slice(css.indexOf(".buy-hint {"), css.indexOf(".g-name .buy-hint"));
+    expect(buyHintCss).toContain("font-weight: 400;");
+    expect(buyHintCss).not.toContain("font-weight: 750");
+    const today = js.slice(js.indexOf("function todayHtml"), js.indexOf("function todayShowsPhotoPrep"));
+    expect(today).toContain('if (dinner?.type === "note") return `${todayHead()}${nightCard(dinner, null)}');
+    expect(today.indexOf('dinner?.type === "note"')).toBeLessThan(today.indexOf("prepLine()"));
     expect(css).toContain(".fresh-row {");
     expect(css).toContain(".buy-hint {");
     expect(css).not.toContain(".coming-line");

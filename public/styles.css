@@ -809,7 +809,7 @@ html.is-edge-dragging { overflow-x: hidden; }
   background: var(--green-soft);
   color: var(--green-dark);
   font-size: 0.75rem;
-  font-weight: 750;
+  font-weight: 400;
   letter-spacing: 0.01em;
   line-height: 1.2;
 }
