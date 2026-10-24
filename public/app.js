@@ -88,6 +88,18 @@ document.addEventListener("visibilitychange", () => {
 document.addEventListener("scroll", () => {
   if (state.swipeId || gesture?.dragging) avoidFab();
 }, true);
+function pinSheets() {
+  const vv = window.visualViewport;
+  if (!vv) return;
+  const root = document.documentElement;
+  root.style.setProperty("--vvt", `${Math.round(vv.offsetTop)}px`);
+  root.style.setProperty("--vvh", `${Math.round(vv.height)}px`);
+}
+if (window.visualViewport) {
+  window.visualViewport.addEventListener("resize", pinSheets);
+  window.visualViewport.addEventListener("scroll", pinSheets);
+  pinSheets();
+}
 
 let gesture = null;
 let wakeLock = null;
@@ -288,7 +300,9 @@ function render(force = false) {
       document.getElementById(id)?.scrollIntoView({ block: "center" });
     }
     avoidFab();
+    mountSheetBackdrops();
     mountSheetGrabs();
+    pinSheets();
     markSwipeBack();
   };
   if (state.loading) {
@@ -312,6 +326,7 @@ function render(force = false) {
     return;
   }
   app.innerHTML = appHtml();
+  keepOneAddField();
   const focus = document.getElementById("add-search");
   if (focus && state.page?.kind === "add-item") focus.focus();
   finish();
@@ -319,14 +334,15 @@ function render(force = false) {
 
 function appHtml() {
   if (state.page?.kind === "cook") return cookHtml() + sheetHtml();
+  const addOn = state.page?.kind === "add-item";
   const bare = ["recipe", "feedback", "item", "add-item"].includes(state.page?.kind);
   const todayOn = state.tab === "today" && !state.page;
   const dinnerTonight = todayOn ? mealOn(nyToday(), "dinner") : null;
   const todayCook = dinnerTonight?.type === "recipe" && Boolean(recipeForEntry(dinnerTonight));
   const monthOn = state.tab === "calendar" && state.calMode === "month" && !state.page;
   const weekOn = state.tab === "calendar" && state.calMode !== "month" && !state.page;
-  const groceryOn = state.tab === "groceries" && !state.page;
-  const mainClass = bare ? "bare" : todayOn ? `screen today-screen${todayCook ? "" : " no-dock"}` : monthOn ? "screen month-screen" : weekOn ? "screen week-screen" : groceryOn ? "screen grocery-screen" : "screen";
+  const groceryOn = (state.tab === "groceries" && !state.page) || addOn;
+  const mainClass = addOn ? "screen grocery-screen" : bare ? "bare" : todayOn ? `screen today-screen${todayCook ? "" : " no-dock"}` : monthOn ? "screen month-screen" : weekOn ? "screen week-screen" : groceryOn ? "screen grocery-screen" : "screen";
   return `<main class="${mainClass}">${bodyHtml()}</main>${bare ? "" : tabsHtml()}${sheetHtml()}${toastHtml()}`;
 }
 
@@ -349,7 +365,7 @@ function bodyHtml() {
   if (state.page?.kind === "recipe") return recipeHtml(state.page.id);
   if (state.page?.kind === "feedback") return feedbackHtml(state.page.id);
   if (state.page?.kind === "item") return itemHtml(state.page.id);
-  if (state.page?.kind === "add-item") return addHtml();
+  if (state.page?.kind === "add-item") return groceriesHtml() + addHtml();
   if (state.page?.kind === "new-recipe") return newRecipeHtml();
   if (state.page?.kind === "about") return aboutHtml();
   if (state.tab === "calendar") return calendarHtml();
@@ -1118,26 +1134,22 @@ function addHtml() {
     ? `<input id="add-search" name="quantityNote" class="field-box" type="text" placeholder="2 lb, a bunch" value="${esc(draft.quantityNote)}" maxlength="140" autocomplete="off" enterkeyhint="done" aria-label="Quantity">`
     : addRow("quantity", "Quantity", draft.quantityNote, "Optional");
   const noteTyping = typing === "note";
-  return `<div class="sheet add-sheet"><form id="add-form" class="add-form sheet-card" data-form="add-item">
+  return `<div class="sheet add-sheet"><div id="add-form" class="add-form sheet-card" data-form="add-item">
       <div class="topbar"><button class="back" type="button" data-action="back" aria-label="Close">✕</button><h1>Add</h1><span></span></div>
       <div class="pad">
         ${nameControl}
         <div id="suggest-list" class="suggest-list">${typing === "name" ? suggestHtml(filteredSuggestions()) : ""}</div>
         ${qtyControl}
-        <input type="hidden" name="section" value="${esc(section)}">
         ${sectionFieldHtml(section)}
         ${storeFieldHtml(draft.store)}
         ${freshRowHtml(draft.fresh)}
         ${noteTyping
           ? `<input id="add-search" name="notes" class="field-box" type="text" placeholder="Note" value="${esc(draft.notes)}" maxlength="500" autocomplete="off" enterkeyhint="done" aria-label="Note">`
           : addRow("note", "Note", draft.notes, "Optional")}
-        ${typing === "name" ? "" : `<input type="hidden" name="name" value="${esc(state.addQuery)}">`}
-        ${typing === "quantity" ? "" : `<input type="hidden" name="quantityNote" value="${esc(draft.quantityNote)}">`}
-        ${typing === "note" ? "" : `<input type="hidden" name="notes" value="${esc(draft.notes)}">`}
         ${state.error ? `<p class="error">${esc(state.error)}</p>` : ""}
-        <button class="green-btn" type="submit">Add</button>
+        <button class="green-btn" type="submit" data-action="submit-add">Add</button>
       </div>
-    </form></div>`;
+    </div></div>`;
 }
 
 function sectionFieldHtml(section) {
@@ -1999,6 +2011,23 @@ function groceryRowWidth(id) {
   return swipe?.clientWidth || 320;
 }
 
+function mountSheetBackdrops() {
+  for (const sheet of document.querySelectorAll(".sheet")) {
+    if (sheet.querySelector(":scope > .sheet-backdrop")) continue;
+    const backdrop = document.createElement("div");
+    backdrop.className = "sheet-backdrop";
+    sheet.prepend(backdrop);
+  }
+}
+
+function keepOneAddField() {
+  if (state.page?.kind !== "add-item") return;
+  const keep = document.getElementById("add-search");
+  for (const node of document.querySelectorAll("input, textarea, select")) {
+    if (node !== keep) node.remove();
+  }
+}
+
 function mountSheetGrabs() {
   for (const card of document.querySelectorAll(".sheet-card")) {
     if (card.querySelector(":scope > .sheet-grab")) continue;
@@ -2193,7 +2222,7 @@ async function onClick(event) {
   if (state.storeOpen && !event.target.closest(".store-drop") && !storeLabel?.querySelector("[data-action=toggle-stores]")) {
     closeStoreDrop();
   }
-  if (event.target.classList?.contains("sheet")) {
+  if (event.target.classList?.contains("sheet") || event.target.classList?.contains("sheet-backdrop")) {
     if (state.sheet) dismissSheet();
     else if (state.page?.kind === "pick") closePick();
     else if (state.page?.kind === "add-item") {
@@ -2379,7 +2408,7 @@ async function onClick(event) {
     return;
   }
   if (action === "add-ingredient" || action === "remove-ingredient") {
-    const form = button.closest("form");
+    const form = fieldRoot(button);
     if (!form || state.sheet?.kind !== "edit-recipe") return;
     const ingredients = readIngredientDraft(form);
     if (action === "remove-ingredient") {
@@ -2480,6 +2509,7 @@ async function onClick(event) {
     render();
     return;
   }
+  if (action === "submit-add") return submitAdd();
   if (action === "add-focus") {
     state.addFocus = button.dataset.field || "name";
     state.storeAdd = false;
@@ -2506,7 +2536,7 @@ async function onClick(event) {
   if (action === "save-rename") return saveRename(button);
   if (action === "ask-remove-store") {
     state.storeConfirm = button.dataset.id;
-    paintStoreMenus(button.closest("form"));
+    paintStoreMenus(fieldRoot(button));
     return;
   }
   if (action === "confirm-remove-store") return removeStore(button.dataset.id);
@@ -2533,7 +2563,6 @@ async function onSubmit(event) {
     return signIn(state.passcode);
   }
   if (form.dataset.form === "item-edit") return saveItem(new FormData(form));
-  if (form.dataset.form === "add-item") return submitAdd(form);
   if (form.dataset.form === "fetch-recipe") return fetchRecipe(new FormData(form).get("url"));
   if (form.dataset.form === "edit-recipe") return saveRecipeEdit(form);
 }
@@ -2560,11 +2589,9 @@ function onInput(event) {
     state.addQuery = event.target.value;
     const list = document.getElementById("suggest-list");
     if (list) list.innerHTML = suggestHtml(filteredSuggestions());
-    const form = event.target.form;
+    const form = document.getElementById("add-form");
     if (form && draft && !draft.sectionTouched) {
       draft.section = state.addQuery.trim() ? guessSection(state.addQuery) : "other";
-      const section = form.querySelector("[name=section]");
-      if (section) section.value = draft.section;
       const label = form.querySelector("[data-section-value]");
       if (label) label.textContent = sectionLabel(draft.section);
       draft.category = aisleFor(draft.store, draft.section);
@@ -3347,10 +3374,11 @@ function aisleOptions() {
 }
 
 function freshRowHtml(on) {
+  const hidden = state.page?.kind === "add-item" ? "" : `<input type="hidden" name="fresh" value="${on ? "on" : ""}">`;
   return `<div class="fresh-field">
       <p class="field-label">Fresh</p>
       <button class="fresh-row" type="button" data-action="toggle-fresh" aria-pressed="${on ? "true" : "false"}"><span>Fresh</span><span class="fresh-box${on ? " is-on" : ""}" aria-hidden="true"></span></button>
-      <input type="hidden" name="fresh" value="${on ? "on" : ""}">
+      ${hidden}
     </div>`;
 }
 
@@ -3390,8 +3418,9 @@ function storeFieldHtml(selected) {
   const newStore = !onAdd || state.storeAdd;
   const editMenu = !onAdd || state.storeEditOpen;
   const typingId = onAdd && state.storeAdd ? " id=\"add-search\"" : "";
+  const hiddenStore = onAdd ? "" : `<input type="hidden" name="store" value="${esc(selected || "")}">`;
   return `<div class="store-field"><label class="field-label">Store<span class="select-wrap"><button class="box" type="button" data-action="toggle-stores" aria-haspopup="listbox" aria-expanded="${state.storeOpen ? "true" : "false"}">${esc(storeLabel(selected))}</button></span></label>
-    <input type="hidden" name="store" value="${esc(selected || "")}">
+    ${hiddenStore}
     <div class="store-drop${open}" role="listbox">${storeOptionsHtml(selected)}</div>
     ${newStore ? `<div class="new-store${adding}"><input${typingId} class="field-box" name="newStore" maxlength="40" placeholder="Store name" aria-label="New store" autocomplete="off" enterkeyhint="done"><button class="text-green" type="button" data-action="save-store">Add</button></div>` : ""}
     ${editMenu ? `<div class="store-edit-menu${editing}">${editStoresHtml()}</div>` : ""}</div>`;
@@ -3424,9 +3453,13 @@ function editStoresHtml() {
   }).join("");
 }
 
+function fieldRoot(node) {
+  return node?.closest?.("form, #add-form") || null;
+}
+
 function paintStoreMenus(form) {
   if (!form) return;
-  const selected = form.querySelector("[name=store]")?.value || "";
+  const selected = form.id === "add-form" ? (state.addDraft?.store || "") : (form.querySelector("[name=store]")?.value || "");
   const drop = form.querySelector(".store-drop");
   if (drop) drop.innerHTML = storeOptionsHtml(selected);
   const menu = form.querySelector(".store-edit-menu");
@@ -3442,7 +3475,7 @@ function closeStoreDrop() {
 }
 
 function toggleStores(button) {
-  const form = button.closest("form");
+  const form = fieldRoot(button);
   const menu = form?.querySelector(".store-drop");
   if (!menu) return;
   const open = menu.classList.contains("is-hidden");
@@ -3458,7 +3491,7 @@ function toggleStores(button) {
 }
 
 function pickStore(button) {
-  const form = button.closest("form");
+  const form = fieldRoot(button);
   if (!form) return;
   const choice = button.dataset.store ?? "";
   const hidden = form.querySelector("[name=store]");
@@ -3476,7 +3509,7 @@ function pickStore(button) {
 }
 
 function showNewStore(button) {
-  const form = button.closest("form");
+  const form = fieldRoot(button);
   if (!form) return;
   if (form.id === "add-form") {
     closeStoreDrop();
@@ -3498,7 +3531,7 @@ function showNewStore(button) {
 }
 
 async function saveStore(button) {
-  const form = button.closest("form");
+  const form = fieldRoot(button);
   if (!form) return;
   const raw = String(form.querySelector("[name=newStore]")?.value || "").trim().replace(/\s+/g, " ");
   if (!raw) {
@@ -3529,7 +3562,7 @@ async function saveStore(button) {
 }
 
 function showEditStores(button) {
-  const form = button.closest("form");
+  const form = fieldRoot(button);
   if (!form) return;
   closeStoreDrop();
   state.storeAdd = false;
@@ -3547,7 +3580,7 @@ function showEditStores(button) {
 function editStoreRow(button) {
   state.storeEdit = button.dataset.id || null;
   state.storeConfirm = null;
-  const form = button.closest("form");
+  const form = fieldRoot(button);
   if (form?.id === "add-form") {
     state.storeAdd = false;
     state.storeEditOpen = true;
@@ -3560,7 +3593,7 @@ function editStoreRow(button) {
 }
 
 async function saveRename(button) {
-  const form = button.closest("form");
+  const form = fieldRoot(button);
   const id = button.dataset.id;
   const name = String(form?.querySelector("[name=renameStore]")?.value || "").trim().replace(/\s+/g, " ");
   if (!form || !id || !name) return;
@@ -3619,9 +3652,14 @@ async function removeStore(id) {
 function onKeyDown(event) {
   if (event.key !== "Enter") return;
   const name = event.target?.name;
+  if (event.target?.id === "add-search" && (name === "name" || name === "quantityNote" || name === "notes")) {
+    event.preventDefault();
+    submitAdd();
+    return;
+  }
   if (name !== "newStore" && name !== "renameStore") return;
   event.preventDefault();
-  const form = event.target.form;
+  const form = fieldRoot(event.target);
   if (name === "renameStore") {
     const button = event.target.closest(".store-rename")?.querySelector("[data-action=save-rename]");
     if (button) saveRename(button);
@@ -3674,22 +3712,21 @@ function onAddField(event) {
   return false;
 }
 
-async function submitAdd(form) {
-  const data = new FormData(form);
-  const name = String(data.get("name") || "").trim();
+async function submitAdd() {
+  const draft = state.addDraft || blankAddDraft();
+  const name = String(state.addQuery || "").trim();
   if (!name) return;
-  const picked = data.get("store");
-  const store = picked == null ? "local" : String(picked);
+  const store = draft.store == null ? "local" : String(draft.store);
   if (store === "__add__") return;
-  const section = String(data.get("section") || guessSection(name));
+  const section = String((draft.sectionTouched ? draft.section : guessSection(name)) || guessSection(name));
   const category = aisleFor(store, section);
   const ok = await addGrocery(name, {
-    quantityNote: String(data.get("quantityNote") || "") || null,
+    quantityNote: String(draft.quantityNote || "") || null,
     store,
     category,
     section,
-    notes: String(data.get("notes") || "") || null,
-    fresh: data.get("fresh") === "on",
+    notes: String(draft.notes || "") || null,
+    fresh: draft.fresh === true,
   });
   if (!ok) return;
   state.page = null;
@@ -3719,13 +3756,19 @@ function pickSection(button) {
 }
 
 function toggleFresh(button) {
-  const form = button.closest("form");
+  const form = fieldRoot(button);
+  if (form?.id === "add-form" && state.addDraft) {
+    const on = !state.addDraft.fresh;
+    state.addDraft.fresh = on;
+    button.setAttribute("aria-pressed", on ? "true" : "false");
+    button.querySelector(".fresh-box")?.classList.toggle("is-on", on);
+    return;
+  }
   const hidden = form?.querySelector("[name=fresh]");
   const on = hidden?.value !== "on";
   if (hidden) hidden.value = on ? "on" : "";
   button.setAttribute("aria-pressed", on ? "true" : "false");
   button.querySelector(".fresh-box")?.classList.toggle("is-on", on);
-  if (form?.id === "add-form" && state.addDraft) state.addDraft.fresh = on;
 }
 
 async function useSuggestion(button) {

@@ -2345,9 +2345,12 @@ describe("grocery API", () => {
     expect(pointerUp).not.toContain("openItem(id)");
     const addForm = js.slice(js.indexOf("function addHtml"), js.indexOf("function newRecipeHtml"));
     expect(addForm.match(/type="submit"/g)).toHaveLength(1);
+    expect(addForm).toContain('data-action="submit-add"');
+    expect(addForm).not.toContain("<form");
+    expect(addForm).not.toContain('type="hidden"');
     expect(addForm).toContain('name="quantityNote"');
     expect(addForm).toContain("storeFieldHtml");
-    expect(addForm).toContain('name="section"');
+    expect(addForm).toContain("sectionFieldHtml");
     expect(addForm).not.toContain("More details");
     expect(addForm).not.toContain("more-details");
     expect(addForm).not.toContain('name="category"');
@@ -2375,7 +2378,7 @@ describe("grocery API", () => {
     expect(js).toContain("storeTag");
     expect(addForm).not.toContain('name="brand"');
     expect(addForm).not.toContain(">Brand");
-    expect(addForm.indexOf('name="section"')).toBeLessThan(addForm.indexOf("storeFieldHtml"));
+    expect(addForm.indexOf("sectionFieldHtml")).toBeLessThan(addForm.indexOf("storeFieldHtml"));
     expect(addForm.indexOf("freshRowHtml(draft.fresh)")).toBeLessThan(addForm.indexOf('name="notes"'));
     expect(addForm).toContain('name="notes"');
     expect(addForm).toContain("freshRowHtml(draft.fresh)");
@@ -2686,6 +2689,10 @@ describe("grocery API", () => {
     expect(css).toContain(".hero-logo {");
     expect(css).not.toContain(".week-period { touch-action: pan-y; }");
     expect(css).not.toContain("touch-action: none");
+    expect(css).toContain(".sheet-backdrop");
+    expect(css).not.toContain("html.is-sheet-pulling");
+    expect(js).toContain("function keepOneAddField");
+    expect(js).toContain('querySelectorAll("input, textarea, select")');
     expect(css).toContain(".hero-out {");
     expect(css).toContain(".about-version {");
     expect(css).toContain(".month-screen .month-period {");
