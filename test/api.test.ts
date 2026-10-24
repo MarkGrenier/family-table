@@ -2491,9 +2491,9 @@ describe("grocery API", () => {
     expect(css).toContain("opacity 300ms");
     expect(css).toContain(".month-panel-head.is-today .week-date");
     const shell = await (await exports.default.fetch("https://grocery.test/sw.js")).text();
-    expect(shell).toContain("grocery-shell-v84");
-    expect(shell).toContain("/styles.css?v=72");
-    expect(shell).toContain("/app.js?v=79");
+    expect(shell).toContain("grocery-shell-v85");
+    expect(shell).toContain("/styles.css?v=73");
+    expect(shell).toContain("/app.js?v=80");
     const weekTab = js.slice(js.indexOf('if (action === "tab")'), js.indexOf('if (action === "back")'));
     expect(weekTab).toContain('state.calMode = "week";');
     expect(weekTab).toContain("state.weekAnchor = null;");
@@ -2519,7 +2519,10 @@ describe("grocery API", () => {
     const periodTouch = touchMove.slice(touchMove.indexOf("movePeriod("));
     expect(periodTouch.indexOf("preventDefault()")).toBeGreaterThan(-1);
     expect(touchMove).toContain("gesture.fromTouch");
-    expect(js).toContain('addEventListener("touchmove", onTouchMove, { passive: false })');
+    expect(js).toContain('document.addEventListener("touchmove", onTouchMove, { capture: true, passive: false })');
+    expect(js).not.toContain('app.addEventListener("touchmove"');
+    const touchCancel = js.slice(js.indexOf("function onTouchCancel"), js.indexOf("function beginPeriod"));
+    expect(touchCancel).toContain("endPeriod(");
     expect(css).toContain(".today-head h1");
     expect(css).toContain(".today-head {\n  flex: none;\n  margin-bottom: 0.8rem;\n}");
     expect(css).toContain(".search { display: block; margin: 0.8rem 0; }");

@@ -77,10 +77,10 @@ app.addEventListener("pointerdown", onPointerDown);
 app.addEventListener("pointermove", onPointerMove);
 app.addEventListener("pointerup", onPointerUp);
 app.addEventListener("pointercancel", onPointerCancel);
-app.addEventListener("touchstart", onTouchStart, { passive: true });
-app.addEventListener("touchmove", onTouchMove, { passive: false });
-app.addEventListener("touchend", onTouchEnd);
-app.addEventListener("touchcancel", onTouchCancel);
+document.addEventListener("touchstart", onTouchStart, { capture: true, passive: true });
+document.addEventListener("touchmove", onTouchMove, { capture: true, passive: false });
+document.addEventListener("touchend", onTouchEnd, { capture: true });
+document.addEventListener("touchcancel", onTouchCancel, { capture: true });
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible" && state.page?.kind === "cook") lockScreen();
 });
@@ -157,6 +157,7 @@ async function boot() {
   state.loading = false;
   render();
   dismissSplash();
+  if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {});
 }
 
 async function splashFonts() {
@@ -373,6 +374,7 @@ function todayHtml() {
     const night = leftoversNight(dinner, recipe, { edit: Boolean(recipe) });
     return `${todayHead()}${night}`;
   }
+  if (dinner?.type === "note") return `${todayHead()}${noteNight(dinner)}${eventsHtml(events)}`;
   if (recipe && dinner) {
     if (state.todayId !== recipe.id) {
       state.todayId = recipe.id;
@@ -459,27 +461,30 @@ function leftoversRow(entry, recipe) {
 }
 
 function dishName(entry, recipe) {
-  return recipe?.name || entry?.recipeName || entry?.note || "Dinner";
+  return recipe?.name || entry?.recipeName || entry?.note || (entry?.type === "leftovers" ? "Leftovers" : "Dinner");
+}
+
+function noteNight(entry) {
+  return `<article class="note-night">
+      <p class="kicker">${esc(mealLabel(entry.meal))}</p>
+      <h1>${esc(entry.note || "Dinner out")}</h1>
+      <p class="night-line">No cooking tonight.</p>
+      ${tomorrowCard(entry.date)}
+    </article>`;
 }
 
 function emptyTonight() {
+  const date = nyToday();
   return `<div class="empty-night">
-      ${emptyPlate()}
-      <h1>Nothing planned tonight.</h1>
-      <p class="muted">Pick a recipe when you know what's for dinner.</p>
-      <button class="primary" type="button" data-action="plan-dinner">Plan dinner</button>
+      <p class="kicker">Dinner</p>
+      <p class="empty-title">Nothing planned</p>
+      <p class="muted">Pick a recipe, or mark the night.</p>
+      <div class="empty-actions">
+        <button class="primary" type="button" data-action="plan-dinner" data-date="${esc(date)}">Plan a recipe</button>
+        <button class="outline-btn" type="button" data-action="mark-out" data-date="${esc(date)}" data-meal="dinner">Dinner out</button>
+        <button class="outline-btn" type="button" data-action="mark-leftovers" data-date="${esc(date)}" data-meal="dinner">Leftovers</button>
+      </div>
     </div>`;
-}
-
-function emptyPlate() {
-  return `<svg class="empty-art" viewBox="0 0 280 180" aria-hidden="true">
-      <rect width="280" height="180" rx="24" fill="#f3f1ea"/>
-      <ellipse cx="140" cy="96" rx="78" ry="46" fill="#fff"/>
-      <ellipse cx="118" cy="92" rx="28" ry="18" fill="#8fbf55"/>
-      <ellipse cx="162" cy="90" rx="34" ry="20" fill="#e7c27a"/>
-      <circle cx="104" cy="78" r="6" fill="#d4533c"/>
-      <circle cx="126" cy="72" r="5" fill="#e07a3d"/>
-    </svg>`;
 }
 
 function duePrepSteps() {
@@ -721,6 +726,10 @@ function pickHtml() {
   return `<div class="sheet pick-sheet"><div class="sheet-card pick-card" role="dialog" aria-label="Pick a recipe">
     <div class="pick-bar"><button class="text-green" type="button" data-action="cancel-pick">Cancel</button><h1>Pick ${esc(mealName)} for ${esc(label)}</h1></div>
     ${state.error ? `<p class="error">${esc(state.error)}</p>` : ""}
+    <div class="plan-kinds">
+      <button class="plan-kind" type="button" data-action="mark-out" data-date="${esc(date)}" data-meal="${esc(meal)}"><span class="recipe-name">Dinner out</span><span class="small">No recipe</span></button>
+      <button class="plan-kind" type="button" data-action="mark-leftovers" data-date="${esc(date)}" data-meal="${esc(meal)}"><span class="recipe-name">Leftovers</span><span class="small">No recipe</span></button>
+    </div>
     <label class="search">
       <input id="recipe-search" class="field-box" type="search" value="${esc(state.recipeQuery)}" placeholder="Search recipes" aria-label="Search recipes" autocomplete="off">
     </label>
@@ -1761,7 +1770,10 @@ function onTouchEnd(event) {
 function onTouchCancel(event) {
   if (!gesture || gesture.kind !== "period" || !gesture.fromTouch) return;
   const touch = [...event.changedTouches].find((item) => item.identifier === gesture.touchId);
-  if (!touch) return;
+  if (touch && gesture.dragging && !gesture.scroll) {
+    endPeriod({ clientX: touch.clientX, clientY: touch.clientY, timeStamp: event.timeStamp });
+    return;
+  }
   cancelPeriod();
 }
 
@@ -2176,6 +2188,8 @@ async function onClick(event) {
     if (date < nyToday()) return;
     return openAddMeal(date, "dinner");
   }
+  if (action === "mark-out") return markSimple(button.dataset.date || nyToday(), button.dataset.meal || "dinner", "note");
+  if (action === "mark-leftovers") return markSimple(button.dataset.date || nyToday(), button.dataset.meal || "dinner", "leftovers");
   if (action === "open-day") {
     const date = button.dataset.date || nyToday();
     if (date < nyToday()) return;
@@ -2604,6 +2618,54 @@ function finishAdd(date) {
   state.tab = "calendar";
   focusCalendarDate(date);
   render();
+}
+
+async function markSimple(date, meal, type) {
+  if (!date || date < nyToday()) return;
+  const slot = meal || "dinner";
+  const note = type === "note" ? "Dinner out" : null;
+  const body = note ? { date, meal: slot, type, note } : { date, meal: slot, type };
+  const existing = mealOn(date, slot);
+  const snapshot = existing ? copyPlan(existing) : null;
+  const optimistic = {
+    id: existing?.id || `pending-${date}-${slot}`,
+    date,
+    meal: slot,
+    type,
+    recipeId: null,
+    recipeName: null,
+    imageUrl: null,
+    note,
+    alternates: [],
+    also: [],
+  };
+  const key = planKey(date, slot);
+  const serial = ++planSerial;
+  pendingSlots.set(key, optimistic);
+  state.plan = state.plan.filter((entry) => planKey(entry.date, entry.meal) !== key);
+  state.plan.push(optimistic);
+  if (!state.addOrigin) state.addOrigin = !state.page && state.tab === "today" ? "today" : "calendar";
+  finishAdd(date);
+  try {
+    const data = await api("/api/plan", { method: "POST", body });
+    if (serial !== planSerial) return;
+    const saved = data.entry || optimistic;
+    pendingSlots.set(key, saved);
+    state.plan = state.plan.filter((entry) => planKey(entry.date, entry.meal) !== key);
+    state.plan.push(saved);
+    render();
+    await refresh(true);
+    if (serial !== planSerial) return;
+    pendingSlots.delete(key);
+  } catch (error) {
+    if (serial !== planSerial) return;
+    pendingSlots.delete(key);
+    state.plan = state.plan.filter((entry) => planKey(entry.date, entry.meal) !== key);
+    if (snapshot) state.plan.push(snapshot);
+    state.notice = "";
+    state.error = error.message;
+    render();
+  }
 }
 
 async function planRecipe(date, meal, recipeId, keep = false) {
