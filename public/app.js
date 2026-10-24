@@ -39,11 +39,9 @@ const state = {
   todayServings: null,
   todayServingsOpen: false,
   todayId: null,
-  swipeDebug: false,
-  swipeLog: [],
 };
 
-const APP_VERSION = "87";
+const APP_VERSION = "88";
 
 const SECTIONS = [
   ["produce", "Produce"],
@@ -81,10 +79,6 @@ app.addEventListener("pointerdown", onPointerDown);
 app.addEventListener("pointermove", onPointerMove);
 app.addEventListener("pointerup", onPointerUp);
 app.addEventListener("pointercancel", onPointerCancel);
-document.addEventListener("touchstart", onSwipeDebugStart, { capture: true, passive: true });
-document.addEventListener("touchmove", onSwipeDebugMove, { capture: true, passive: true });
-document.addEventListener("touchend", onSwipeDebugEnd, { capture: true, passive: true });
-document.addEventListener("touchcancel", onSwipeDebugCancel, { capture: true, passive: true });
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible" && state.page?.kind === "cook") lockScreen();
 });
@@ -128,14 +122,7 @@ let swallowClick = false;
 let edgeClick = false;
 let backSettle = 0;
 let edgeAnimating = 0;
-let periodDirty = false;
-let snapSeating = false;
-let snapTouched = false;
-let snapFinger = false;
-let snapTimer = 0;
 let edgeTouchArmed = false;
-const boundSnaps = new WeakSet();
-const swipeTouch = new Map();
 let viewKeySeen = "";
 
 function swallowNextClick() {
@@ -145,29 +132,10 @@ function swallowNextClick() {
   }, 0);
 }
 
-initSwipeDebug();
 boot();
 setInterval(() => refresh(false), 5000);
 
 const SPLASH_MS = 1500;
-
-function initSwipeDebug() {
-  let stored = false;
-  try {
-    stored = sessionStorage.getItem("family-table-swipe-debug") === "1";
-  } catch {
-    stored = false;
-  }
-  const query = new URLSearchParams(location.search).get("debug") === "swipe";
-  state.swipeDebug = query || stored;
-  if (query) {
-    try {
-      sessionStorage.setItem("family-table-swipe-debug", "1");
-    } catch {
-      /* Private mode can refuse storage. The query still turns the readout on. */
-    }
-  }
-}
 
 async function boot() {
   const started = performance.now();
@@ -231,8 +199,7 @@ async function refresh(force) {
     state.plan = applyPlanPending(mergeDated(state.plan, plan.plan || [], range));
     state.events = mergeDated(state.events, events.events || [], range);
     state.error = "";
-    if ((force || !isTyping()) && !gesture?.dragging && gesture?.kind !== "back" && !edgeAnimating && !periodScrollBusy()) render();
-    else if (periodScrollBusy() || snapFinger) periodDirty = true;
+    if ((force || !isTyping()) && !gesture?.dragging && gesture?.kind !== "back" && !edgeAnimating) render();
   } catch (error) {
     if (serial !== refreshSerial) return;
     if (error.status === 401) {
@@ -312,8 +279,6 @@ function render(force = false) {
     }
     avoidFab();
     markSwipeBack();
-    seatPeriodSnap();
-    paintSwipeDebug();
   };
   if (state.loading) {
     finish();
@@ -351,7 +316,7 @@ function appHtml() {
   const weekOn = state.tab === "calendar" && state.calMode !== "month" && !state.page;
   const groceryOn = state.tab === "groceries" && !state.page;
   const mainClass = bare ? "bare" : todayOn ? `screen today-screen${todayCook ? "" : " no-dock"}` : monthOn ? "screen month-screen" : weekOn ? "screen week-screen" : groceryOn ? "screen grocery-screen" : "screen";
-  return `<main class="${mainClass}">${bodyHtml()}</main>${bare ? "" : tabsHtml()}${sheetHtml()}${toastHtml()}${state.swipeDebug ? swipeDebugHtml() : ""}`;
+  return `<main class="${mainClass}">${bodyHtml()}</main>${bare ? "" : tabsHtml()}${sheetHtml()}${toastHtml()}`;
 }
 
 function loginHtml() {
@@ -561,20 +526,13 @@ function calendarHtml() {
 }
 
 function weekListHtml() {
+  const today = nyToday();
   const start = weekStart();
-  const panes = [weekPane(addDays(start, -7), "prev"), weekPane(start, "current")];
-  if (start < nyToday()) panes.push(weekPane(addDays(start, 7), "next"));
-  return `<div class="period-snap" data-period="week">${panes.join("")}</div>`;
-}
-
-function weekPane(start, role) {
   const end = addDays(start, 6);
   const title = `${shortMonth(start)} ${Number(start.slice(8))} – ${shortMonth(end)} ${Number(end.slice(8))}`;
   const days = Array.from({ length: 7 }, (_, index) => addDays(start, index));
-  const next = start < nyToday();
-  const hidden = role === "current" ? "" : " aria-hidden=\"true\"";
-  return `<section class="period-pane" data-role="${role}"${hidden}>
-    <div class="week-period">
+  const next = start < today;
+  return `<div class="week-period">
       <div class="week-head">
         <button type="button" data-action="week-shift" data-delta="-1" aria-label="Previous week">${chevLeft()}</button>
         <h1>${esc(title)}</h1>
@@ -582,34 +540,21 @@ function weekPane(start, role) {
         <button class="icon-btn" type="button" data-action="cal-mode" aria-label="Open month">${cal()}</button>
       </div>
       <div class="week-list">${days.map(weekDay).join("")}</div>
-    </div>
-  </section>`;
+    </div>`;
 }
 
 function monthHtml() {
   const anchor = state.calStart || `${nyToday().slice(0, 7)}-01`;
-  return `<div class="period-snap" data-period="month">${monthPane(shiftMonth(anchor, -1), "prev")}${monthPane(anchor, "current")}${monthPane(shiftMonth(anchor, 1), "next")}</div>`;
-}
-
-function monthPane(anchor, role) {
-  const hidden = role === "current" ? "" : " aria-hidden=\"true\"";
-  return `<section class="period-pane" data-role="${role}"${hidden}>
-    <div class="month-period">
+  return `<div class="month-period">
       <div class="month-bar">
         <button type="button" data-action="cal-shift" data-delta="-1" aria-label="Previous month">${chevLeft()}</button>
         <h1>${esc(monthTitle(anchor))}</h1>
         <button type="button" data-action="cal-shift" data-delta="1" aria-label="Next month">${chevRight()}</button>
-        <button class="icon-btn${role === "current" ? " is-on" : ""}" type="button" data-action="cal-mode" aria-label="Back to this week">${cal()}</button>
+        <button class="icon-btn is-on" type="button" data-action="cal-mode" aria-label="Back to this week">${cal()}</button>
       </div>
       <div class="cal-board">${monthGrid(anchor, monthSelection(anchor))}</div>
-      ${monthPanel(monthSelection(anchor), role === "current")}
-    </div>
-  </section>`;
-}
-
-function shiftMonth(iso, delta) {
-  const [year, month] = String(iso || nyToday()).split("-").map(Number);
-  return new Date(Date.UTC(year, month - 1 + delta, 1)).toISOString().slice(0, 10);
+      ${monthPanel(monthSelection(anchor))}
+    </div>`;
 }
 
 function monthSelection(anchor) {
@@ -623,11 +568,11 @@ function monthSelection(anchor) {
   return new Date(Date.UTC(year, mon, 0)).toISOString().slice(0, 10);
 }
 
-function monthPanel(date, current = true) {
+function monthPanel(date) {
   const events = eventsOn(date);
   const today = date === nyToday();
   const label = today ? `Today · ${shortDate(date)}` : shortDate(date);
-  return `<section class="month-panel"${current ? " id=\"month-panel\"" : ""}>
+  return `<section class="month-panel" id="month-panel">
       <div class="month-panel-head${today ? " is-today" : ""}"><p class="week-date">${esc(label)}</p></div>
       ${dayBody(date, false)}
       ${events.map((event) => `<p class="event-line">${event.time ? `<time>${esc(event.time)}</time>` : ""}${esc(event.title)}</p>`).join("")}
@@ -1801,185 +1746,13 @@ function onEdgeTouchMove(event) {
   if (event.cancelable) event.preventDefault();
 }
 
-function holdSnapFinger() {
-  snapFinger = true;
-  clearTimeout(holdSnapFinger.timer);
-}
-function releaseSnapFinger() {
-  clearTimeout(holdSnapFinger.timer);
-  holdSnapFinger.timer = setTimeout(() => { snapFinger = false; }, 500);
-}
-
-function onSwipeDebugStart(event) {
-  if (event.target?.closest?.(".period-snap")) {
-    snapTouched = true;
-    holdSnapFinger();
-  }
-  logSwipe("start", event);
-}
-function onSwipeDebugMove(event) {
-  if (event.target?.closest?.(".period-snap")) holdSnapFinger();
-  logSwipe("move", event);
-}
-function onSwipeDebugEnd(event) {
-  logSwipe("end", event);
-  if (snapFinger) releaseSnapFinger();
-}
-function onSwipeDebugCancel(event) {
-  logSwipe("cancel", event);
-  if (snapFinger) releaseSnapFinger();
-}
-
-function logSwipe(type, event) {
-  if (!state.swipeDebug) return;
-  const touch = event.changedTouches?.[0] || event.touches?.[0];
-  if (!touch) return;
-  const id = touch.identifier;
-  if (type === "start") {
-    const scroller = event.target?.closest?.(".period-snap");
-    swipeTouch.set(id, { x: touch.clientX, y: touch.clientY, scroll: scroller?.scrollLeft || 0 });
-  }
-  const origin = swipeTouch.get(id) || { x: touch.clientX, y: touch.clientY, scroll: 0 };
-  const dx = Math.round(touch.clientX - origin.x);
-  const dy = Math.round(touch.clientY - origin.y);
-  const scroller = event.target?.closest?.(".period-snap");
-  let handled = "watching";
-  if (gesture?.kind === "back" && gesture.dragging) handled = "edge-back";
-  else if (gesture?.id && gesture.dragging) handled = "grocery";
-  else if (scroller && Math.abs((scroller.scrollLeft || 0) - origin.scroll) > 6) handled = "scroll-snap";
-  else if (type === "cancel") handled = "cancelled";
-  else if (type === "end") handled = "ignored";
-  const strip = scroller ? `${Math.round(scroller.scrollWidth)}/${Math.round(scroller.clientWidth)} left ${Math.round(scroller.scrollLeft)}` : "no strip";
-  const entry = { type, target: describeTarget(event.target), dx, dy, handled, strip };
-  if (type === "move" && state.swipeLog[0]?.type === "move") state.swipeLog[0] = entry;
-  else state.swipeLog = [entry, ...state.swipeLog].slice(0, 6);
-  if (type === "end" || type === "cancel") swipeTouch.delete(id);
-  paintSwipeDebug();
-}
-
-function describeTarget(node) {
-  const el = node?.nodeType === 1 ? node : node?.parentElement;
-  if (!el) return "document";
-  const id = el.id ? `#${el.id}` : "";
-  const cls = typeof el.className === "string" ? el.className.trim().split(/\s+/).filter(Boolean).slice(0, 2).join(".") : "";
-  return `${el.tagName.toLowerCase()}${id}${cls ? `.${cls}` : ""}`;
-}
-
-function swipeDebugHtml() {
-  const rows = state.swipeLog.map((row) => `<li><span>${esc(row.type)}</span> ${esc(row.target)} <span>dx ${row.dx} dy ${row.dy}</span> <span>${esc(row.strip || "")}</span> <strong>${esc(row.handled)}</strong></li>`).join("");
-  return `<aside id="swipe-debug" class="swipe-debug" aria-live="polite"><p>Swipe debug</p><ol>${rows}</ol></aside>`;
-}
-
-function paintSwipeDebug() {
-  const box = document.getElementById("swipe-debug");
-  if (!box) return;
-  const list = box.querySelector("ol");
-  if (list) list.innerHTML = state.swipeLog.map((row) => `<li><span>${esc(row.type)}</span> ${esc(row.target)} <span>dx ${row.dx} dy ${row.dy}</span> <span>${esc(row.strip || "")}</span> <strong>${esc(row.handled)}</strong></li>`).join("");
-}
-
 function aboutHtml() {
   return `<div class="topbar"><button class="back" type="button" data-action="back" aria-label="Back">${chevLeft()}</button><h1>About</h1><span></span></div>
     <div class="pad about-pad">
       <p class="about-name">Family Table</p>
       <p class="muted">Dinners, the week, and the grocery list.</p>
-      <button class="about-toggle" type="button" data-action="toggle-swipe-debug" aria-pressed="${state.swipeDebug ? "true" : "false"}">Swipe debug<span>${state.swipeDebug ? "On" : "Off"}</span></button>
       <p class="about-version">Version ${APP_VERSION}</p>
     </div>`;
-}
-
-function pinPeriodPanes(node) {
-  const width = node?.clientWidth || 0;
-  if (!width) return 0;
-  const px = `${width}px`;
-  for (const pane of node.children) {
-    if (pane.style.minWidth === px) continue;
-    pane.style.flexBasis = px;
-    pane.style.width = px;
-    pane.style.minWidth = px;
-    pane.style.maxWidth = px;
-  }
-  return width;
-}
-
-function periodScrollBusy() {
-  if (snapSeating || snapFinger) return true;
-  const scroller = document.querySelector(".period-snap");
-  if (!scroller) return false;
-  const width = scroller.clientWidth || 1;
-  return Math.abs(scroller.scrollLeft - width) > 4;
-}
-
-function seatPeriodSnap() {
-  const scroller = document.querySelector(".period-snap");
-  if (!scroller) return;
-  snapSeating = true;
-  snapTouched = false;
-  const place = () => {
-    if (snapFinger) return true;
-    const node = document.querySelector(".period-snap");
-    const width = pinPeriodPanes(node);
-    if (!width) return false;
-    if (Math.abs(node.scrollLeft - width) > 1) node.scrollLeft = width;
-    return Math.abs(node.scrollLeft - width) <= 1;
-  };
-  place();
-  if (!boundSnaps.has(scroller)) {
-    boundSnaps.add(scroller);
-    scroller.addEventListener("scroll", onPeriodSnapScroll, { passive: true });
-    scroller.addEventListener("scrollend", onPeriodSnapEnd);
-    scroller.addEventListener("pointerdown", () => { snapTouched = true; holdSnapFinger(); });
-    scroller.addEventListener("pointerup", releaseSnapFinger);
-    scroller.addEventListener("pointercancel", releaseSnapFinger);
-    scroller.addEventListener("wheel", () => { snapTouched = true; }, { passive: true });
-  }
-  let tries = 0;
-  const retry = () => {
-    tries += 1;
-    const ok = place();
-    if (!ok && tries < 8) {
-      requestAnimationFrame(retry);
-      return;
-    }
-    snapSeating = false;
-  };
-  requestAnimationFrame(retry);
-}
-
-function onPeriodSnapScroll(event) {
-  if (snapSeating) return;
-  const scroller = event.currentTarget;
-  clearTimeout(snapTimer);
-  snapTimer = setTimeout(() => commitPeriodSnap(scroller), 120);
-}
-
-function onPeriodSnapEnd(event) {
-  if (snapSeating) return;
-  clearTimeout(snapTimer);
-  commitPeriodSnap(event.currentTarget);
-}
-
-function commitPeriodSnap(scroller) {
-  if (!scroller?.isConnected || snapSeating) return;
-  const width = scroller.clientWidth || 1;
-  const index = Math.round(scroller.scrollLeft / width);
-  const max = Math.max(0, scroller.children.length - 1);
-  if (index === 1) {
-    snapTouched = false;
-    if (periodDirty) {
-      periodDirty = false;
-      render();
-    }
-    return;
-  }
-  if (!snapTouched || index < 0 || index > max) return;
-  if (Math.abs(scroller.scrollLeft - index * width) > 18) return;
-  const delta = index < 1 ? -1 : 1;
-  const mode = scroller.dataset.period === "month" ? "month" : "week";
-  if (mode === "week" && delta > 0 && weekStart() >= nyToday()) return;
-  snapTouched = false;
-  snapSeating = true;
-  if (mode === "week") shiftWeek(delta);
-  else shiftCalendar(delta);
 }
 
 function onPointerDown(event) {
@@ -2140,8 +1913,6 @@ async function onClick(event) {
   }
   const button = event.target.closest("[data-action]");
   if (!button) return;
-  const pane = button.closest(".period-pane");
-  if (pane && pane.dataset.role && pane.dataset.role !== "current") return;
   const action = button.dataset.action;
   if (action === "toggle-passcode") {
     const input = document.getElementById("passcode");
@@ -2377,16 +2148,6 @@ async function onClick(event) {
   if (action === "open-about") {
     state.page = { kind: "about" };
     state.sheet = null;
-    render();
-    return;
-  }
-  if (action === "toggle-swipe-debug") {
-    state.swipeDebug = !state.swipeDebug;
-    try {
-      sessionStorage.setItem("family-table-swipe-debug", state.swipeDebug ? "1" : "0");
-    } catch {
-      /* The toggle still applies for this visit. */
-    }
     render();
     return;
   }

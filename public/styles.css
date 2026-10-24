@@ -1185,20 +1185,6 @@ body:has(.night-screen),
   letter-spacing: -0.03em;
 }
 
-.about-toggle {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  width: 100%;
-  min-height: 52px;
-  margin-top: 1.5rem;
-  border-top: 1px solid var(--line);
-  text-align: left;
-  font-weight: 650;
-}
-
-.about-toggle span { color: var(--muted); font-weight: 600; }
-
 .about-version {
   margin-top: auto;
   padding: 1.6rem 0 0.2rem;
@@ -1216,27 +1202,6 @@ body:has(.night-screen),
   font-weight: 650;
 }
 
-.swipe-debug {
-  position: fixed;
-  left: 0.6rem;
-  right: 0.6rem;
-  bottom: calc(var(--tab-bar) + 0.35rem);
-  z-index: 40;
-  max-height: 9.2rem;
-  overflow: auto;
-  padding: 0.4rem 0.6rem 0.5rem;
-  border-radius: 12px;
-  background: rgba(17, 17, 17, 0.9);
-  color: white;
-  font-size: 0.72rem;
-  line-height: 1.35;
-  pointer-events: none;
-}
-
-.swipe-debug p { margin: 0; font-weight: 750; }
-.swipe-debug ol { margin: 0.25rem 0 0; padding: 0; list-style: none; }
-.swipe-debug li { padding: 0.12rem 0; }
-.swipe-debug strong { color: #b6ef86; font-weight: 700; }
 .plan-kinds { margin: 0.15rem 0 0.35rem; }
 .plan-kind {
   display: flex;
@@ -1421,50 +1386,6 @@ body:has(.night-screen),
 .week-day.is-today .week-date { color: var(--green-dark); }
 .week-empty { margin: 0; color: var(--muted); font-size: 1rem; font-weight: 500; text-transform: none; letter-spacing: 0; }
 .meal-row > .week-empty { flex: 1; width: auto; min-width: 0; }
-.period-snap {
-  display: flex;
-  align-items: flex-start;
-  width: 100%;
-  min-width: 0;
-  max-width: 100%;
-  /* Hidden on the cross axis makes iOS drop the horizontal pan. Clip computes back to hidden. */
-  overflow-x: scroll;
-  overflow-y: auto;
-  scroll-snap-type: x mandatory;
-  -webkit-overflow-scrolling: touch;
-  container-type: inline-size;
-  scrollbar-width: none;
-}
-
-.period-snap::-webkit-scrollbar { display: none; }
-
-.period-pane {
-  flex: 0 0 100%;
-  width: 100%;
-  min-width: 100%;
-  max-width: 100%;
-  flex-basis: 100cqi;
-  width: 100cqi;
-  min-width: 100cqi;
-  max-width: 100cqi;
-  height: auto;
-  overflow: visible;
-  scroll-snap-align: start;
-  scroll-snap-stop: always;
-}
-
-.month-screen .period-snap {
-  flex: 1 1 auto;
-  min-height: 0;
-  height: 100%;
-}
-
-.month-screen .period-pane {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  overflow: clip;
-}
 
 .meal-row {
   display: flex;
