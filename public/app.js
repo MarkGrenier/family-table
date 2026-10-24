@@ -34,6 +34,7 @@ const state = {
   undo: null,
   undoFading: false,
   swipeId: null,
+  mealSwipeId: null,
   addDraft: blankAddDraft(),
   todayPanel: "ingredients",
   todayServings: null,
@@ -78,12 +79,15 @@ app.addEventListener("pointermove", onPointerMove);
 app.addEventListener("pointerup", onPointerUp);
 app.addEventListener("pointercancel", onPointerCancel);
 app.addEventListener("touchmove", (event) => {
-  if (gesture?.kind !== "back") return;
+  const kind = gesture?.kind;
+  if (kind !== "back" && kind !== "period" && kind !== "meal") return;
   const touch = event.touches[0];
   if (!touch) return;
   const dx = touch.clientX - gesture.x;
   const dy = touch.clientY - gesture.y;
-  if (!gesture.dragging && !(dx > 8 && dx > Math.abs(dy))) return;
+  if (kind === "back") {
+    if (!gesture.dragging && !(dx > 8 && dx > Math.abs(dy))) return;
+  } else if (!gesture.dragging || gesture.scroll) return;
   if (event.cancelable) event.preventDefault();
 }, { passive: false });
 document.addEventListener("visibilitychange", () => {
@@ -107,6 +111,11 @@ const BACK_FLICK_PX = 16;
 const BACK_FLICK_V = 0.35;
 const BACK_SNAP_MS = 200;
 const BACK_UNDER = 0.28;
+const PERIOD_LOCK_PX = 10;
+const PERIOD_FLICK_PX = 48;
+const PERIOD_FLICK_V = 0.45;
+const PERIOD_COMMIT = 0.28;
+const PERIOD_SNAP_MS = 220;
 const BACK_SELECTOR = '[data-action="back"], [data-action="close-sheet"], [data-action="close-cook"], [data-action="close-feedback"], [data-action="cancel-pick"], [data-action="plan-cancel"]';
 let noticeTimer = null;
 let renderQueued = false;
@@ -124,6 +133,10 @@ let swallowClick = false;
 let edgeClick = false;
 let backSettle = 0;
 let edgeAnimating = 0;
+let periodSettle = 0;
+let periodAnimating = 0;
+let periodEnter = 0;
+let periodDirty = false;
 let viewKeySeen = "";
 
 function swallowNextClick() {
@@ -199,7 +212,8 @@ async function refresh(force) {
     state.plan = applyPlanPending(mergeDated(state.plan, plan.plan || [], range));
     state.events = mergeDated(state.events, events.events || [], range);
     state.error = "";
-    if ((force || !isTyping()) && !gesture?.dragging && gesture?.kind !== "back" && !edgeAnimating) render();
+    if ((force || !isTyping()) && !gesture?.dragging && gesture?.kind !== "back" && !edgeAnimating && !periodAnimating) render();
+    else if (periodAnimating) periodDirty = true;
   } catch (error) {
     if (serial !== refreshSerial) return;
     if (error.status === 401) {
@@ -279,6 +293,7 @@ function render(force = false) {
     }
     avoidFab();
     markSwipeBack();
+    playPeriodEnter();
   };
   if (state.loading) {
     finish();
@@ -364,7 +379,7 @@ function todayHtml() {
   const recipe = recipeForEntry(dinner);
   const events = eventsOn(today);
   if (dinner?.type === "leftovers" && !(dinner.also || []).length) {
-    const night = leftoversNight(dinner, recipe);
+    const night = leftoversNight(dinner, recipe, { edit: Boolean(recipe) });
     return `${todayHead()}${night}`;
   }
   if (recipe && dinner) {
@@ -387,10 +402,14 @@ function todayHead() {
 function leftoversNight(entry, recipe, options = {}) {
   const photo = foodPhoto(recipe, entry);
   const back = options.back ? `<button class="float left" type="button" data-action="back" aria-label="Back">${chevLeft()}</button>` : "";
+  const edit = options.edit && recipe
+    ? `<button class="float right edit-float" type="button" data-action="edit-recipe" data-id="${esc(recipe.id)}">Edit</button>`
+    : "";
   return `<article class="leftover-night">
       <div class="hero night-hero">
         <img class="fallback-photo" src="${esc(photo || "/photos/leftovers-hero.jpg")}" alt="">
         ${back}
+        ${edit}
       </div>
       <div class="pad">
         ${options.back ? `<p class="kicker meal-kicker">${esc(mealLabel(entry.meal))}</p>` : ""}
@@ -535,14 +554,16 @@ function weekListHtml() {
 
 function monthHtml() {
   const anchor = state.calStart || `${nyToday().slice(0, 7)}-01`;
-  return `<div class="month-bar">
-      <button type="button" data-action="cal-shift" data-delta="-1" aria-label="Previous month">${chevLeft()}</button>
-      <h1>${esc(monthTitle(anchor))}</h1>
-      <button type="button" data-action="cal-shift" data-delta="1" aria-label="Next month">${chevRight()}</button>
-      <button class="icon-btn is-on" type="button" data-action="cal-mode" aria-label="Back to this week">${cal()}</button>
-    </div>
-    <div class="cal-board">${monthGrid(anchor, monthSelection(anchor))}</div>
-    ${monthPanel(monthSelection(anchor))}`;
+  return `<div class="month-period">
+      <div class="month-bar">
+        <button type="button" data-action="cal-shift" data-delta="-1" aria-label="Previous month">${chevLeft()}</button>
+        <h1>${esc(monthTitle(anchor))}</h1>
+        <button type="button" data-action="cal-shift" data-delta="1" aria-label="Next month">${chevRight()}</button>
+        <button class="icon-btn is-on" type="button" data-action="cal-mode" aria-label="Back to this week">${cal()}</button>
+      </div>
+      <div class="cal-board">${monthGrid(anchor, monthSelection(anchor))}</div>
+      ${monthPanel(monthSelection(anchor))}
+    </div>`;
 }
 
 function monthSelection(anchor) {
@@ -603,18 +624,29 @@ function addDinnerButton(date) {
 
 function removeMealButton(entry) {
   if (!entry?.date || entry.date < nyToday()) return "";
-  return `<button class="icon-btn add-plus" type="button" data-action="remove-meal" data-id="${esc(entry.id)}" aria-label="Remove">${minus()}</button>`;
+  return `<button class="remove-badge" type="button" data-action="remove-meal" data-id="${esc(entry.id)}" aria-label="Remove"><span class="remove-dot">${minus()}</span></button>`;
 }
 
 function mealRow(entry) {
   const recipe = recipeForEntry(entry);
-  if (entry.type === "leftovers") return leftoversRow(entry, recipe);
+  if (entry.type === "leftovers") return mealSwipe(entry, leftoversRow(entry, recipe));
   const title = planTitle(entry);
   const meal = mealLabel(entry.meal);
   if (!recipe) {
-    return `<div class="meal-row meal-line"><button class="meal-open" type="button" data-action="open-day" data-date="${esc(entry.date)}"><span class="meal-copy"><strong>${esc(title)}</strong><span>${esc(meal)}</span></span></button>${removeMealButton(entry)}</div>`;
+    return mealSwipe(entry, `<div class="meal-row meal-line"><button class="meal-open" type="button" data-action="open-day" data-date="${esc(entry.date)}"><span class="meal-copy"><strong>${esc(title)}</strong><span>${esc(meal)}</span></span></button>${removeMealButton(entry)}</div>`);
   }
-  return `<div class="meal-row meal-line"><button class="meal-open" type="button" data-action="open-recipe" data-id="${esc(recipe.id)}" data-date="${esc(entry.date)}" data-meal="${esc(entry.meal)}">${recipeThumb(recipe)}<span class="meal-copy"><strong>${esc(title)}</strong><span>${esc(meal)}</span></span></button>${removeMealButton(entry)}</div>`;
+  return mealSwipe(entry, `<div class="meal-row meal-line"><button class="meal-open" type="button" data-action="open-recipe" data-id="${esc(recipe.id)}" data-date="${esc(entry.date)}" data-meal="${esc(entry.meal)}">${recipeThumb(recipe)}<span class="meal-copy"><strong>${esc(title)}</strong><span>${esc(meal)}</span></span></button>${removeMealButton(entry)}</div>`);
+}
+
+function mealSwipe(entry, inner) {
+  if (!entry?.date || entry.date < nyToday()) return inner;
+  const open = state.mealSwipeId === entry.id ? " is-open" : "";
+  return `<div class="m-swipe${open}" data-id="${esc(entry.id)}">
+      <div class="m-clip">
+        <button class="m-delete" type="button" data-action="remove-meal" data-id="${esc(entry.id)}">Remove</button>
+        <div class="m-row">${inner}</div>
+      </div>
+    </div>`;
 }
 
 function mealLabel(meal) {
@@ -776,7 +808,7 @@ function recipeView(recipe, mode) {
   const panel = embedded ? state.todayPanel || "ingredients" : state.page.panel || "ingredients";
   const open = embedded ? state.todayServingsOpen : state.page.servingsOpen;
   const tag = embedded ? prepPhotoTag() : "";
-  return `${hero(recipe, !embedded, tag, mode === "page")}
+  return `${hero(recipe, !embedded, tag, mode === "page" || mode === "today")}
     <div class="pad">
       ${mode === "leftovers" ? `<span class="lo-pill">Leftovers</span>` : ""}
       <div class="title-row"><h1>${esc(recipe.name)}</h1>
@@ -1697,10 +1729,38 @@ function runBackControl(control) {
 
 function onPointerDown(event) {
   if (beginEdgeBack(event)) return;
-  const board = event.target.closest(".cal-board");
-  if (board) {
-    if (state.sheet?.kind === "pick-date") return;
-    gesture = { kind: "cal", x: event.clientX, y: event.clientY };
+  if (event.button !== 0 || event.isPrimary === false) return;
+  if (event.target.closest?.(".sheet, input, textarea, select, [contenteditable='true']")) return;
+  const host = event.target.closest(".m-swipe");
+  if (host) {
+    if (!event.target.closest(".remove-badge, .m-delete")) {
+      clearGesture();
+      gesture = {
+        kind: "meal",
+        id: host.dataset.id,
+        x: event.clientX,
+        y: event.clientY,
+        dragging: false,
+        pointerId: event.pointerId,
+      };
+    }
+    return;
+  }
+  const period = event.target.closest(".month-period");
+  if (period && !state.page && state.tab === "calendar" && state.calMode === "month") {
+    clearGesture();
+    gesture = {
+      kind: "period",
+      x: event.clientX,
+      y: event.clientY,
+      lastX: event.clientX,
+      lastT: event.timeStamp,
+      velocity: 0,
+      dx: 0,
+      dragging: false,
+      pointerId: event.pointerId,
+      layer: period,
+    };
     return;
   }
   const row = event.target.closest(".g-row");
@@ -1715,7 +1775,14 @@ function onPointerMove(event) {
     moveEdgeBack(event);
     return;
   }
-  if (gesture.kind === "cal") return;
+  if (gesture.kind === "period") {
+    movePeriod(event);
+    return;
+  }
+  if (gesture.kind === "meal") {
+    moveMeal(event);
+    return;
+  }
   const dx = event.clientX - gesture.x;
   const dy = event.clientY - gesture.y;
   if (!gesture.dragging) {
@@ -1764,16 +1831,18 @@ function onPointerUp(event) {
     endEdgeBack(event);
     return;
   }
-  const dx = event.clientX - gesture.x;
-  const dy = event.clientY - gesture.y;
-  if (gesture.kind === "cal") {
-    clearGesture();
-    if (Math.abs(dx) > 56 && Math.abs(dx) > Math.abs(dy)) {
-      swallowNextClick();
-      shiftCalendar(dx < 0 ? 1 : -1);
-    }
+  if (gesture.kind === "period") {
+    if (gesture.pointerId !== event.pointerId) return;
+    endPeriod(event);
     return;
   }
+  if (gesture.kind === "meal") {
+    if (gesture.pointerId !== event.pointerId) return;
+    endMeal(event, false);
+    return;
+  }
+  const dx = event.clientX - gesture.x;
+  const dy = event.clientY - gesture.y;
   const id = gesture.id;
   const long = gesture.long;
   const dragging = gesture.dragging;
@@ -1811,8 +1880,14 @@ function onPointerCancel(event) {
     cancelEdgeBack();
     return;
   }
-  if (gesture.kind === "cal") {
-    clearGesture();
+  if (gesture.kind === "period") {
+    if (event && gesture.pointerId !== event.pointerId) return;
+    cancelPeriod();
+    return;
+  }
+  if (gesture.kind === "meal") {
+    if (event && gesture.pointerId !== event.pointerId) return;
+    endMeal(event, true);
     return;
   }
   if (gesture.dragging) {
@@ -1824,6 +1899,200 @@ function onPointerCancel(event) {
     return;
   }
   clearGesture();
+}
+
+function movePeriod(event) {
+  if (!gesture?.layer?.isConnected) {
+    clearGesture();
+    return;
+  }
+  const dx = event.clientX - gesture.x;
+  const dy = event.clientY - gesture.y;
+  const dt = event.timeStamp - gesture.lastT;
+  if (dt > 0 && dt < 80) gesture.velocity = (event.clientX - gesture.lastX) / dt;
+  else if (dt >= 80) gesture.velocity = 0;
+  gesture.lastX = event.clientX;
+  gesture.lastT = event.timeStamp;
+  if (!gesture.dragging) {
+    if (Math.abs(dx) < PERIOD_LOCK_PX && Math.abs(dy) < PERIOD_LOCK_PX) return;
+    if (Math.abs(dy) > Math.abs(dx)) {
+      gesture.scroll = true;
+      return;
+    }
+    gesture.dragging = true;
+    try {
+      gesture.layer.setPointerCapture?.(event.pointerId);
+    } catch {
+      // Pointer capture can throw if the pointer already ended.
+    }
+  }
+  if (gesture.scroll) return;
+  const width = periodWidth(gesture.layer);
+  const next = Math.max(-width, Math.min(width, dx));
+  gesture.dx = next;
+  if (reduceMotion()) return;
+  paintPeriod(gesture.layer, next, false);
+}
+
+function endPeriod(event) {
+  const current = gesture;
+  if (!current || current.kind !== "period") return;
+  if (event && event.timeStamp - current.lastT > 80) current.velocity = 0;
+  const dx = event ? event.clientX - current.x : current.dx || 0;
+  const dragging = current.dragging && !current.scroll;
+  const layer = current.layer;
+  clearGesture();
+  if (!dragging) return;
+  swallowNextClick();
+  const width = periodWidth(layer);
+  const distance = Math.abs(dx);
+  const flicked = dx !== 0 && Math.sign(current.velocity) === Math.sign(dx) && Math.abs(current.velocity) >= PERIOD_FLICK_V && distance >= PERIOD_FLICK_PX;
+  const commit = distance >= width * PERIOD_COMMIT || flicked;
+  if (!commit) {
+    snapPeriod(layer, 0);
+    return;
+  }
+  const delta = dx < 0 ? 1 : -1;
+  if (reduceMotion() || !layer?.isConnected) {
+    if (layer?.isConnected) {
+      layer.style.transition = "";
+      layer.style.transform = "";
+    }
+    shiftCalendar(delta);
+    return;
+  }
+  paintPeriod(layer, delta > 0 ? -width : width, true);
+  periodAnimating += 1;
+  settlePeriod(layer, () => {
+    periodAnimating = Math.max(0, periodAnimating - 1);
+    periodEnter = delta;
+    shiftCalendar(delta);
+  });
+}
+
+function cancelPeriod() {
+  const current = gesture;
+  const layer = current?.layer;
+  const dragging = current?.dragging && !current?.scroll;
+  clearGesture();
+  if (dragging) snapPeriod(layer, 0);
+}
+
+function moveMeal(event) {
+  const dx = event.clientX - gesture.x;
+  const dy = event.clientY - gesture.y;
+  if (!gesture.dragging) {
+    if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+    if (Math.abs(dy) > Math.abs(dx)) {
+      gesture.scroll = true;
+      return;
+    }
+    gesture.dragging = true;
+    event.target.closest(".m-row")?.setPointerCapture?.(event.pointerId);
+  }
+  if (gesture.scroll) return;
+  const base = state.mealSwipeId === gesture.id ? -96 : 0;
+  const next = Math.max(-120, Math.min(0, base + dx));
+  const row = document.querySelector(`.m-swipe[data-id="${cssEscape(gesture.id)}"] .m-row`);
+  if (row) {
+    row.style.transition = "none";
+    row.style.transform = `translateX(${next}px)`;
+  }
+  gesture.offset = next;
+}
+
+function endMeal(event, cancel) {
+  const current = gesture;
+  if (!current || current.kind !== "meal") return;
+  const id = current.id;
+  const dragging = current.dragging && !current.scroll;
+  const offset = current.offset ?? 0;
+  const open = state.mealSwipeId === id;
+  clearGesture();
+  if (!dragging) {
+    if (cancel || !open) return;
+    state.mealSwipeId = null;
+    swallowNextClick();
+    render();
+    return;
+  }
+  swallowNextClick();
+  state.mealSwipeId = offset < -48 ? id : null;
+  render();
+}
+
+function periodWidth(layer) {
+  return Math.max(1, layer?.getBoundingClientRect().width || window.innerWidth);
+}
+
+function paintPeriod(layer, dx, animate) {
+  if (!layer?.isConnected) return;
+  layer.style.transition = animate ? `transform ${PERIOD_SNAP_MS}ms ease-out` : "none";
+  layer.style.transform = `translate3d(${Math.round(dx)}px,0,0)`;
+}
+
+function snapPeriod(layer, dx) {
+  if (!layer?.isConnected) return;
+  if (reduceMotion()) {
+    layer.style.transition = "";
+    layer.style.transform = "";
+    return;
+  }
+  paintPeriod(layer, dx, true);
+  periodAnimating += 1;
+  settlePeriod(layer, () => {
+    periodAnimating = Math.max(0, periodAnimating - 1);
+    if (!layer.isConnected || dx !== 0) return;
+    layer.style.transition = "";
+    layer.style.transform = "";
+  });
+}
+
+function settlePeriod(layer, run) {
+  const token = ++periodSettle;
+  let finished = false;
+  const finish = () => {
+    if (finished) return;
+    finished = true;
+    layer?.removeEventListener("transitionend", onEnd);
+    if (token !== periodSettle) return;
+    run?.();
+  };
+  const onEnd = (event) => {
+    if (event.target !== layer || event.propertyName !== "transform") return;
+    finish();
+  };
+  layer?.addEventListener("transitionend", onEnd);
+  setTimeout(finish, PERIOD_SNAP_MS + 40);
+}
+
+function playPeriodEnter() {
+  if (!periodEnter) return;
+  const delta = periodEnter;
+  periodEnter = 0;
+  const layer = document.querySelector(".month-period");
+  if (!layer || reduceMotion()) return;
+  const width = periodWidth(layer);
+  layer.style.transition = "none";
+  layer.style.transform = `translate3d(${delta > 0 ? width : -width}px,0,0)`;
+  periodAnimating += 1;
+  requestAnimationFrame(() => {
+    if (!layer.isConnected) {
+      periodAnimating = Math.max(0, periodAnimating - 1);
+      return;
+    }
+    paintPeriod(layer, 0, true);
+    settlePeriod(layer, () => {
+      periodAnimating = Math.max(0, periodAnimating - 1);
+      if (layer.isConnected) {
+        layer.style.transition = "";
+        layer.style.transform = "";
+      }
+      if (!periodDirty) return;
+      periodDirty = false;
+      render();
+    });
+  });
 }
 
 function clearGesture() {
@@ -1887,6 +2156,7 @@ async function onClick(event) {
     state.page = null;
     state.sheet = null;
     state.swipeId = null;
+    state.mealSwipeId = null;
     state.pickBack = null;
     render();
     if (state.tab === "today") refresh(true);
