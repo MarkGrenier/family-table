@@ -761,7 +761,7 @@ function recipeRows(recipes, options = {}) {
         ${recipeThumb(recipe)}
         <span class="recipe-copy"><span class="recipe-name">${esc(recipe.name)}</span>${recipe.needsReview ? `<span class="review-pill">Needs a look</span>` : ""}${lastMadeText(recipe) ? `<span class="small">${esc(lastMadeText(recipe))}</span>` : ""}</span>
       </button>
-      ${options.pick ? "" : `<span class="recipe-actions"><button class="icon-btn add-plus" type="button" data-action="add-to-date" data-id="${esc(recipe.id)}" aria-label="Add to date">${plus()}</button><button class="icon-btn" type="button" data-action="recipe-row-menu" data-id="${esc(recipe.id)}" aria-label="More">${dots()}</button><button class="heart${recipe.favorite ? " is-on" : ""}" type="button" data-action="favorite" data-id="${esc(recipe.id)}" aria-label="${recipe.favorite ? "Unfavorite" : "Favorite"}">${heart(recipe.favorite)}</button></span>`}
+      ${options.pick ? "" : `<span class="recipe-actions"><button class="icon-btn add-plus" type="button" data-action="add-to-date" data-id="${esc(recipe.id)}" aria-label="Add to date">${plus()}</button><button class="row-edit" type="button" data-action="edit-recipe" data-id="${esc(recipe.id)}">Edit</button><button class="heart${recipe.favorite ? " is-on" : ""}" type="button" data-action="favorite" data-id="${esc(recipe.id)}" aria-label="${recipe.favorite ? "Unfavorite" : "Favorite"}">${heart(recipe.favorite)}</button></span>`}
     </div>`).join("");
 }
 
@@ -812,10 +812,9 @@ function cookDock(recipe, raised) {
 }
 
 function hero(recipe, showBack, prepTag = "", entry = null) {
-  const today = entry
-    ? ` data-from="today" data-id="${esc(entry.id)}" data-date="${esc(entry.date)}" data-meal="${esc(entry.meal)}"`
-    : "";
-  const menu = `<button class="float right" type="button" data-action="recipe-menu"${today} aria-label="More">${dots()}</button>`;
+  const menu = entry
+    ? `<button class="float right" type="button" data-action="recipe-menu" data-from="today" data-id="${esc(entry.id)}" data-date="${esc(entry.date)}" data-meal="${esc(entry.meal)}" aria-label="More">${dots()}</button>`
+    : `<button class="float right edit-float" type="button" data-action="edit-recipe" data-id="${esc(recipe.id)}">Edit</button>`;
   const back = showBack ? `<button class="float left" type="button" data-action="back" aria-label="Back">${chevLeft()}</button>` : "";
   if (!recipe.imageUrl) {
     return `<div class="hero hero-empty">${back}<span class="hero-mark" aria-hidden="true">${plateIcon()}</span>${prepTag}${menu}</div>`;
@@ -1324,28 +1323,16 @@ function sheetHtml() {
       </form></div>`;
   }
   if (state.sheet?.kind === "recipe-menu") {
-    const mealMenu = Boolean(state.sheet.date && state.sheet.meal);
+    if (!state.sheet.date || !state.sheet.meal) return "";
     const onToday = state.sheet.from === "today";
     const hideAdd = onToday || state.sheet.from === "calendar";
-    const planned = mealMenu ? (state.sheet.entryId ? entryById(state.sheet.entryId) : mealOn(state.sheet.date, state.sheet.meal)) : null;
+    const planned = state.sheet.entryId ? entryById(state.sheet.entryId) : mealOn(state.sheet.date, state.sheet.meal);
     const recipe = activeRecipe();
-    if (!mealMenu) {
-      return `<div class="sheet"><div class="sheet-card" role="dialog" aria-label="Recipe">
-        <div class="sheet-head"><span></span><button type="button" data-action="close-sheet" aria-label="Close">✕</button></div>
-        ${recipe ? recipeMenuRows(recipe.id) : ""}
-      </div></div>`;
-    }
     return `<div class="sheet"><div class="sheet-card" role="dialog" aria-label="Meal">
         <div class="sheet-head"><span></span><button type="button" data-action="close-sheet" aria-label="Close">✕</button></div>
         ${planned && !hideAdd ? `<button class="menu-row" type="button" data-action="add-meal" data-date="${esc(planned.date)}" data-meal="${esc(planned.meal)}">Add</button>` : ""}
         ${planned ? `<button class="menu-row" type="button" data-action="remove-meal" data-id="${esc(planned.id)}">Remove</button>` : ""}
         ${recipe ? `<button class="menu-row" type="button" data-action="edit-recipe">Edit recipe</button>` : ""}
-      </div></div>`;
-  }
-  if (state.sheet?.kind === "recipe-row-menu") {
-    return `<div class="sheet"><div class="sheet-card" role="dialog" aria-label="Recipe options">
-        <div class="sheet-head"><span></span><button type="button" data-action="close-sheet" aria-label="Close">✕</button></div>
-        ${recipeMenuRows(state.sheet.recipeId)}
       </div></div>`;
   }
   if (state.sheet?.kind === "pick-date") return dateSheetHtml();
@@ -1735,14 +1722,15 @@ function onPointerDown(event) {
     return;
   }
   const recipeRow = event.target.closest(".recipe-row[data-id]");
-  if (recipeRow && state.page?.kind !== "pick" && !event.target.closest(".heart") && !event.target.closest(".icon-btn")) {
+  if (recipeRow && state.page?.kind !== "pick" && !event.target.closest(".heart") && !event.target.closest(".icon-btn") && !event.target.closest(".row-edit")) {
     clearGesture();
     const id = recipeRow.dataset.id;
     gesture = { kind: "recipe", id, x: event.clientX, y: event.clientY, long: false, pointerId: event.pointerId };
     gesture.timer = setTimeout(() => {
       if (!gesture || gesture.kind !== "recipe") return;
+      if (!recipeById(id)) return;
       gesture.long = true;
-      state.sheet = { kind: "recipe-row-menu", recipeId: id };
+      state.sheet = { kind: "edit-recipe", id, error: "", date: null, meal: null };
       render();
     }, 520);
     return;
@@ -2022,11 +2010,6 @@ async function onClick(event) {
   if (action === "pick-date-day") return askPlan(button.dataset.date, "dinner", state.sheet?.recipeId);
   if (action === "date-shift") return shiftDateMonth(Number(button.dataset.delta));
   if (action === "add-to-date") return openDatePicker(button.dataset.id || state.page?.id);
-  if (action === "recipe-row-menu") {
-    state.sheet = { kind: "recipe-row-menu", recipeId: button.dataset.id };
-    render();
-    return;
-  }
   if (action === "plan-replace") {
     const sheet = state.sheet;
     if (sheet?.kind !== "plan-choice") return;
@@ -2347,10 +2330,6 @@ function canShiftDateMonth(delta) {
   const [year, month] = String(current).split("-").map(Number);
   const previousLast = new Date(Date.UTC(year, month - 1, 0)).toISOString().slice(0, 10);
   return previousLast >= nyToday();
-}
-
-function recipeMenuRows(recipeId) {
-  return `<button class="menu-row" type="button" data-action="edit-recipe" data-id="${esc(recipeId)}">Edit recipe</button>`;
 }
 
 function dateSheetHtml() {

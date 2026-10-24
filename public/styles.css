@@ -275,6 +275,15 @@ h1, .title {
 .float.left { left: 0.8rem; }
 .float.right { right: 0.8rem; }
 .float.add-float { right: calc(0.8rem + 52px); color: var(--green-dark); }
+.float.edit-float {
+  width: auto;
+  min-width: 44px;
+  padding: 0 0.95rem;
+  border-radius: 999px;
+  color: var(--green);
+  font-size: 0.95rem;
+  font-weight: 750;
+}
 
 .pad { padding: 1rem 1.15rem 0; }
 
@@ -782,6 +791,14 @@ select.box, button.box { appearance: none; padding-right: 2.2rem; }
   min-height: 30px;
   margin-right: 0.1rem;
   border-radius: 50%;
+}
+.recipe-actions .row-edit {
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 0.2rem 0 0.35rem;
+  color: var(--green);
+  font-size: 0.95rem;
+  font-weight: 750;
 }
 .recipe-actions .icon-btn svg { width: 18px; height: 18px; }
 .recipe-actions .add-plus svg { width: 16px; height: 16px; }
