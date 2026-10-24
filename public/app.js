@@ -368,11 +368,11 @@ function todayHtml() {
   const dinner = mealOn(today, "dinner");
   const recipe = recipeForEntry(dinner);
   const events = eventsOn(today);
-  if (dinner?.type === "note") return `${todayHead()}${nightCard(dinner, null)}${eventsHtml(events)}`;
   const prep = todayShowsPhotoPrep(dinner, recipe) ? "" : prepLine();
   if (dinner?.type === "leftovers" && !(dinner.also || []).length) {
     return `${todayHead()}${prep}${nightCard(dinner, recipe, { edit: Boolean(recipe) })}${eventsHtml(events)}`;
   }
+  if (dinner?.type === "note") return `${todayHead()}${prep}${nightCard(dinner, null)}${eventsHtml(events)}`;
   if (recipe && dinner) {
     if (state.todayId !== recipe.id) {
       state.todayId = recipe.id;

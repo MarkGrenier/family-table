@@ -2564,8 +2564,8 @@ describe("grocery API", () => {
     expect(buyHintCss).toContain("font-weight: 400;");
     expect(buyHintCss).not.toContain("font-weight: 750");
     const today = js.slice(js.indexOf("function todayHtml"), js.indexOf("function todayShowsPhotoPrep"));
-    expect(today).toContain('if (dinner?.type === "note") return `${todayHead()}${nightCard(dinner, null)}');
-    expect(today.indexOf('dinner?.type === "note"')).toBeLessThan(today.indexOf("prepLine()"));
+    expect(today).toContain('if (dinner?.type === "note") return `${todayHead()}${prep}${nightCard(dinner, null)}');
+    expect(today.indexOf("prepLine()")).toBeLessThan(today.indexOf('dinner?.type === "note"'));
     expect(css).toContain(".fresh-row {");
     expect(css).toContain(".buy-hint {");
     expect(css).not.toContain(".coming-line");
