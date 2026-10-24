@@ -2420,7 +2420,9 @@ describe("grocery API", () => {
     expect(js).not.toContain("recipes-menu");
     expect(js).toContain("Needs a look");
     expect(js).not.toContain("sourceUrl");
-    expect(js).toContain("function utensilsIcon");
+    expect(js).toContain('class="hero-logo"');
+    expect(js).toContain("markImg(112)");
+    expect(js).not.toContain("function utensilsIcon");
     expect(js).toContain("function bowlIcon");
     expect(js).not.toContain("/photos/leftovers-hero.jpg");
     expect(js).toContain("Tomorrow: leftovers");
@@ -2496,9 +2498,9 @@ describe("grocery API", () => {
     expect(css).toContain("opacity 300ms");
     expect(css).toContain(".month-panel-head.is-today .week-date");
     const shell = await (await exports.default.fetch("https://grocery.test/sw.js")).text();
-    expect(shell).toContain("grocery-shell-v86");
-    expect(shell).toContain("/styles.css?v=74");
-    expect(shell).toContain("/app.js?v=81");
+    expect(shell).toContain("grocery-shell-v87");
+    expect(shell).toContain("/styles.css?v=75");
+    expect(shell).toContain("/app.js?v=82");
     const weekTab = js.slice(js.indexOf('if (action === "tab")'), js.indexOf('if (action === "back")'));
     expect(weekTab).toContain('state.calMode = "week";');
     expect(weekTab).toContain("state.weekAnchor = null;");
@@ -2611,7 +2613,14 @@ describe("grocery API", () => {
     expect(css).toContain("background: var(--green);");
     expect(css).not.toContain(".m-swipe");
     expect(css).toContain("scroll-snap-type: x mandatory");
+    expect(css).toContain("overflow-x: scroll");
+    expect(css).toContain("overflow-y: auto");
+    expect(css).toContain("100cqi");
+    const paneRule = css.slice(css.indexOf(".period-pane {"), css.indexOf(".month-screen .period-snap"));
+    expect(paneRule).toContain("overflow: visible");
+    expect(paneRule).not.toContain("overflow-y");
     expect(css).toContain(".period-pane {");
+    expect(css).toContain(".hero-logo {");
     expect(css).not.toContain(".week-period { touch-action: pan-y; }");
     expect(css).not.toContain("touch-action: none");
     expect(css).toContain(".hero-out {");

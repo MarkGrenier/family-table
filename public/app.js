@@ -43,7 +43,7 @@ const state = {
   swipeLog: [],
 };
 
-const APP_VERSION = "86";
+const APP_VERSION = "87";
 
 const SECTIONS = [
   ["produce", "Produce"],
@@ -131,6 +131,7 @@ let edgeAnimating = 0;
 let periodDirty = false;
 let snapSeating = false;
 let snapTouched = false;
+let snapFinger = false;
 let snapTimer = 0;
 let edgeTouchArmed = false;
 const boundSnaps = new WeakSet();
@@ -231,7 +232,7 @@ async function refresh(force) {
     state.events = mergeDated(state.events, events.events || [], range);
     state.error = "";
     if ((force || !isTyping()) && !gesture?.dragging && gesture?.kind !== "back" && !edgeAnimating && !periodScrollBusy()) render();
-    else if (periodScrollBusy()) periodDirty = true;
+    else if (periodScrollBusy() || snapFinger) periodDirty = true;
   } catch (error) {
     if (serial !== refreshSerial) return;
     if (error.status === 401) {
@@ -434,7 +435,7 @@ function nightCard(entry, recipe, options = {}) {
       <div class="hero hero-tint hero-${kind}">
         ${back}
         ${edit}
-        <span class="hero-icon" aria-hidden="true">${out ? utensilsIcon() : bowlIcon()}</span>
+        ${out ? `<span class="hero-logo">${markImg(112)}</span>` : `<span class="hero-icon" aria-hidden="true">${bowlIcon()}</span>`}
       </div>
       <div class="pad">
         ${out ? "" : `<span class="lo-pill">Leftovers</span>`}
@@ -1800,13 +1801,34 @@ function onEdgeTouchMove(event) {
   if (event.cancelable) event.preventDefault();
 }
 
+function holdSnapFinger() {
+  snapFinger = true;
+  clearTimeout(holdSnapFinger.timer);
+}
+function releaseSnapFinger() {
+  clearTimeout(holdSnapFinger.timer);
+  holdSnapFinger.timer = setTimeout(() => { snapFinger = false; }, 500);
+}
+
 function onSwipeDebugStart(event) {
-  if (event.target?.closest?.(".period-snap")) snapTouched = true;
+  if (event.target?.closest?.(".period-snap")) {
+    snapTouched = true;
+    holdSnapFinger();
+  }
   logSwipe("start", event);
 }
-function onSwipeDebugMove(event) { logSwipe("move", event); }
-function onSwipeDebugEnd(event) { logSwipe("end", event); }
-function onSwipeDebugCancel(event) { logSwipe("cancel", event); }
+function onSwipeDebugMove(event) {
+  if (event.target?.closest?.(".period-snap")) holdSnapFinger();
+  logSwipe("move", event);
+}
+function onSwipeDebugEnd(event) {
+  logSwipe("end", event);
+  if (snapFinger) releaseSnapFinger();
+}
+function onSwipeDebugCancel(event) {
+  logSwipe("cancel", event);
+  if (snapFinger) releaseSnapFinger();
+}
 
 function logSwipe(type, event) {
   if (!state.swipeDebug) return;
@@ -1827,7 +1849,8 @@ function logSwipe(type, event) {
   else if (scroller && Math.abs((scroller.scrollLeft || 0) - origin.scroll) > 6) handled = "scroll-snap";
   else if (type === "cancel") handled = "cancelled";
   else if (type === "end") handled = "ignored";
-  const entry = { type, target: describeTarget(event.target), dx, dy, handled };
+  const strip = scroller ? `${Math.round(scroller.scrollWidth)}/${Math.round(scroller.clientWidth)} left ${Math.round(scroller.scrollLeft)}` : "no strip";
+  const entry = { type, target: describeTarget(event.target), dx, dy, handled, strip };
   if (type === "move" && state.swipeLog[0]?.type === "move") state.swipeLog[0] = entry;
   else state.swipeLog = [entry, ...state.swipeLog].slice(0, 6);
   if (type === "end" || type === "cancel") swipeTouch.delete(id);
@@ -1843,7 +1866,7 @@ function describeTarget(node) {
 }
 
 function swipeDebugHtml() {
-  const rows = state.swipeLog.map((row) => `<li><span>${esc(row.type)}</span> ${esc(row.target)} <span>dx ${row.dx} dy ${row.dy}</span> <strong>${esc(row.handled)}</strong></li>`).join("");
+  const rows = state.swipeLog.map((row) => `<li><span>${esc(row.type)}</span> ${esc(row.target)} <span>dx ${row.dx} dy ${row.dy}</span> <span>${esc(row.strip || "")}</span> <strong>${esc(row.handled)}</strong></li>`).join("");
   return `<aside id="swipe-debug" class="swipe-debug" aria-live="polite"><p>Swipe debug</p><ol>${rows}</ol></aside>`;
 }
 
@@ -1851,7 +1874,7 @@ function paintSwipeDebug() {
   const box = document.getElementById("swipe-debug");
   if (!box) return;
   const list = box.querySelector("ol");
-  if (list) list.innerHTML = state.swipeLog.map((row) => `<li><span>${esc(row.type)}</span> ${esc(row.target)} <span>dx ${row.dx} dy ${row.dy}</span> <strong>${esc(row.handled)}</strong></li>`).join("");
+  if (list) list.innerHTML = state.swipeLog.map((row) => `<li><span>${esc(row.type)}</span> ${esc(row.target)} <span>dx ${row.dx} dy ${row.dy}</span> <span>${esc(row.strip || "")}</span> <strong>${esc(row.handled)}</strong></li>`).join("");
 }
 
 function aboutHtml() {
@@ -1865,7 +1888,7 @@ function aboutHtml() {
 }
 
 function periodScrollBusy() {
-  if (snapSeating) return true;
+  if (snapSeating || snapFinger) return true;
   const scroller = document.querySelector(".period-snap");
   if (!scroller) return false;
   const width = scroller.clientWidth || 1;
@@ -1878,6 +1901,7 @@ function seatPeriodSnap() {
   snapSeating = true;
   snapTouched = false;
   const place = () => {
+    if (snapFinger) return true;
     const node = document.querySelector(".period-snap");
     if (!node?.clientWidth) return false;
     const width = node.clientWidth;
@@ -1889,7 +1913,9 @@ function seatPeriodSnap() {
     boundSnaps.add(scroller);
     scroller.addEventListener("scroll", onPeriodSnapScroll, { passive: true });
     scroller.addEventListener("scrollend", onPeriodSnapEnd);
-    scroller.addEventListener("pointerdown", () => { snapTouched = true; });
+    scroller.addEventListener("pointerdown", () => { snapTouched = true; holdSnapFinger(); });
+    scroller.addEventListener("pointerup", releaseSnapFinger);
+    scroller.addEventListener("pointercancel", releaseSnapFinger);
     scroller.addEventListener("wheel", () => { snapTouched = true; }, { passive: true });
   }
   let tries = 0;
@@ -4023,10 +4049,6 @@ function markImg(size) {
 
 function plateIcon() {
   return markImg(76);
-}
-
-function utensilsIcon() {
-  return `<svg viewBox="0 0 80 80" width="76" height="76" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M24 12v14M18 12v11M30 12v11"/><path d="M18 23c0 6 12 6 12 0"/><path d="M24 29v36"/><path d="M52 12c8 9 8 16 0 24v32"/><path d="M52 36H43"/></svg>`;
 }
 
 function bowlIcon() {
