@@ -39,7 +39,11 @@ const state = {
   todayServings: null,
   todayServingsOpen: false,
   todayId: null,
+  swipeDebug: false,
+  swipeLog: [],
 };
+
+const APP_VERSION = "86";
 
 const SECTIONS = [
   ["produce", "Produce"],
@@ -77,10 +81,10 @@ app.addEventListener("pointerdown", onPointerDown);
 app.addEventListener("pointermove", onPointerMove);
 app.addEventListener("pointerup", onPointerUp);
 app.addEventListener("pointercancel", onPointerCancel);
-document.addEventListener("touchstart", onTouchStart, { capture: true, passive: true });
-document.addEventListener("touchmove", onTouchMove, { capture: true, passive: false });
-document.addEventListener("touchend", onTouchEnd, { capture: true });
-document.addEventListener("touchcancel", onTouchCancel, { capture: true });
+document.addEventListener("touchstart", onSwipeDebugStart, { capture: true, passive: true });
+document.addEventListener("touchmove", onSwipeDebugMove, { capture: true, passive: true });
+document.addEventListener("touchend", onSwipeDebugEnd, { capture: true, passive: true });
+document.addEventListener("touchcancel", onSwipeDebugCancel, { capture: true, passive: true });
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible" && state.page?.kind === "cook") lockScreen();
 });
@@ -124,10 +128,13 @@ let swallowClick = false;
 let edgeClick = false;
 let backSettle = 0;
 let edgeAnimating = 0;
-let periodSettle = 0;
-let periodAnimating = 0;
-let periodEnter = 0;
 let periodDirty = false;
+let snapSeating = false;
+let snapTouched = false;
+let snapTimer = 0;
+let edgeTouchArmed = false;
+const boundSnaps = new WeakSet();
+const swipeTouch = new Map();
 let viewKeySeen = "";
 
 function swallowNextClick() {
@@ -137,10 +144,29 @@ function swallowNextClick() {
   }, 0);
 }
 
+initSwipeDebug();
 boot();
 setInterval(() => refresh(false), 5000);
 
 const SPLASH_MS = 1500;
+
+function initSwipeDebug() {
+  let stored = false;
+  try {
+    stored = sessionStorage.getItem("family-table-swipe-debug") === "1";
+  } catch {
+    stored = false;
+  }
+  const query = new URLSearchParams(location.search).get("debug") === "swipe";
+  state.swipeDebug = query || stored;
+  if (query) {
+    try {
+      sessionStorage.setItem("family-table-swipe-debug", "1");
+    } catch {
+      /* Private mode can refuse storage. The query still turns the readout on. */
+    }
+  }
+}
 
 async function boot() {
   const started = performance.now();
@@ -204,8 +230,8 @@ async function refresh(force) {
     state.plan = applyPlanPending(mergeDated(state.plan, plan.plan || [], range));
     state.events = mergeDated(state.events, events.events || [], range);
     state.error = "";
-    if ((force || !isTyping()) && !gesture?.dragging && gesture?.kind !== "back" && !edgeAnimating && !periodAnimating) render();
-    else if (periodAnimating) periodDirty = true;
+    if ((force || !isTyping()) && !gesture?.dragging && gesture?.kind !== "back" && !edgeAnimating && !periodScrollBusy()) render();
+    else if (periodScrollBusy()) periodDirty = true;
   } catch (error) {
     if (serial !== refreshSerial) return;
     if (error.status === 401) {
@@ -285,7 +311,8 @@ function render(force = false) {
     }
     avoidFab();
     markSwipeBack();
-    playPeriodEnter();
+    seatPeriodSnap();
+    paintSwipeDebug();
   };
   if (state.loading) {
     finish();
@@ -316,16 +343,14 @@ function render(force = false) {
 function appHtml() {
   if (state.page?.kind === "cook") return cookHtml() + sheetHtml();
   const bare = ["recipe", "feedback", "item", "add-item"].includes(state.page?.kind);
-  const dinnerTonight = state.tab === "today" && !state.page ? mealOn(nyToday(), "dinner") : null;
-  const dayDinner = state.page?.kind === "day" ? mealOn(state.page.date, "dinner") : null;
+  const todayOn = state.tab === "today" && !state.page;
+  const dinnerTonight = todayOn ? mealOn(nyToday(), "dinner") : null;
   const todayCook = dinnerTonight?.type === "recipe" && Boolean(recipeForEntry(dinnerTonight));
-  const leftoversNightOn =
-    (dinnerTonight?.type === "leftovers" && !(dinnerTonight.also || []).length) ||
-    (dayDinner?.type === "leftovers" && !(dayDinner.also || []).length);
   const monthOn = state.tab === "calendar" && state.calMode === "month" && !state.page;
+  const weekOn = state.tab === "calendar" && state.calMode !== "month" && !state.page;
   const groceryOn = state.tab === "groceries" && !state.page;
-  const mainClass = bare ? "bare" : todayCook ? "screen today-screen" : leftoversNightOn ? "screen today-screen no-dock night-screen" : monthOn ? "screen month-screen" : groceryOn ? "screen grocery-screen" : "screen";
-  return `<main class="${mainClass}">${bodyHtml()}</main>${bare ? "" : tabsHtml()}${sheetHtml()}${toastHtml()}`;
+  const mainClass = bare ? "bare" : todayOn ? `screen today-screen${todayCook ? "" : " no-dock"}` : monthOn ? "screen month-screen" : weekOn ? "screen week-screen" : groceryOn ? "screen grocery-screen" : "screen";
+  return `<main class="${mainClass}">${bodyHtml()}</main>${bare ? "" : tabsHtml()}${sheetHtml()}${toastHtml()}${state.swipeDebug ? swipeDebugHtml() : ""}`;
 }
 
 function loginHtml() {
@@ -349,6 +374,7 @@ function bodyHtml() {
   if (state.page?.kind === "item") return itemHtml(state.page.id);
   if (state.page?.kind === "add-item") return addHtml();
   if (state.page?.kind === "new-recipe") return newRecipeHtml();
+  if (state.page?.kind === "about") return aboutHtml();
   if (state.tab === "calendar") return calendarHtml();
   if (state.tab === "recipes") return recipesHtml();
   if (state.tab === "groceries") return groceriesHtml();
@@ -371,10 +397,9 @@ function todayHtml() {
   const recipe = recipeForEntry(dinner);
   const events = eventsOn(today);
   if (dinner?.type === "leftovers" && !(dinner.also || []).length) {
-    const night = leftoversNight(dinner, recipe, { edit: Boolean(recipe) });
-    return `${todayHead()}${night}`;
+    return `${todayHead()}${nightCard(dinner, recipe, { edit: Boolean(recipe) })}${eventsHtml(events)}`;
   }
-  if (dinner?.type === "note") return `${todayHead()}${noteNight(dinner)}${eventsHtml(events)}`;
+  if (dinner?.type === "note") return `${todayHead()}${nightCard(dinner, null)}${eventsHtml(events)}`;
   if (recipe && dinner) {
     if (state.todayId !== recipe.id) {
       state.todayId = recipe.id;
@@ -393,25 +418,32 @@ function todayHead() {
 }
 
 function leftoversNight(entry, recipe, options = {}) {
-  const photo = foodPhoto(recipe, entry);
+  return nightCard(entry, recipe, options);
+}
+
+function nightCard(entry, recipe, options = {}) {
+  const out = entry?.type === "note";
+  const title = out ? entry.note || "Dinner out" : dishName(entry, recipe);
+  const line = out ? "No cooking tonight." : "Night off. Enjoy the leftovers.";
+  const kind = out ? "out" : "left";
   const back = options.back ? `<button class="float left" type="button" data-action="back" aria-label="Back">${chevLeft()}</button>` : "";
-  const edit = options.edit && recipe
+  const edit = !out && options.edit && recipe
     ? `<button class="float right edit-float" type="button" data-action="edit-recipe" data-id="${esc(recipe.id)}">Edit</button>`
     : "";
-  return `<article class="leftover-night">
-      <div class="hero night-hero">
-        <img class="fallback-photo" src="${esc(photo || "/photos/leftovers-hero.jpg")}" alt="">
+  return `<article class="night-card night-${kind}">
+      <div class="hero hero-tint hero-${kind}">
         ${back}
         ${edit}
+        <span class="hero-icon" aria-hidden="true">${out ? utensilsIcon() : bowlIcon()}</span>
       </div>
       <div class="pad">
-        ${options.back ? `<p class="kicker meal-kicker">${esc(mealLabel(entry.meal))}</p>` : ""}
-        <span class="lo-pill">Leftovers</span>
-        <h1>${esc(dishName(entry, recipe))}</h1>
-        <p class="night-line">Night off. Enjoy the leftovers.</p>
+        ${out ? "" : `<span class="lo-pill">Leftovers</span>`}
+        <div class="title-row"><h1>${esc(title)}</h1>
+          <button class="change-link" type="button" data-action="add-meal" data-date="${esc(entry.date)}" data-meal="${esc(entry.meal || "dinner")}">Change</button>
+        </div>
+        <p class="meta">${esc(line)}</p>
+        ${tomorrowCard(entry.date)}
       </div>
-      <div class="night-gap"></div>
-      ${tomorrowCard(entry.date)}
     </article>`;
 }
 
@@ -465,12 +497,7 @@ function dishName(entry, recipe) {
 }
 
 function noteNight(entry) {
-  return `<article class="note-night">
-      <p class="kicker">${esc(mealLabel(entry.meal))}</p>
-      <h1>${esc(entry.note || "Dinner out")}</h1>
-      <p class="night-line">No cooking tonight.</p>
-      ${tomorrowCard(entry.date)}
-    </article>`;
+  return nightCard(entry, null);
 }
 
 function emptyTonight() {
@@ -533,35 +560,55 @@ function calendarHtml() {
 }
 
 function weekListHtml() {
-  const today = nyToday();
   const start = weekStart();
+  const panes = [weekPane(addDays(start, -7), "prev"), weekPane(start, "current")];
+  if (start < nyToday()) panes.push(weekPane(addDays(start, 7), "next"));
+  return `<div class="period-snap" data-period="week">${panes.join("")}</div>`;
+}
+
+function weekPane(start, role) {
   const end = addDays(start, 6);
   const title = `${shortMonth(start)} ${Number(start.slice(8))} – ${shortMonth(end)} ${Number(end.slice(8))}`;
   const days = Array.from({ length: 7 }, (_, index) => addDays(start, index));
-  const next = start < today;
-  return `<div class="week-period">
-    <div class="week-head">
-      <button type="button" data-action="week-shift" data-delta="-1" aria-label="Previous week">${chevLeft()}</button>
-      <h1>${esc(title)}</h1>
-      <button type="button" data-action="week-shift" data-delta="1" aria-label="Next week"${next ? "" : " disabled"}>${chevRight()}</button>
-      <button class="icon-btn" type="button" data-action="cal-mode" aria-label="Open month">${cal()}</button>
+  const next = start < nyToday();
+  const hidden = role === "current" ? "" : " aria-hidden=\"true\"";
+  return `<section class="period-pane" data-role="${role}"${hidden}>
+    <div class="week-period">
+      <div class="week-head">
+        <button type="button" data-action="week-shift" data-delta="-1" aria-label="Previous week">${chevLeft()}</button>
+        <h1>${esc(title)}</h1>
+        <button type="button" data-action="week-shift" data-delta="1" aria-label="Next week"${next ? "" : " disabled"}>${chevRight()}</button>
+        <button class="icon-btn" type="button" data-action="cal-mode" aria-label="Open month">${cal()}</button>
+      </div>
+      <div class="week-list">${days.map(weekDay).join("")}</div>
     </div>
-    <div class="week-list">${days.map(weekDay).join("")}</div>
-  </div>`;
+  </section>`;
 }
 
 function monthHtml() {
   const anchor = state.calStart || `${nyToday().slice(0, 7)}-01`;
-  return `<div class="month-period">
+  return `<div class="period-snap" data-period="month">${monthPane(shiftMonth(anchor, -1), "prev")}${monthPane(anchor, "current")}${monthPane(shiftMonth(anchor, 1), "next")}</div>`;
+}
+
+function monthPane(anchor, role) {
+  const hidden = role === "current" ? "" : " aria-hidden=\"true\"";
+  return `<section class="period-pane" data-role="${role}"${hidden}>
+    <div class="month-period">
       <div class="month-bar">
         <button type="button" data-action="cal-shift" data-delta="-1" aria-label="Previous month">${chevLeft()}</button>
         <h1>${esc(monthTitle(anchor))}</h1>
         <button type="button" data-action="cal-shift" data-delta="1" aria-label="Next month">${chevRight()}</button>
-        <button class="icon-btn is-on" type="button" data-action="cal-mode" aria-label="Back to this week">${cal()}</button>
+        <button class="icon-btn${role === "current" ? " is-on" : ""}" type="button" data-action="cal-mode" aria-label="Back to this week">${cal()}</button>
       </div>
       <div class="cal-board">${monthGrid(anchor, monthSelection(anchor))}</div>
-      ${monthPanel(monthSelection(anchor))}
-    </div>`;
+      ${monthPanel(monthSelection(anchor), role === "current")}
+    </div>
+  </section>`;
+}
+
+function shiftMonth(iso, delta) {
+  const [year, month] = String(iso || nyToday()).split("-").map(Number);
+  return new Date(Date.UTC(year, month - 1 + delta, 1)).toISOString().slice(0, 10);
 }
 
 function monthSelection(anchor) {
@@ -575,11 +622,11 @@ function monthSelection(anchor) {
   return new Date(Date.UTC(year, mon, 0)).toISOString().slice(0, 10);
 }
 
-function monthPanel(date) {
+function monthPanel(date, current = true) {
   const events = eventsOn(date);
   const today = date === nyToday();
   const label = today ? `Today · ${shortDate(date)}` : shortDate(date);
-  return `<section class="month-panel" id="month-panel">
+  return `<section class="month-panel"${current ? " id=\"month-panel\"" : ""}>
       <div class="month-panel-head${today ? " is-today" : ""}"><p class="week-date">${esc(label)}</p></div>
       ${dayBody(date, false)}
       ${events.map((event) => `<p class="event-line">${event.time ? `<time>${esc(event.time)}</time>` : ""}${esc(event.title)}</p>`).join("")}
@@ -997,6 +1044,7 @@ function groceriesHtml() {
     ${body}
     ${body ? "" : `<p class="empty">The list is clear.</p>`}
     ${state.doneOpen && done.length ? `<h2 class="section-head">Completed</h2>${done.map((item) => groceryRow(item)).join("")}` : ""}
+    <button class="about-link" type="button" data-action="open-about">About</button>
     <button class="fab" type="button" data-action="add-item" aria-label="Add">+</button>`;
 }
 
@@ -1443,6 +1491,7 @@ function beginEdgeBack(event) {
     under: null,
     dim: null,
   };
+  armEdgeTouch();
   return true;
 }
 
@@ -1729,76 +1778,168 @@ function runBackControl(control) {
   edgeClick = false;
 }
 
-function onTouchStart(event) {
-  if (gesture?.kind === "back") return;
-  if (event.touches.length !== 1) return;
-  const touch = event.touches[0];
-  if (touch.clientX <= EDGE_PX) return;
-  const target = event.target;
-  if (target?.closest?.(".sheet, input, textarea, select, [contenteditable='true']")) return;
-  beginPeriod(target, touch.clientX, touch.clientY, event.timeStamp, { touchId: touch.identifier });
+function armEdgeTouch() {
+  if (edgeTouchArmed) return;
+  edgeTouchArmed = true;
+  document.addEventListener("touchmove", onEdgeTouchMove, { capture: true, passive: false });
 }
 
-function onTouchMove(event) {
-  const kind = gesture?.kind;
-  if (kind === "back") {
-    const touch = event.touches[0];
-    if (!touch) return;
-    const dx = touch.clientX - gesture.x;
-    const dy = touch.clientY - gesture.y;
-    if (!gesture.dragging && !(dx > 8 && dx > Math.abs(dy))) return;
-    if (event.cancelable) event.preventDefault();
-    return;
-  }
-  if (kind !== "period" || !gesture.fromTouch) return;
-  const touch = [...event.touches].find((item) => item.identifier === gesture.touchId);
+function disarmEdgeTouch() {
+  if (!edgeTouchArmed) return;
+  edgeTouchArmed = false;
+  document.removeEventListener("touchmove", onEdgeTouchMove, { capture: true });
+}
+
+function onEdgeTouchMove(event) {
+  if (gesture?.kind !== "back") return;
+  const touch = event.touches[0];
   if (!touch) return;
   const dx = touch.clientX - gesture.x;
   const dy = touch.clientY - gesture.y;
-  const horizontal = !gesture.scroll && Math.abs(dx) > Math.abs(dy) && Math.abs(dx) >= 2;
-  movePeriod({ clientX: touch.clientX, clientY: touch.clientY, timeStamp: event.timeStamp, pointerId: gesture.touchId });
-  if (event.cancelable && ((gesture?.dragging && !gesture.scroll) || horizontal)) event.preventDefault();
+  if (!gesture.dragging && !(dx > 8 && dx > Math.abs(dy))) return;
+  if (event.cancelable) event.preventDefault();
 }
 
-function onTouchEnd(event) {
-  if (!gesture || gesture.kind !== "period" || !gesture.fromTouch) return;
-  const touch = [...event.changedTouches].find((item) => item.identifier === gesture.touchId);
+function onSwipeDebugStart(event) {
+  if (event.target?.closest?.(".period-snap")) snapTouched = true;
+  logSwipe("start", event);
+}
+function onSwipeDebugMove(event) { logSwipe("move", event); }
+function onSwipeDebugEnd(event) { logSwipe("end", event); }
+function onSwipeDebugCancel(event) { logSwipe("cancel", event); }
+
+function logSwipe(type, event) {
+  if (!state.swipeDebug) return;
+  const touch = event.changedTouches?.[0] || event.touches?.[0];
   if (!touch) return;
-  endPeriod({ clientX: touch.clientX, clientY: touch.clientY, timeStamp: event.timeStamp });
+  const id = touch.identifier;
+  if (type === "start") {
+    const scroller = event.target?.closest?.(".period-snap");
+    swipeTouch.set(id, { x: touch.clientX, y: touch.clientY, scroll: scroller?.scrollLeft || 0 });
+  }
+  const origin = swipeTouch.get(id) || { x: touch.clientX, y: touch.clientY, scroll: 0 };
+  const dx = Math.round(touch.clientX - origin.x);
+  const dy = Math.round(touch.clientY - origin.y);
+  const scroller = event.target?.closest?.(".period-snap");
+  let handled = "watching";
+  if (gesture?.kind === "back" && gesture.dragging) handled = "edge-back";
+  else if (gesture?.id && gesture.dragging) handled = "grocery";
+  else if (scroller && Math.abs((scroller.scrollLeft || 0) - origin.scroll) > 6) handled = "scroll-snap";
+  else if (type === "cancel") handled = "cancelled";
+  else if (type === "end") handled = "ignored";
+  const entry = { type, target: describeTarget(event.target), dx, dy, handled };
+  if (type === "move" && state.swipeLog[0]?.type === "move") state.swipeLog[0] = entry;
+  else state.swipeLog = [entry, ...state.swipeLog].slice(0, 6);
+  if (type === "end" || type === "cancel") swipeTouch.delete(id);
+  paintSwipeDebug();
 }
 
-function onTouchCancel(event) {
-  if (!gesture || gesture.kind !== "period" || !gesture.fromTouch) return;
-  const touch = [...event.changedTouches].find((item) => item.identifier === gesture.touchId);
-  if (touch && gesture.dragging && !gesture.scroll) {
-    endPeriod({ clientX: touch.clientX, clientY: touch.clientY, timeStamp: event.timeStamp });
+function describeTarget(node) {
+  const el = node?.nodeType === 1 ? node : node?.parentElement;
+  if (!el) return "document";
+  const id = el.id ? `#${el.id}` : "";
+  const cls = typeof el.className === "string" ? el.className.trim().split(/\s+/).filter(Boolean).slice(0, 2).join(".") : "";
+  return `${el.tagName.toLowerCase()}${id}${cls ? `.${cls}` : ""}`;
+}
+
+function swipeDebugHtml() {
+  const rows = state.swipeLog.map((row) => `<li><span>${esc(row.type)}</span> ${esc(row.target)} <span>dx ${row.dx} dy ${row.dy}</span> <strong>${esc(row.handled)}</strong></li>`).join("");
+  return `<aside id="swipe-debug" class="swipe-debug" aria-live="polite"><p>Swipe debug</p><ol>${rows}</ol></aside>`;
+}
+
+function paintSwipeDebug() {
+  const box = document.getElementById("swipe-debug");
+  if (!box) return;
+  const list = box.querySelector("ol");
+  if (list) list.innerHTML = state.swipeLog.map((row) => `<li><span>${esc(row.type)}</span> ${esc(row.target)} <span>dx ${row.dx} dy ${row.dy}</span> <strong>${esc(row.handled)}</strong></li>`).join("");
+}
+
+function aboutHtml() {
+  return `<div class="topbar"><button class="back" type="button" data-action="back" aria-label="Back">${chevLeft()}</button><h1>About</h1><span></span></div>
+    <div class="pad about-pad">
+      <p class="about-name">Family Table</p>
+      <p class="muted">Dinners, the week, and the grocery list.</p>
+      <button class="about-toggle" type="button" data-action="toggle-swipe-debug" aria-pressed="${state.swipeDebug ? "true" : "false"}">Swipe debug<span>${state.swipeDebug ? "On" : "Off"}</span></button>
+      <p class="about-version">Version ${APP_VERSION}</p>
+    </div>`;
+}
+
+function periodScrollBusy() {
+  if (snapSeating) return true;
+  const scroller = document.querySelector(".period-snap");
+  if (!scroller) return false;
+  const width = scroller.clientWidth || 1;
+  return Math.abs(scroller.scrollLeft - width) > 4;
+}
+
+function seatPeriodSnap() {
+  const scroller = document.querySelector(".period-snap");
+  if (!scroller) return;
+  snapSeating = true;
+  snapTouched = false;
+  const place = () => {
+    const node = document.querySelector(".period-snap");
+    if (!node?.clientWidth) return false;
+    const width = node.clientWidth;
+    if (Math.abs(node.scrollLeft - width) > 1) node.scrollLeft = width;
+    return Math.abs(node.scrollLeft - width) <= 1;
+  };
+  place();
+  if (!boundSnaps.has(scroller)) {
+    boundSnaps.add(scroller);
+    scroller.addEventListener("scroll", onPeriodSnapScroll, { passive: true });
+    scroller.addEventListener("scrollend", onPeriodSnapEnd);
+    scroller.addEventListener("pointerdown", () => { snapTouched = true; });
+    scroller.addEventListener("wheel", () => { snapTouched = true; }, { passive: true });
+  }
+  let tries = 0;
+  const retry = () => {
+    tries += 1;
+    const ok = place();
+    if (!ok && tries < 8) {
+      requestAnimationFrame(retry);
+      return;
+    }
+    snapSeating = false;
+  };
+  requestAnimationFrame(retry);
+}
+
+function onPeriodSnapScroll(event) {
+  if (snapSeating) return;
+  const scroller = event.currentTarget;
+  clearTimeout(snapTimer);
+  snapTimer = setTimeout(() => commitPeriodSnap(scroller), 120);
+}
+
+function onPeriodSnapEnd(event) {
+  if (snapSeating) return;
+  clearTimeout(snapTimer);
+  commitPeriodSnap(event.currentTarget);
+}
+
+function commitPeriodSnap(scroller) {
+  if (!scroller?.isConnected || snapSeating) return;
+  const width = scroller.clientWidth || 1;
+  const index = Math.round(scroller.scrollLeft / width);
+  const max = Math.max(0, scroller.children.length - 1);
+  if (index === 1) {
+    snapTouched = false;
+    if (periodDirty) {
+      periodDirty = false;
+      render();
+    }
     return;
   }
-  cancelPeriod();
-}
-
-function beginPeriod(target, x, y, time, ids) {
-  if (state.page || state.tab !== "calendar") return false;
-  const mode = state.calMode === "month" ? "month" : "week";
-  const layer = target?.closest?.(mode === "month" ? ".month-period" : ".week-period");
-  if (!layer) return false;
-  clearGesture();
-  gesture = {
-    kind: "period",
-    mode,
-    fromTouch: ids.touchId != null,
-    touchId: ids.touchId ?? null,
-    pointerId: ids.pointerId ?? null,
-    x,
-    y,
-    lastX: x,
-    lastT: time,
-    velocity: 0,
-    dx: 0,
-    dragging: false,
-    layer,
-  };
-  return true;
+  if (!snapTouched || index < 0 || index > max) return;
+  if (Math.abs(scroller.scrollLeft - index * width) > 18) return;
+  const delta = index < 1 ? -1 : 1;
+  const mode = scroller.dataset.period === "month" ? "month" : "week";
+  if (mode === "week" && delta > 0 && weekStart() >= nyToday()) return;
+  snapTouched = false;
+  snapSeating = true;
+  if (mode === "week") shiftWeek(delta);
+  else shiftCalendar(delta);
 }
 
 function onPointerDown(event) {
@@ -1807,7 +1948,6 @@ function onPointerDown(event) {
   if (event.button !== 0 || event.isPrimary === false) return;
   if (event.target.closest?.(".sheet, input, textarea, select, [contenteditable='true']")) return;
   if (event.clientX <= EDGE_PX) return;
-  if (beginPeriod(event.target, event.clientX, event.clientY, event.timeStamp, { pointerId: event.pointerId })) return;
   const row = event.target.closest(".g-row");
   if (!row || event.target.closest(".g-check") || event.target.closest(".g-delete")) return;
   clearGesture();
@@ -1818,11 +1958,6 @@ function onPointerMove(event) {
   if (!gesture || gesture.pointerId !== event.pointerId) return;
   if (gesture.kind === "back") {
     moveEdgeBack(event);
-    return;
-  }
-  if (gesture.kind === "period") {
-    if (gesture.fromTouch) return;
-    movePeriod(event);
     return;
   }
   const dx = event.clientX - gesture.x;
@@ -1873,11 +2008,6 @@ function onPointerUp(event) {
     endEdgeBack(event);
     return;
   }
-  if (gesture.kind === "period") {
-    if (gesture.fromTouch || gesture.pointerId !== event.pointerId) return;
-    endPeriod(event);
-    return;
-  }
   const dx = event.clientX - gesture.x;
   const dy = event.clientY - gesture.y;
   const id = gesture.id;
@@ -1917,11 +2047,6 @@ function onPointerCancel(event) {
     cancelEdgeBack();
     return;
   }
-  if (gesture.kind === "period") {
-    if (gesture.fromTouch || (event && gesture.pointerId !== event.pointerId)) return;
-    cancelPeriod();
-    return;
-  }
   if (gesture.dragging) {
     const id = gesture.id;
     const offset = gesture.offset ?? 0;
@@ -1933,176 +2058,10 @@ function onPointerCancel(event) {
   clearGesture();
 }
 
-function movePeriod(event) {
-  if (!gesture?.layer?.isConnected) {
-    clearGesture();
-    return;
-  }
-  const dx = event.clientX - gesture.x;
-  const dy = event.clientY - gesture.y;
-  const dt = event.timeStamp - gesture.lastT;
-  if (dt > 0 && dt < 80) gesture.velocity = (event.clientX - gesture.lastX) / dt;
-  else if (dt >= 80) gesture.velocity = 0;
-  gesture.lastX = event.clientX;
-  gesture.lastT = event.timeStamp;
-  if (gesture.scroll) return;
-  if (!gesture.dragging) {
-    if (Math.abs(dx) < PERIOD_LOCK_PX && Math.abs(dy) < PERIOD_LOCK_PX) return;
-    if (Math.abs(dy) > Math.abs(dx)) {
-      gesture.scroll = true;
-      return;
-    }
-    gesture.dragging = true;
-    if (!gesture.fromTouch) {
-      try {
-        gesture.layer.setPointerCapture?.(event.pointerId);
-      } catch {
-        // Pointer capture can throw if the pointer already ended.
-      }
-    }
-  }
-  if (gesture.scroll) return;
-  const width = periodWidth(gesture.layer);
-  const next = periodOffset(gesture.mode, dx, width);
-  gesture.dx = next;
-  if (reduceMotion()) return;
-  paintPeriod(gesture.layer, next, false);
-}
-
-function endPeriod(event) {
-  const current = gesture;
-  if (!current || current.kind !== "period") return;
-  if (event && event.timeStamp - current.lastT > 80) current.velocity = 0;
-  const dx = event ? event.clientX - current.x : current.dx || 0;
-  const dragging = current.dragging && !current.scroll;
-  const layer = current.layer;
-  clearGesture();
-  if (!dragging) return;
-  swallowNextClick();
-  const delta = dx < 0 ? 1 : -1;
-  if (current.mode === "week" && delta > 0 && weekStart() >= nyToday()) {
-    snapPeriod(layer, 0);
-    return;
-  }
-  const width = periodWidth(layer);
-  const distance = Math.abs(dx);
-  const flicked = dx !== 0 && Math.sign(current.velocity) === Math.sign(dx) && Math.abs(current.velocity) >= PERIOD_FLICK_V && distance >= PERIOD_FLICK_PX;
-  const commit = distance >= width * PERIOD_COMMIT || flicked;
-  if (!commit) {
-    snapPeriod(layer, 0);
-    return;
-  }
-  if (reduceMotion() || !layer?.isConnected) {
-    if (layer?.isConnected) {
-      layer.style.transition = "";
-      layer.style.transform = "";
-    }
-    if (current.mode === "week") shiftWeek(delta);
-    else shiftCalendar(delta);
-    return;
-  }
-  paintPeriod(layer, delta > 0 ? -width : width, true);
-  periodAnimating += 1;
-  settlePeriod(layer, () => {
-    periodAnimating = Math.max(0, periodAnimating - 1);
-    periodEnter = { delta, mode: current.mode };
-    if (current.mode === "week") shiftWeek(delta);
-    else shiftCalendar(delta);
-  });
-}
-
-function periodOffset(mode, dx, width) {
-  const raw = Math.max(-width, Math.min(width, dx));
-  if (mode === "week" && raw < 0 && weekStart() >= nyToday()) return Math.max(-48, raw * 0.28);
-  return raw;
-}
-
-function cancelPeriod() {
-  const current = gesture;
-  const layer = current?.layer;
-  const dragging = current?.dragging && !current?.scroll;
-  clearGesture();
-  if (dragging) snapPeriod(layer, 0);
-}
-
-function periodWidth(layer) {
-  return Math.max(1, layer?.getBoundingClientRect().width || window.innerWidth);
-}
-
-function paintPeriod(layer, dx, animate) {
-  if (!layer?.isConnected) return;
-  layer.style.transition = animate ? `transform ${PERIOD_SNAP_MS}ms ease-out` : "none";
-  layer.style.transform = `translate3d(${Math.round(dx)}px,0,0)`;
-}
-
-function snapPeriod(layer, dx) {
-  if (!layer?.isConnected) return;
-  if (reduceMotion()) {
-    layer.style.transition = "";
-    layer.style.transform = "";
-    return;
-  }
-  paintPeriod(layer, dx, true);
-  periodAnimating += 1;
-  settlePeriod(layer, () => {
-    periodAnimating = Math.max(0, periodAnimating - 1);
-    if (!layer.isConnected || dx !== 0) return;
-    layer.style.transition = "";
-    layer.style.transform = "";
-  });
-}
-
-function settlePeriod(layer, run) {
-  const token = ++periodSettle;
-  let finished = false;
-  const finish = () => {
-    if (finished) return;
-    finished = true;
-    layer?.removeEventListener("transitionend", onEnd);
-    if (token !== periodSettle) return;
-    run?.();
-  };
-  const onEnd = (event) => {
-    if (event.target !== layer || event.propertyName !== "transform") return;
-    finish();
-  };
-  layer?.addEventListener("transitionend", onEnd);
-  setTimeout(finish, PERIOD_SNAP_MS + 40);
-}
-
-function playPeriodEnter() {
-  if (!periodEnter) return;
-  const delta = periodEnter.delta;
-  const mode = periodEnter.mode;
-  periodEnter = 0;
-  const layer = document.querySelector(mode === "week" ? ".week-period" : ".month-period");
-  if (!layer || reduceMotion()) return;
-  const width = periodWidth(layer);
-  layer.style.transition = "none";
-  layer.style.transform = `translate3d(${delta > 0 ? width : -width}px,0,0)`;
-  periodAnimating += 1;
-  requestAnimationFrame(() => {
-    if (!layer.isConnected) {
-      periodAnimating = Math.max(0, periodAnimating - 1);
-      return;
-    }
-    paintPeriod(layer, 0, true);
-    settlePeriod(layer, () => {
-      periodAnimating = Math.max(0, periodAnimating - 1);
-      if (layer.isConnected) {
-        layer.style.transition = "";
-        layer.style.transform = "";
-      }
-      if (!periodDirty) return;
-      periodDirty = false;
-      render();
-    });
-  });
-}
-
 function clearGesture() {
   if (gesture?.timer) clearTimeout(gesture.timer);
   gesture = null;
+  disarmEdgeTouch();
 }
 
 function dismissSheet() {
@@ -2141,6 +2100,8 @@ async function onClick(event) {
   }
   const button = event.target.closest("[data-action]");
   if (!button) return;
+  const pane = button.closest(".period-pane");
+  if (pane && pane.dataset.role && pane.dataset.role !== "current") return;
   const action = button.dataset.action;
   if (action === "toggle-passcode") {
     const input = document.getElementById("passcode");
@@ -2373,6 +2334,22 @@ async function onClick(event) {
   }
   if (action === "send-feedback") return sendFeedback(button.dataset.id);
   if (action === "toggle-item") return toggleItem(button.dataset.id);
+  if (action === "open-about") {
+    state.page = { kind: "about" };
+    state.sheet = null;
+    render();
+    return;
+  }
+  if (action === "toggle-swipe-debug") {
+    state.swipeDebug = !state.swipeDebug;
+    try {
+      sessionStorage.setItem("family-table-swipe-debug", state.swipeDebug ? "1" : "0");
+    } catch {
+      /* The toggle still applies for this visit. */
+    }
+    render();
+    return;
+  }
   if (action === "grocery-menu") {
     state.sheet = { kind: "grocery-menu" };
     render();
@@ -4046,6 +4023,14 @@ function markImg(size) {
 
 function plateIcon() {
   return markImg(76);
+}
+
+function utensilsIcon() {
+  return `<svg viewBox="0 0 80 80" width="76" height="76" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M24 12v14M18 12v11M30 12v11"/><path d="M18 23c0 6 12 6 12 0"/><path d="M24 29v36"/><path d="M52 12c8 9 8 16 0 24v32"/><path d="M52 36H43"/></svg>`;
+}
+
+function bowlIcon() {
+  return `<svg viewBox="0 0 80 80" width="76" height="76" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 34h48"/><path d="M20 34c2 18 10 26 20 26s18-8 20-26"/><path d="M30 22c3-7 17-7 20 0"/></svg>`;
 }
 
 function heart(on) {

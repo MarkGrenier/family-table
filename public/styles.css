@@ -27,7 +27,6 @@ html, body {
   min-height: 100%;
   background: var(--bg);
   color: var(--text);
-  touch-action: pan-y;
   overscroll-behavior-x: none;
 }
 
@@ -93,6 +92,39 @@ a { color: var(--green-dark); }
 .today-screen .hero {
   border-radius: 12px;
   overflow: hidden;
+}
+
+.hero-tint {
+  display: grid;
+  place-items: center;
+}
+
+.hero-out {
+  background: linear-gradient(180deg, #f6f4ee 0%, #e4eee0 100%);
+  color: #3d6b28;
+}
+
+.hero-left {
+  background: linear-gradient(180deg, #f8f4ec 0%, #efe2cc 100%);
+  color: #6b542c;
+}
+
+.hero-icon { display: grid; place-items: center; }
+.hero-icon svg { width: 76px; height: 76px; }
+
+.night-card .lo-pill { margin: 0 0 0.55rem; }
+
+.change-link {
+  min-height: 44px;
+  padding: 0.15rem 0 0 0.35rem;
+  color: var(--green);
+  font-size: 0.95rem;
+  font-weight: 750;
+}
+
+.night-card .pad .tomorrow {
+  width: 100%;
+  margin: 1.5rem 0 0.2rem;
 }
 
 .today-screen .tomorrow {
@@ -1126,8 +1158,71 @@ body:has(.night-screen),
 }
 .empty-actions .primary,
 .empty-actions .outline-btn { width: 100%; }
-.note-night .kicker { margin-top: 0.15rem; }
-.note-night h1 { margin-top: 0.1rem; }
+.about-pad {
+  display: flex;
+  flex-direction: column;
+  min-height: calc(100dvh - var(--tab-bar) - var(--safe-t) - 5.5rem);
+}
+
+.about-name {
+  margin: 0.2rem 0 0.35rem;
+  font-size: 1.7rem;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+}
+
+.about-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  min-height: 52px;
+  margin-top: 1.5rem;
+  border-top: 1px solid var(--line);
+  text-align: left;
+  font-weight: 650;
+}
+
+.about-toggle span { color: var(--muted); font-weight: 600; }
+
+.about-version {
+  margin-top: auto;
+  padding: 1.6rem 0 0.2rem;
+  color: var(--muted);
+  font-size: 0.82rem;
+  text-align: center;
+}
+
+.about-link {
+  display: block;
+  margin: 1.8rem auto 4.8rem;
+  min-height: 44px;
+  color: var(--muted);
+  font-size: 0.92rem;
+  font-weight: 650;
+}
+
+.swipe-debug {
+  position: fixed;
+  left: 0.6rem;
+  right: 0.6rem;
+  bottom: calc(var(--tab-bar) + 0.35rem);
+  z-index: 40;
+  max-height: 9.2rem;
+  overflow: auto;
+  padding: 0.4rem 0.6rem 0.5rem;
+  border-radius: 12px;
+  background: rgba(17, 17, 17, 0.9);
+  color: white;
+  font-size: 0.72rem;
+  line-height: 1.35;
+  pointer-events: none;
+}
+
+.swipe-debug p { margin: 0; font-weight: 750; }
+.swipe-debug ol { margin: 0.25rem 0 0; padding: 0; list-style: none; }
+.swipe-debug li { padding: 0.12rem 0; }
+.swipe-debug strong { color: #b6ef86; font-weight: 700; }
 .plan-kinds { margin: 0.15rem 0 0.35rem; }
 .plan-kind {
   display: flex;
@@ -1312,8 +1407,60 @@ body:has(.night-screen),
 .week-day.is-today .week-date { color: var(--green-dark); }
 .week-empty { margin: 0; color: var(--muted); font-size: 1rem; font-weight: 500; text-transform: none; letter-spacing: 0; }
 .meal-row > .week-empty { flex: 1; width: auto; min-width: 0; }
-.week-period { touch-action: pan-y; }
-.screen:has(.week-period) { overflow-x: clip; }
+html:has(.week-screen),
+body:has(.week-screen),
+#app:has(.week-screen) {
+  height: 100dvh;
+  min-height: 100dvh;
+  max-height: 100dvh;
+  overflow: hidden;
+}
+
+.screen.week-screen {
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  height: 100dvh;
+  min-height: 0;
+  max-height: 100dvh;
+  overflow: hidden;
+  padding-bottom: calc(var(--tab-bar) + 0.35rem);
+}
+
+.period-snap {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-snap-type: x mandatory;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+  touch-action: pan-x pan-y;
+}
+
+.period-snap::-webkit-scrollbar { display: none; }
+
+.period-pane {
+  flex: 0 0 100%;
+  width: 100%;
+  min-width: 100%;
+  max-width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scroll-snap-align: start;
+  scroll-snap-stop: always;
+  overscroll-behavior-y: contain;
+  touch-action: pan-x pan-y;
+}
+
+.week-screen .period-snap,
+.month-screen .period-snap { flex: 1 1 auto; min-height: 0; }
+
+.month-screen .period-pane { display: flex; flex-direction: column; }
 
 .meal-row {
   display: flex;
@@ -1398,10 +1545,10 @@ body:has(.month-screen),
 .month-screen .month-period {
   flex: 1 1 auto;
   min-height: 0;
+  height: 100%;
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  touch-action: none;
 }
 .month-screen .month-bar { flex: none; margin-bottom: 0; }
 .month-screen .cal-board {
