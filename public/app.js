@@ -41,7 +41,7 @@ const state = {
   todayId: null,
 };
 
-const APP_VERSION = "88";
+const APP_VERSION = "89";
 
 const SECTIONS = [
   ["produce", "Produce"],
@@ -1757,7 +1757,6 @@ function aboutHtml() {
 
 function onPointerDown(event) {
   if (beginEdgeBack(event)) return;
-  if (event.pointerType === "touch") return;
   if (event.button !== 0 || event.isPrimary === false) return;
   if (event.target.closest?.(".sheet, input, textarea, select, [contenteditable='true']")) return;
   if (event.clientX <= EDGE_PX) return;

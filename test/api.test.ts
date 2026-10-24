@@ -2498,9 +2498,9 @@ describe("grocery API", () => {
     expect(css).toContain("opacity 300ms");
     expect(css).toContain(".month-panel-head.is-today .week-date");
     const shell = await (await exports.default.fetch("https://grocery.test/sw.js")).text();
-    expect(shell).toContain("grocery-shell-v88");
-    expect(shell).toContain("/styles.css?v=76");
-    expect(shell).toContain("/app.js?v=83");
+    expect(shell).toContain("grocery-shell-v89");
+    expect(shell).toContain("/styles.css?v=77");
+    expect(shell).toContain("/app.js?v=84");
     const weekTab = js.slice(js.indexOf('if (action === "tab")'), js.indexOf('if (action === "back")'));
     expect(weekTab).toContain('state.calMode = "week";');
     expect(weekTab).toContain("state.weekAnchor = null;");
@@ -2513,7 +2513,7 @@ describe("grocery API", () => {
     const edgeDown = js.slice(js.indexOf("function onPointerDown"), js.indexOf('const row = event.target.closest(".g-row")'));
     expect(edgeDown.indexOf("beginEdgeBack(event)")).toBeGreaterThan(-1);
     expect(edgeDown).not.toContain("beginPeriod(");
-    expect(edgeDown).toContain('pointerType === "touch"');
+    expect(edgeDown).not.toContain('pointerType === "touch"');
     expect(edgeDown).toContain("EDGE_PX");
     expect(edgeDown).not.toContain("m-swipe");
     expect(edgeDown).not.toContain('kind: "cal"');
