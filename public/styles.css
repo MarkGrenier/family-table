@@ -662,7 +662,27 @@ button.box { display: block; width: 100%; text-align: left; font-weight: 400; }
   background: #fff;
   border-radius: 18px 18px 0 0;
   padding: 0.8rem 1.1rem calc(1.2rem + env(safe-area-inset-bottom));
+  overscroll-behavior-y: contain;
 }
+.sheet-grab {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 22px;
+  margin: -0.35rem 0 0.15rem;
+  background: #fff;
+}
+.sheet-grab::before {
+  content: "";
+  width: 36px;
+  height: 5px;
+  border-radius: 999px;
+  background: #d0d0d4;
+}
+html.is-sheet-pulling, html.is-sheet-pulling body { overflow: hidden; }
 
 .can-swipe-back { touch-action: pan-y; overscroll-behavior-x: none; }
 .is-swipe-back { box-shadow: -8px 0 16px rgba(0, 0, 0, 0.12); }
@@ -1015,6 +1035,20 @@ select.box, button.box { appearance: none; padding-right: 2.2rem; }
 .dock-raised {
   padding-bottom: calc(var(--tab-bar) + var(--dock-pad));
   background: var(--bg);
+}
+
+.prep-line {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  margin: 0 0 0.85rem;
+  min-height: 44px;
+  padding: 0.35rem 0.9rem;
+  border-radius: 12px;
+  background: var(--green-soft);
+  color: #24520f;
+  font-weight: 700;
+  text-align: left;
 }
 
 .prep-tag {

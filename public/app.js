@@ -41,7 +41,7 @@ const state = {
   todayId: null,
 };
 
-const APP_VERSION = "89";
+const APP_VERSION = "90";
 
 const SECTIONS = [
   ["produce", "Produce"],
@@ -95,6 +95,10 @@ const UNDO_FADE_MS = 400;
 const CHECK_HOLD_MS = 600;
 const CHECK_LEAVE_MS = 380;
 const EDGE_PX = 30;
+const SWIPE_REVEAL = 96;
+const SWIPE_OPEN = 48;
+const SWIPE_FULL = 0.5;
+const SWIPE_FLICK = 0.65;
 const BACK_LOCK_PX = 10;
 const BACK_FLICK_PX = 16;
 const BACK_FLICK_V = 0.35;
@@ -123,6 +127,7 @@ let edgeClick = false;
 let backSettle = 0;
 let edgeAnimating = 0;
 let edgeTouchArmed = false;
+let sheetTouchArmed = false;
 let viewKeySeen = "";
 
 function swallowNextClick() {
@@ -278,6 +283,7 @@ function render(force = false) {
       document.getElementById(id)?.scrollIntoView({ block: "center" });
     }
     avoidFab();
+    mountSheetGrabs();
     markSwipeBack();
   };
   if (state.loading) {
@@ -362,10 +368,11 @@ function todayHtml() {
   const dinner = mealOn(today, "dinner");
   const recipe = recipeForEntry(dinner);
   const events = eventsOn(today);
+  const prep = todayShowsPhotoPrep(dinner, recipe) ? "" : prepLine();
   if (dinner?.type === "leftovers" && !(dinner.also || []).length) {
-    return `${todayHead()}${nightCard(dinner, recipe, { edit: Boolean(recipe) })}${eventsHtml(events)}`;
+    return `${todayHead()}${prep}${nightCard(dinner, recipe, { edit: Boolean(recipe) })}${eventsHtml(events)}`;
   }
-  if (dinner?.type === "note") return `${todayHead()}${nightCard(dinner, null)}${eventsHtml(events)}`;
+  if (dinner?.type === "note") return `${todayHead()}${prep}${nightCard(dinner, null)}${eventsHtml(events)}`;
   if (recipe && dinner) {
     if (state.todayId !== recipe.id) {
       state.todayId = recipe.id;
@@ -374,9 +381,16 @@ function todayHtml() {
       state.todayServingsOpen = false;
     }
   }
-  return `${todayHead()}${recipe && dinner ? recipeView(recipe, "today") : emptyTonight()}
+  return `${todayHead()}${prep}${recipe && dinner ? recipeView(recipe, "today") : emptyTonight()}
     ${eventsHtml(events)}
     ${recipe ? cookDock(recipe, true) : ""}`;
+}
+
+function todayShowsPhotoPrep(dinner, recipe) {
+  if (!recipe || !dinner) return false;
+  if (dinner.type === "note") return false;
+  if (dinner.type === "leftovers" && !(dinner.also || []).length) return false;
+  return true;
 }
 
 function todayHead() {
@@ -499,6 +513,13 @@ function prepPhotoTag() {
   if (!count) return "";
   const label = `Prep for tomorrow · ${count} ${count === 1 ? "step" : "steps"}`;
   return `<button class="prep-tag" type="button" data-action="open-prep">${esc(label)}</button>`;
+}
+
+function prepLine() {
+  const steps = duePrepSteps();
+  if (!steps.length) return "";
+  const word = steps.length === 1 ? "step" : "steps";
+  return `<button class="prep-line" type="button" data-action="open-prep">Prep for tomorrow: ${steps.length} ${word}</button>`;
 }
 
 function prepSheet() {
@@ -719,10 +740,6 @@ function pickHtml() {
   return `<div class="sheet pick-sheet"><div class="sheet-card pick-card" role="dialog" aria-label="Pick a recipe">
     <div class="pick-bar"><button class="text-green" type="button" data-action="cancel-pick">Cancel</button><h1>Pick ${esc(mealName)} for ${esc(label)}</h1></div>
     ${state.error ? `<p class="error">${esc(state.error)}</p>` : ""}
-    <div class="plan-kinds">
-      <button class="plan-kind" type="button" data-action="mark-out" data-date="${esc(date)}" data-meal="${esc(meal)}"><span class="recipe-name">Dinner out</span><span class="small">No recipe</span></button>
-      <button class="plan-kind" type="button" data-action="mark-leftovers" data-date="${esc(date)}" data-meal="${esc(meal)}"><span class="recipe-name">Leftovers</span><span class="small">No recipe</span></button>
-    </div>
     <label class="search">
       <input id="recipe-search" class="field-box" type="search" value="${esc(state.recipeQuery)}" placeholder="Search recipes" aria-label="Search recipes" autocomplete="off">
     </label>
@@ -1018,7 +1035,7 @@ function freshWaiting(item, today) {
 function buyHint(item) {
   if (!item.dueDate) return "";
   if (item.dueDate <= nyToday()) return "Buy today";
-  return `Buy ${formatUtc(item.dueDate, { weekday: "short" })}`;
+  return `Buy ${formatUtc(item.dueDate, { weekday: "long" })}`;
 }
 
 function itemHtml(id) {
@@ -1757,13 +1774,14 @@ function aboutHtml() {
 
 function onPointerDown(event) {
   if (beginEdgeBack(event)) return;
+  if (beginSheetPull(event)) return;
   if (event.button !== 0 || event.isPrimary === false) return;
   if (event.target.closest?.(".sheet, input, textarea, select, [contenteditable='true']")) return;
   if (event.clientX <= EDGE_PX) return;
   const row = event.target.closest(".g-row");
   if (!row || event.target.closest(".g-check") || event.target.closest(".g-delete")) return;
   clearGesture();
-  gesture = { id: row.dataset.id, x: event.clientX, y: event.clientY, long: false, dragging: false, pointerId: event.pointerId };
+  gesture = { id: row.dataset.id, x: event.clientX, y: event.clientY, long: false, dragging: false, pointerId: event.pointerId, lastX: event.clientX, lastT: event.timeStamp, vx: 0 };
 }
 
 function onPointerMove(event) {
@@ -1772,8 +1790,17 @@ function onPointerMove(event) {
     moveEdgeBack(event);
     return;
   }
+  if (gesture.kind === "sheet") {
+    moveSheetPull(event);
+    return;
+  }
   const dx = event.clientX - gesture.x;
   const dy = event.clientY - gesture.y;
+  const dt = event.timeStamp - (gesture.lastT || event.timeStamp);
+  if (gesture.lastX != null && dt > 0 && dt < 80) gesture.vx = (event.clientX - gesture.lastX) / dt;
+  else if (dt >= 80) gesture.vx = 0;
+  gesture.lastX = event.clientX;
+  gesture.lastT = event.timeStamp;
   if (!gesture.dragging) {
     if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
     if (Math.abs(dy) > Math.abs(dx)) {
@@ -1788,12 +1815,16 @@ function onPointerMove(event) {
     event.target.closest(".g-row")?.setPointerCapture?.(event.pointerId);
   }
   if (gesture.scroll) return;
-  const base = state.swipeId === gesture.id ? -96 : 0;
-  const next = Math.max(-120, Math.min(0, base + dx));
+  const width = gesture.width || groceryRowWidth(gesture.id);
+  gesture.width = width;
+  const base = state.swipeId === gesture.id ? -SWIPE_REVEAL : 0;
+  const next = Math.max(-width, Math.min(0, base + dx));
   const row = document.querySelector(`.g-swipe[data-id="${cssEscape(gesture.id)}"] .g-row`);
   if (row) {
     row.style.transition = "none";
     row.style.transform = `translateX(${next}px)`;
+    const del = row.parentElement?.querySelector(".g-delete");
+    if (del) del.style.width = `${Math.max(SWIPE_REVEAL, -next)}px`;
   }
   gesture.offset = next;
   avoidFab();
@@ -1809,7 +1840,7 @@ function avoidFab() {
   if (!row) return;
   const d = row.getBoundingClientRect();
   const f = fab.getBoundingClientRect();
-  const hit = !(d.right - 96 >= f.right || d.right <= f.left || d.bottom <= f.top || d.top >= f.bottom);
+  const hit = !(d.right - SWIPE_REVEAL >= f.right || d.right <= f.left || d.bottom <= f.top || d.top >= f.bottom);
   if (hit) fab.classList.add("is-away");
 }
 
@@ -1820,6 +1851,11 @@ function onPointerUp(event) {
     endEdgeBack(event);
     return;
   }
+  if (gesture.kind === "sheet") {
+    if (gesture.pointerId !== event.pointerId) return;
+    endSheetPull(true);
+    return;
+  }
   const dx = event.clientX - gesture.x;
   const dy = event.clientY - gesture.y;
   const id = gesture.id;
@@ -1827,11 +1863,19 @@ function onPointerUp(event) {
   const dragging = gesture.dragging;
   const offset = gesture.offset;
   const scrolled = gesture.scroll;
+  const vx = gesture.vx || 0;
+  const width = gesture.width || groceryRowWidth(id);
   clearGesture();
   if (long || scrolled) return;
   if (dragging) {
     swallowNextClick();
-    state.swipeId = (offset ?? 0) < -48 ? id : null;
+    const full = (offset ?? 0) <= -width * SWIPE_FULL;
+    const flung = vx < -SWIPE_FLICK && (offset ?? 0) < -SWIPE_REVEAL;
+    if (full || flung) {
+      deleteGrocery(id);
+      return;
+    }
+    state.swipeId = (offset ?? 0) < -SWIPE_OPEN ? id : null;
     render();
     return;
   }
@@ -1859,11 +1903,16 @@ function onPointerCancel(event) {
     cancelEdgeBack();
     return;
   }
+  if (gesture.kind === "sheet") {
+    if (event && gesture.pointerId !== event.pointerId) return;
+    endSheetPull(false);
+    return;
+  }
   if (gesture.dragging) {
     const id = gesture.id;
     const offset = gesture.offset ?? 0;
     clearGesture();
-    state.swipeId = offset < -48 ? id : null;
+    state.swipeId = offset < -SWIPE_OPEN ? id : null;
     render();
     return;
   }
@@ -1873,7 +1922,188 @@ function onPointerCancel(event) {
 function clearGesture() {
   if (gesture?.timer) clearTimeout(gesture.timer);
   gesture = null;
+  document.documentElement.classList.remove("is-sheet-pulling");
   disarmEdgeTouch();
+  disarmSheetTouch();
+}
+
+function groceryRowWidth(id) {
+  const swipe = id ? document.querySelector(`.g-swipe[data-id="${cssEscape(id)}"]`) : null;
+  return swipe?.clientWidth || 320;
+}
+
+function mountSheetGrabs() {
+  for (const card of document.querySelectorAll(".sheet-card")) {
+    if (card.querySelector(":scope > .sheet-grab")) continue;
+    const grab = document.createElement("div");
+    grab.className = "sheet-grab";
+    grab.setAttribute("aria-hidden", "true");
+    card.prepend(grab);
+  }
+}
+
+function sheetScroller(card, target) {
+  let node = target instanceof Element ? target : card;
+  while (node && node !== card) {
+    const overflow = getComputedStyle(node).overflowY;
+    if ((overflow === "auto" || overflow === "scroll" || overflow === "overlay") && node.scrollHeight > node.clientHeight + 2) return node;
+    node = node.parentElement;
+  }
+  return card;
+}
+
+function beginSheetPull(event) {
+  if (event.button !== 0 || event.isPrimary === false) return false;
+  const card = event.target.closest?.(".sheet-card");
+  if (!card) return false;
+  if (event.target.closest?.("input, textarea, select, [contenteditable='true']")) return false;
+  const chrome = event.target.closest?.(".sheet-grab, .sheet-head, .pick-bar, .topbar");
+  const onCardEdge = event.target === card && event.clientY - card.getBoundingClientRect().top < 36;
+  if ((!chrome || !card.contains(chrome)) && !onCardEdge) return false;
+  const scroller = sheetScroller(card, event.target);
+  if (scroller.scrollTop > 0) return false;
+  clearGesture();
+  gesture = {
+    kind: "sheet",
+    pointerId: event.pointerId,
+    x: event.clientX,
+    y: event.clientY,
+    lastY: event.clientY,
+    lastT: event.timeStamp,
+    vy: 0,
+    card,
+    scroller,
+    dragging: false,
+    scroll: false,
+    dy: 0,
+  };
+  armSheetTouch();
+  return true;
+}
+
+function moveSheetPull(event) {
+  if (!gesture || gesture.kind !== "sheet" || gesture.pointerId !== event.pointerId) return;
+  trackSheetPull(event.clientX, event.clientY, event.timeStamp);
+  if (gesture?.dragging && event.cancelable) event.preventDefault();
+}
+
+function trackSheetPull(clientX, clientY, timeStamp) {
+  if (!gesture || gesture.kind !== "sheet") return;
+  const card = gesture.card;
+  if (!card?.isConnected) {
+    clearGesture();
+    return;
+  }
+  const dx = clientX - gesture.x;
+  const dy = clientY - gesture.y;
+  const dt = timeStamp - (gesture.lastT || timeStamp);
+  if (dt > 0 && dt < 80) gesture.vy = (clientY - gesture.lastY) / dt;
+  else if (dt >= 80) gesture.vy = 0;
+  gesture.lastY = clientY;
+  gesture.lastT = timeStamp;
+  if (gesture.scroll) return;
+  const atTop = (gesture.scroller?.scrollTop || 0) <= 0;
+  if (!gesture.dragging) {
+    if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+    if (!atTop || dy < 8 || Math.abs(dx) > dy) {
+      gesture.scroll = true;
+      disarmSheetTouch();
+      return;
+    }
+    gesture.dragging = true;
+    document.documentElement.classList.add("is-sheet-pulling");
+  }
+  if (!atTop) {
+    gesture.scroll = true;
+    gesture.dragging = false;
+    card.style.transition = "";
+    card.style.transform = "";
+    document.documentElement.classList.remove("is-sheet-pulling");
+    disarmSheetTouch();
+    return;
+  }
+  gesture.dy = Math.max(0, dy);
+  card.style.transition = "none";
+  card.style.transform = `translateY(${gesture.dy}px)`;
+}
+
+function endSheetPull(commit) {
+  if (gesture?.kind !== "sheet") return;
+  const card = gesture.card;
+  const dy = gesture.dy || 0;
+  const vy = gesture.vy || 0;
+  const dragging = gesture.dragging;
+  clearGesture();
+  if (!dragging || !card?.isConnected) return;
+  swallowNextClick();
+  const dismiss = commit && (dy > 88 || (dy > 36 && vy > 0.6));
+  card.style.transition = "transform 0.2s ease";
+  card.style.transform = dismiss ? "translateY(110%)" : "translateY(0)";
+  if (!dismiss) {
+    setTimeout(() => {
+      if (!card.isConnected) return;
+      card.style.transition = "";
+      card.style.transform = "";
+    }, 220);
+    return;
+  }
+  setTimeout(() => closePresented(), 190);
+}
+
+function armSheetTouch() {
+  if (sheetTouchArmed) return;
+  sheetTouchArmed = true;
+  document.addEventListener("touchmove", onSheetTouchMove, { capture: true, passive: false });
+  document.addEventListener("touchend", onSheetTouchEnd, { capture: true });
+  document.addEventListener("touchcancel", onSheetTouchCancel, { capture: true });
+}
+
+function disarmSheetTouch() {
+  if (!sheetTouchArmed) return;
+  sheetTouchArmed = false;
+  document.removeEventListener("touchmove", onSheetTouchMove, { capture: true });
+  document.removeEventListener("touchend", onSheetTouchEnd, { capture: true });
+  document.removeEventListener("touchcancel", onSheetTouchCancel, { capture: true });
+}
+
+function onSheetTouchMove(event) {
+  if (gesture?.kind !== "sheet" || gesture.scroll) return;
+  const touch = event.touches[0];
+  if (!touch) return;
+  const dy = touch.clientY - gesture.y;
+  const dx = touch.clientX - gesture.x;
+  const atTop = (gesture.scroller?.scrollTop || 0) <= 0;
+  if (!atTop || dy <= 0 || Math.abs(dx) > dy) return;
+  if (dy < 6 && !gesture.dragging) return;
+  if (event.cancelable) event.preventDefault();
+  trackSheetPull(touch.clientX, touch.clientY, event.timeStamp || performance.now());
+}
+
+function onSheetTouchEnd() {
+  endSheetPull(true);
+}
+
+function onSheetTouchCancel() {
+  endSheetPull(false);
+}
+
+function closePresented() {
+  if (state.sheet) {
+    dismissSheet();
+    return;
+  }
+  if (state.page?.kind === "pick") {
+    closePick();
+    return;
+  }
+  if (state.page?.kind === "add-item") {
+    state.page = null;
+    state.tab = "groceries";
+    state.addQuery = "";
+    state.addDraft = blankAddDraft();
+    state.error = "";
+    render();
+  }
 }
 
 function dismissSheet() {

@@ -2307,6 +2307,7 @@ describe("grocery API", () => {
     expect(groceryDown).not.toContain("setTimeout");
     const pointerUp = js.slice(js.indexOf("function onPointerUp"), js.indexOf("function onPointerCancel"));
     expect(pointerUp).toContain("openEdit(id)");
+    expect(pointerUp).toContain("deleteGrocery(id)");
     expect(pointerUp).not.toContain("openItem(id)");
     const addForm = js.slice(js.indexOf("function addHtml"), js.indexOf("function newRecipeHtml"));
     expect(addForm.match(/type="submit"/g)).toHaveLength(1);
@@ -2450,7 +2451,7 @@ describe("grocery API", () => {
     expect(js).toContain('class="buy-hint"');
     const buyHint = js.slice(js.indexOf("function buyHint"), js.indexOf("function itemHtml"));
     expect(buyHint).toContain('return "Buy today"');
-    expect(buyHint).toContain("Buy ${formatUtc(item.dueDate, { weekday: \"short\" })}");
+    expect(buyHint).toContain("Buy ${formatUtc(item.dueDate, { weekday: \"long\" })}");
     expect(buyHint).toContain("item.dueDate <= nyToday()");
     expect(js).toContain("month-screen");
     const toggleItem = js.slice(js.indexOf("async function toggleItem"), js.indexOf("async function undoCheck"));
@@ -2470,6 +2471,13 @@ describe("grocery API", () => {
     expect(hero.headers.get("Content-Type") ?? "").toContain("image/");
     expect(js).not.toContain("Reheating");
     expect(js).toContain('data-action="cancel-pick"');
+    const pick = js.slice(js.indexOf("function pickHtml"), js.indexOf("function recipesHtml"));
+    expect(pick).not.toContain("plan-kinds");
+    expect(pick).not.toContain("mark-out");
+    expect(pick).not.toContain("mark-leftovers");
+    expect(js).toContain("function prepLine");
+    expect(js).toContain("Prep for tomorrow:");
+    expect(js).toContain('kind: "sheet"');
     expect(js).toContain("Pick ${esc(mealName)} for ");
     expect(js).toContain("Added to ");
     expect(js).toContain("focusCalendarDate");
@@ -2498,9 +2506,9 @@ describe("grocery API", () => {
     expect(css).toContain("opacity 300ms");
     expect(css).toContain(".month-panel-head.is-today .week-date");
     const shell = await (await exports.default.fetch("https://grocery.test/sw.js")).text();
-    expect(shell).toContain("grocery-shell-v89");
-    expect(shell).toContain("/styles.css?v=77");
-    expect(shell).toContain("/app.js?v=84");
+    expect(shell).toContain("grocery-shell-v90");
+    expect(shell).toContain("/styles.css?v=78");
+    expect(shell).toContain("/app.js?v=85");
     const weekTab = js.slice(js.indexOf('if (action === "tab")'), js.indexOf('if (action === "back")'));
     expect(weekTab).toContain('state.calMode = "week";');
     expect(weekTab).toContain("state.weekAnchor = null;");
