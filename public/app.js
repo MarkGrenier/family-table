@@ -146,6 +146,9 @@ let backSettle = 0;
 let edgeAnimating = 0;
 let edgeTouchArmed = false;
 let sheetTouchArmed = false;
+let sheetLockOn = false;
+let sheetLock = null;
+let sheetScrollY = 0;
 let viewKeySeen = "";
 
 function swallowNextClick() {
@@ -307,6 +310,7 @@ function render(force = false) {
     mountSheetGrabs();
     pinSheets();
     markSwipeBack();
+    markSheetOpen();
   };
   if (state.loading) {
     finish();
@@ -2086,7 +2090,8 @@ function beginSheetPull(event) {
   const card = event.target.closest?.(".sheet-card");
   if (!card) return false;
   const typing = event.target.closest?.("input, textarea, select, [contenteditable='true']");
-  if (typing && !card.closest(".pick-sheet")) return false;
+  const fieldSheet = card.closest(".add-sheet") || card.classList.contains("edit-sheet") || card.dataset.form === "item-edit";
+  if (typing && !card.closest(".pick-sheet") && !fieldSheet) return false;
   const scroller = sheetScroller(card, event.target);
   if (scroller.scrollTop > 0) return false;
   clearGesture();
@@ -2129,7 +2134,7 @@ function trackSheetPull(clientX, clientY, timeStamp) {
   gesture.lastY = clientY;
   gesture.lastT = timeStamp;
   if (gesture.scroll) return;
-  const atTop = (gesture.scroller?.scrollTop || 0) <= 0;
+  const atTop = (gesture.scroller?.scrollTop || 0) <= 12;
   if (!gesture.dragging) {
     if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
     if (!atTop || dy < 8 || Math.abs(dx) > dy) {
@@ -2139,6 +2144,7 @@ function trackSheetPull(clientX, clientY, timeStamp) {
     }
     gesture.dragging = true;
     document.documentElement.classList.add("is-sheet-pulling");
+    if (gesture.scroller && gesture.scroller.scrollTop > 0) gesture.scroller.scrollTop = 0;
   }
   if (!atTop) {
     gesture.scroll = true;
@@ -2199,11 +2205,112 @@ function onSheetTouchMove(event) {
   if (!touch) return;
   const dy = touch.clientY - gesture.y;
   const dx = touch.clientX - gesture.x;
-  const atTop = (gesture.scroller?.scrollTop || 0) <= 0;
+  const atTop = (gesture.scroller?.scrollTop || 0) <= 12;
   if (!atTop || dy <= 0 || Math.abs(dx) > dy) return;
   if (dy < 6 && !gesture.dragging) return;
   if (event.cancelable) event.preventDefault();
   trackSheetPull(touch.clientX, touch.clientY, event.timeStamp || performance.now());
+}
+
+function markSheetOpen() {
+  const root = document.documentElement;
+  const open = Boolean(document.querySelector(".sheet"));
+  if (open) {
+    if (!root.classList.contains("sheet-open")) {
+      sheetScrollY = window.scrollY || root.scrollTop || document.body.scrollTop || 0;
+      root.style.setProperty("--sheet-scroll", `${sheetScrollY}px`);
+      root.classList.add("sheet-open");
+    }
+    armSheetLock();
+    return;
+  }
+  if (!root.classList.contains("sheet-open")) return;
+  const y = sheetScrollY;
+  sheetScrollY = 0;
+  root.classList.remove("sheet-open");
+  root.style.removeProperty("--sheet-scroll");
+  disarmSheetLock();
+  window.scrollTo(0, y);
+}
+
+function armSheetLock() {
+  if (sheetLockOn) return;
+  sheetLockOn = true;
+  document.addEventListener("touchstart", onSheetLockStart, { capture: true, passive: true });
+  document.addEventListener("touchmove", onSheetLockMove, { capture: true, passive: false });
+  document.addEventListener("touchend", onSheetLockEnd, { capture: true, passive: true });
+  document.addEventListener("touchcancel", onSheetLockEnd, { capture: true, passive: true });
+}
+
+function disarmSheetLock() {
+  if (!sheetLockOn) return;
+  sheetLockOn = false;
+  sheetLock = null;
+  document.removeEventListener("touchstart", onSheetLockStart, { capture: true });
+  document.removeEventListener("touchmove", onSheetLockMove, { capture: true });
+  document.removeEventListener("touchend", onSheetLockEnd, { capture: true });
+  document.removeEventListener("touchcancel", onSheetLockEnd, { capture: true });
+}
+
+function onSheetLockStart(event) {
+  const touch = event.touches[0];
+  if (!touch) return;
+  sheetLock = { id: touch.identifier, x: touch.clientX, y: touch.clientY };
+}
+
+function onSheetLockEnd() {
+  sheetLock = null;
+}
+
+function sheetLockScroller(target) {
+  let node = target instanceof Element ? target : null;
+  const card = node?.closest?.(".sheet-card") || null;
+  if (!card) return null;
+  while (node && node !== card) {
+    if (isSheetScroller(node)) return node;
+    node = node.parentElement;
+  }
+  return isSheetScroller(card) ? card : null;
+}
+
+function isSheetScroller(node) {
+  const overflow = getComputedStyle(node).overflowY;
+  return (overflow === "auto" || overflow === "scroll" || overflow === "overlay") && node.scrollHeight > node.clientHeight + 2;
+}
+
+function onSheetLockMove(event) {
+  if (!document.documentElement.classList.contains("sheet-open")) return;
+  if (gesture?.kind === "back") return;
+  const touch = event.touches[0];
+  if (!touch || !sheetLock || touch.identifier !== sheetLock.id) return;
+  const target = event.target;
+  if (!(target instanceof Element) || !target.closest(".sheet")) {
+    if (event.cancelable) event.preventDefault();
+    return;
+  }
+  const dy = touch.clientY - sheetLock.y;
+  const dx = touch.clientX - sheetLock.x;
+  const card = target.closest(".sheet-card");
+  if (!card) {
+    if ((Math.abs(dy) > 1 || Math.abs(dx) > 1) && event.cancelable) event.preventDefault();
+    return;
+  }
+  const scroller = sheetLockScroller(target);
+  const inner = scroller && scroller !== card;
+  if (inner) {
+    const atTop = scroller.scrollTop <= 0;
+    const atEnd = scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 1;
+    if ((dy > 0 && !atTop) || (dy < 0 && !atEnd)) return;
+    if (Math.abs(dy) < 8 && Math.abs(dx) < 8) return;
+    if (event.cancelable) event.preventDefault();
+    return;
+  }
+  const gentle = target.closest("input, textarea, select, button, a, [contenteditable='true']");
+  const slop = gentle ? 8 : 2;
+  if (Math.abs(dy) < slop && Math.abs(dx) < slop) return;
+  if (scroller === card && dy < 0 && scroller.scrollTop + scroller.clientHeight < scroller.scrollHeight - 1) return;
+  if (scroller === card && dy > 0 && scroller.scrollTop > 12) return;
+  if (event.cancelable) event.preventDefault();
 }
 
 function onSheetTouchEnd() {

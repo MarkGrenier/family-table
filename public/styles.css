@@ -722,6 +722,44 @@ button.box { display: block; width: 100%; text-align: left; font-weight: 400; }
   background: #d0d0d4;
 }
 .can-swipe-back { touch-action: pan-y; overscroll-behavior-x: none; }
+html.sheet-open,
+html.sheet-open body {
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+html.sheet-open body {
+  position: fixed;
+  top: calc(-1 * var(--sheet-scroll, 0px));
+  left: 0;
+  right: 0;
+  width: 100%;
+}
+html.sheet-open .screen,
+html.sheet-open .bare,
+html.sheet-open .cook {
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+html.sheet-open .sheet,
+html.sheet-open .pick-list,
+html.sheet-open .store-drop,
+html.sheet-open .section-drop,
+html.sheet-open .store-edit-menu {
+  touch-action: pan-y;
+  overscroll-behavior: none;
+}
+html.sheet-open .add-sheet input,
+html.sheet-open .add-sheet .add-row,
+html.sheet-open .add-sheet .fresh-row,
+html.sheet-open .add-sheet .green-btn,
+html.sheet-open .add-sheet .store-field > .select-wrap > button,
+html.sheet-open .sheet-card[data-form="item-edit"] input,
+html.sheet-open .sheet-card[data-form="item-edit"] select,
+html.sheet-open .sheet-card[data-form="item-edit"] .fresh-row,
+html.sheet-open .sheet-card[data-form="item-edit"] .store-field > .select-wrap > button,
+html.sheet-open .edit-sheet input {
+  touch-action: pan-x;
+}
 .is-swipe-back { box-shadow: -8px 0 16px rgba(0, 0, 0, 0.12); }
 main.is-swipe-back { background: var(--bg); position: relative; z-index: 2; min-height: 100vh; }
 .swipe-under {
