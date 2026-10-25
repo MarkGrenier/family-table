@@ -2324,7 +2324,8 @@ describe("grocery API", () => {
     expect(detailHero).not.toContain('aria-label="More"');
     expect(detailHero).not.toContain('aria-label="Remove"');
     const recipePage = js.slice(js.indexOf("function recipeView"), js.indexOf("function cookDock"));
-    expect(recipePage).toContain('mode === "page" || mode === "today"');
+    expect(recipePage).toContain('hero(recipe, !embedded, tag, mode === "page")');
+    expect(recipePage).not.toContain('mode === "today"');
     expect(recipePage).toContain('class="outline-btn add-date"');
     expect(recipePage).toContain(">Add to date</button>");
     expect(js).toContain("Edit recipe");
@@ -2455,7 +2456,8 @@ describe("grocery API", () => {
     expect(night).toContain('class="hero-logo"');
     expect(night).toContain(">Change</button>");
     expect(night).not.toContain('class="night-gap"');
-    expect(js).toContain("nightCard(dinner, recipe, { edit: Boolean(recipe) })");
+    expect(js).toContain("nightCard(dinner, recipe, { change: false })");
+    expect(js).toContain("nightCard(dinner, null, { change: false })");
     expect(night).not.toContain("<h1>Today</h1>");
     expect(night).not.toContain("remove-meal");
     expect(night).not.toContain(">Remove</button>");
@@ -2535,6 +2537,9 @@ describe("grocery API", () => {
     expect(pick).not.toContain("mark-leftovers");
     expect(js).toContain("function prepLine");
     expect(js).toContain("Prep for tomorrow:");
+    const tomorrow = js.slice(js.indexOf("function tomorrowCard"), js.indexOf("function leftoversRow"));
+    expect(tomorrow).not.toContain("prep-mini");
+    expect(tomorrow).not.toContain("Prep for tomorrow");
     expect(js).toContain('kind: "sheet"');
     expect(js).toContain("Pick ${esc(mealName)} for ");
     expect(js).toContain("Added to ");
@@ -2569,9 +2574,9 @@ describe("grocery API", () => {
     expect(js).toContain("function screenBehindPick");
     expect(js).toContain("function parkTodayHero");
     expect(js).toContain("function restoreTodayHero");
-    expect(shell).toContain("grocery-shell-v96");
-    expect(shell).toContain("/styles.css?v=84");
-    expect(shell).toContain("/app.js?v=91");
+    expect(shell).toContain("grocery-shell-v97");
+    expect(shell).toContain("/styles.css?v=85");
+    expect(shell).toContain("/app.js?v=92");
     const weekTab = js.slice(js.indexOf('if (action === "tab")'), js.indexOf('if (action === "back")'));
     expect(weekTab).toContain('state.calMode = "week";');
     expect(weekTab).toContain("state.weekAnchor = null;");
@@ -2627,7 +2632,9 @@ describe("grocery API", () => {
     expect(buyHintCss).toContain("font-weight: 400;");
     expect(buyHintCss).not.toContain("font-weight: 750");
     const today = js.slice(js.indexOf("function todayHtml"), js.indexOf("function todayShowsPhotoPrep"));
-    expect(today).toContain('if (dinner?.type === "note") return `${todayHead()}${prep}${nightCard(dinner, null)}');
+    expect(today).toContain('if (dinner?.type === "note") return `${todayHead()}${prep}${nightCard(dinner, null, { change: false })}');
+    expect(today).not.toContain(">Edit</button>");
+    expect(today).not.toContain(">Change</button>");
     expect(today.indexOf("prepLine()")).toBeLessThan(today.indexOf('dinner?.type === "note"'));
     const ahead = js.slice(js.indexOf("function recipePrepAhead"), js.indexOf("function duePrepSteps"));
     expect(ahead).toContain("recipe.nightBefore");

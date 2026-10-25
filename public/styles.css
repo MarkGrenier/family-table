@@ -817,10 +817,15 @@ html.is-edge-dragging { overflow-x: hidden; }
   padding: 0 0.9rem;
   border-radius: 12px;
   background: var(--field);
-  color: var(--text);
-  font-size: 1rem;
+  color: var(--muted);
+  font-size: 0.82rem;
   font-weight: 400;
   text-align: left;
+}
+.store-field button.box {
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 400;
 }
 .add-row {
   display: flex;

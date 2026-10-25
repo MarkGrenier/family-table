@@ -418,9 +418,9 @@ function todayHtml() {
   const events = eventsOn(today);
   const prep = todayShowsPhotoPrep(dinner, recipe) ? "" : prepLine();
   if (dinner?.type === "leftovers" && !(dinner.also || []).length) {
-    return `${todayHead()}${prep}${nightCard(dinner, recipe, { edit: Boolean(recipe) })}${eventsHtml(events)}`;
+    return `${todayHead()}${prep}${nightCard(dinner, recipe, { change: false })}${eventsHtml(events)}`;
   }
-  if (dinner?.type === "note") return `${todayHead()}${prep}${nightCard(dinner, null)}${eventsHtml(events)}`;
+  if (dinner?.type === "note") return `${todayHead()}${prep}${nightCard(dinner, null, { change: false })}${eventsHtml(events)}`;
   if (recipe && dinner) {
     if (state.todayId !== recipe.id) {
       state.todayId = recipe.id;
@@ -459,6 +459,9 @@ function nightCard(entry, recipe, options = {}) {
   const edit = !out && options.edit && recipe
     ? `<button class="float right edit-float" type="button" data-action="edit-recipe" data-id="${esc(recipe.id)}">Edit</button>`
     : "";
+  const change = options.change === false
+    ? ""
+    : `<button class="change-link" type="button" data-action="add-meal" data-date="${esc(entry.date)}" data-meal="${esc(entry.meal || "dinner")}">Change</button>`;
   const picture = out
     ? `<span class="hero-logo">${markImg(112)}</span>`
     : photo
@@ -472,9 +475,7 @@ function nightCard(entry, recipe, options = {}) {
       </div>
       <div class="pad">
         ${out ? "" : `<span class="lo-pill">Leftovers</span>`}
-        <div class="title-row"><h1>${esc(title)}</h1>
-          <button class="change-link" type="button" data-action="add-meal" data-date="${esc(entry.date)}" data-meal="${esc(entry.meal || "dinner")}">Change</button>
-        </div>
+        <div class="title-row"><h1>${esc(title)}</h1>${change}</div>
         <p class="meta">${esc(line)}</p>
         ${tomorrowCard(entry.date)}
       </div>
@@ -506,11 +507,9 @@ function tomorrowCard(date) {
       </button>`;
   }
   if (!recipe) return "";
-  const count = recipePrepAhead(recipe).length;
-  const prep = count ? `<span class="prep-mini">Prep for tomorrow · ${count} ${count === 1 ? "step" : "steps"}</span>` : "";
   return `<button class="tomorrow" type="button" data-action="open-recipe" data-id="${esc(recipe.id)}" data-date="${esc(entry.date)}" data-meal="${esc(entry.meal)}">
       ${recipeThumb(recipe)}
-      <span class="tomorrow-copy"><span class="kicker">Tomorrow</span><strong>${esc(dishName(entry, recipe))}</strong>${prep}</span>
+      <span class="tomorrow-copy"><span class="kicker">Tomorrow</span><strong>${esc(dishName(entry, recipe))}</strong></span>
       <span class="chev" aria-hidden="true">›</span>
     </button>`;
 }
@@ -887,7 +886,7 @@ function recipeView(recipe, mode) {
   const panel = embedded ? state.todayPanel || "ingredients" : state.page.panel || "ingredients";
   const open = embedded ? state.todayServingsOpen : state.page.servingsOpen;
   const tag = embedded ? prepPhotoTag() : "";
-  return `${hero(recipe, !embedded, tag, mode === "page" || mode === "today")}
+  return `${hero(recipe, !embedded, tag, mode === "page")}
     <div class="pad">
       ${mode === "leftovers" ? `<span class="lo-pill">Leftovers</span>` : ""}
       <div class="title-row"><h1>${esc(recipe.name)}</h1>
