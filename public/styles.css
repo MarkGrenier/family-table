@@ -732,6 +732,7 @@ button.box { display: block; width: 100%; text-align: left; font-weight: 400; }
   border: 0;
   background: transparent;
   font: inherit;
+  font-size: 16px;
   text-align: right;
   padding: 0;
 }
