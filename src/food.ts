@@ -1668,7 +1668,12 @@ export async function withFreshTiming<T extends { id: string; fresh: boolean }>(
     list.push(dinner);
     byItem.set(source.item_id, list);
   }
-  return items.map((item) => ({ ...item, ...freshTiming(item.fresh, byItem.get(item.id) ?? []) }));
+  return items.map((item) => {
+    const timed = freshTiming(item.fresh, byItem.get(item.id) ?? []);
+    const manual = item.fresh ? ((item as { buyDate?: string | null }).buyDate ?? null) : null;
+    if (!timed.dueDate && manual) return { ...item, ...timed, dueDate: manual };
+    return { ...item, ...timed };
+  });
 }
 
 export async function listDueGroceries(db: D1Database, due: string) {

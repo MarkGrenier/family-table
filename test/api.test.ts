@@ -2195,9 +2195,13 @@ describe("grocery API", () => {
     const basil = await call("/api/items", {
       method: "POST",
       token,
-      body: { name: "Basil", store: "local", category: "produce", section: "produce", fresh: true },
+      body: { name: "Basil", store: "local", category: "produce", section: "produce", fresh: true, buyDate: "2026-11-20" },
     });
     expect((basil.json?.item as Json).fresh).toBe(true);
+    expect((basil.json?.item as Json).buyDate).toBe("2026-11-20");
+    const basilListed = (((await call("/api/items", { token })).json?.items ?? []) as Json[]).find((item) => item.name === "Basil");
+    expect(basilListed).toMatchObject({ fresh: true, dueDate: "2026-11-20", buyDate: "2026-11-20" });
+    expect((await call("/api/items", { method: "POST", token, body: { name: "Bad day", store: "local", category: "produce", fresh: true, buyDate: "tomorrow" } })).status).toBe(400);
     expect(await names(shrimpDue)).toEqual(["Salmon", "Shrimp"]);
 
     const quiet = await call(`/api/items/${salmon?.id}`, { method: "PATCH", token, body: { fresh: false } });
@@ -2344,14 +2348,16 @@ describe("grocery API", () => {
     expect(pointerUp).toContain("openEdit(id)");
     expect(pointerUp).toContain("deleteGrocery(id)");
     expect(pointerUp).not.toContain("openItem(id)");
-    const addForm = js.slice(js.indexOf("function addHtml"), js.indexOf("function newRecipeHtml"));
+    const addForm = js.slice(js.indexOf("function buyLabel"), js.indexOf("function newRecipeHtml"));
     expect(addForm.match(/type="submit"/g)).toHaveLength(1);
     expect(addForm).toContain('data-action="submit-add"');
     expect(addForm).not.toContain("<form");
     expect(addForm).not.toContain('type="hidden"');
     expect(addForm).toContain('name="quantityNote"');
-    expect(addForm).toContain("storeFieldHtml");
-    expect(addForm).toContain("sectionFieldHtml");
+    expect(addForm).toContain('data-action="toggle-details"');
+    expect(addForm).toContain("add-dock");
+    expect(addForm).not.toContain("storeFieldHtml");
+    expect(addForm).not.toContain("sectionFieldHtml");
     expect(addForm).not.toContain("More details");
     expect(addForm).not.toContain("more-details");
     expect(addForm).not.toContain('name="category"');
@@ -2381,10 +2387,8 @@ describe("grocery API", () => {
     expect(js).toContain("storeTag");
     expect(addForm).not.toContain('name="brand"');
     expect(addForm).not.toContain(">Brand");
-    expect(addForm.indexOf("sectionFieldHtml")).toBeLessThan(addForm.indexOf("storeFieldHtml"));
-    expect(addForm.indexOf("freshRowHtml(draft.fresh)")).toBeLessThan(addForm.indexOf('name="notes"'));
-    expect(addForm).toContain('name="notes"');
-    expect(addForm).toContain("freshRowHtml(draft.fresh)");
+    expect(addForm).toContain('placeholder="Add something..."');
+    expect(addForm).not.toContain('name="notes"');
     const freshRow = js.slice(js.indexOf("function freshRowHtml"), js.indexOf("function aisleFor"));
     expect(freshRow).toContain(">Fresh</span>");
     expect(freshRow).toContain('name="fresh"');
@@ -2405,11 +2409,14 @@ describe("grocery API", () => {
     expect(pull).toContain("edit-sheet");
     expect(pull).toContain('card.dataset.form === "item-edit"');
     expect(pull).toContain("sheet-backdrop");
+    expect(pull).toContain("section-drop");
     expect(pull).toContain("scroller.scrollTop > 0");
     expect(pull).not.toContain(".sheet-grab, .sheet-head");
     expect(js).toContain("function slideSheetAway");
     expect(js).toContain("function blurSheetFields");
-    expect(js).toContain('placeholder="Quantity"');
+    expect(js).toContain("function buyLabel");
+    expect(js).toContain('data-action="pick-buy-day"');
+    expect(js).not.toContain('placeholder="Quantity"');
     expect(js).not.toContain("2 lb, a bunch");
     expect(js).toContain("function markSheetOpen");
     expect(js).toContain('classList.add("sheet-open")');
@@ -2507,7 +2514,7 @@ describe("grocery API", () => {
     expect(groceries).not.toContain('class="section-head">Fresh');
     expect(groceries).not.toContain('class="aisle-head">Fresh');
     expect(groceries).not.toContain('class="section-head">Buy today');
-    expect(groceries).toContain("store-head\">${esc(block.label)}</h2>${aisles}");
+    expect(groceries).toContain("store-head\" data-store-head=\"${esc(block.id)}\">${esc(block.label)}</h2>${aisles}");
     expect(groceries).toContain('["shelf", ""]');
     expect(groceries).toContain('["produce", "Produce"]');
     expect(groceries).toContain('["refrigerated", "Refrigerated"]');
@@ -2587,9 +2594,9 @@ describe("grocery API", () => {
     expect(js).toContain("function screenBehindPick");
     expect(js).toContain("function parkTodayHero");
     expect(js).toContain("function restoreTodayHero");
-    expect(shell).toContain("grocery-shell-v99");
-    expect(shell).toContain("/styles.css?v=87");
-    expect(shell).toContain("/app.js?v=94");
+    expect(shell).toContain("grocery-shell-v100");
+    expect(shell).toContain("/styles.css?v=88");
+    expect(shell).toContain("/app.js?v=95");
     const weekTab = js.slice(js.indexOf('if (action === "tab")'), js.indexOf('if (action === "back")'));
     expect(weekTab).toContain('state.calMode = "week";');
     expect(weekTab).toContain("state.weekAnchor = null;");

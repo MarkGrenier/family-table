@@ -27,6 +27,7 @@ export type ItemInput = {
   storeTag?: string | null;
   storeRequest?: string;
   fresh?: boolean;
+  buyDate?: string | null;
 };
 
 export type ItemPatch = {
@@ -46,6 +47,7 @@ export type ItemPatch = {
   storeTag?: string | null;
   storeRequest?: string;
   fresh?: boolean;
+  buyDate?: string | null;
   deleted?: boolean;
 };
 
@@ -177,7 +179,19 @@ export function parseNewItem(body: Record<string, unknown>): ItemInput {
     substitute: cleanOptional(body.substitute, "The substitute", 280),
     notes: cleanOptional(body.notes, "The note", 500),
     fresh: body.fresh == null ? false : cleanBool(body.fresh, "Fresh"),
+    buyDate: body.fresh === true ? cleanBuyDate(body.buyDate) : null,
   };
+}
+
+function cleanBuyDate(value: unknown): string | null {
+  if (value == null || value === "") return null;
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) throw new HttpError(400, "Pick a buy day.");
+  const [year, month, day] = value.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) {
+    throw new HttpError(400, "Pick a buy day.");
+  }
+  return value;
 }
 
 function cleanFoodSection(value: unknown): FoodSection | null {
@@ -202,6 +216,7 @@ export function parseItemPatch(body: Record<string, unknown>): ItemPatch {
   if ("substitute" in body) patch.substitute = cleanOptional(body.substitute, "The substitute", 280);
   if ("notes" in body) patch.notes = cleanOptional(body.notes, "The note", 500);
   if ("fresh" in body) patch.fresh = cleanBool(body.fresh, "Fresh");
+  if ("buyDate" in body) patch.buyDate = cleanBuyDate(body.buyDate);
   if ("deleted" in body) patch.deleted = cleanBool(body.deleted, "Deleted");
   if (Object.keys(patch).length === 0) {
     throw new HttpError(400, "Nothing to change.");
