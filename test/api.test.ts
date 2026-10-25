@@ -2386,7 +2386,8 @@ describe("grocery API", () => {
     expect(freshRow).toContain(">Fresh</span>");
     expect(freshRow).toContain('name="fresh"');
     expect(freshRow).toContain("fresh-field");
-    expect(freshRow.indexOf("field-label")).toBeLessThan(freshRow.indexOf("fresh-row"));
+    expect(freshRow).not.toContain("field-label");
+    expect(freshRow).toContain("fresh-row");
     expect(addForm).not.toContain("<select");
     expect(addForm).not.toContain("checkbox");
     expect(addForm).toContain("suggestHtml(filteredSuggestions())");
@@ -2396,9 +2397,12 @@ describe("grocery API", () => {
     expect(suggestions).toContain("onList");
     const pull = js.slice(js.indexOf("function beginSheetPull"), js.indexOf("function moveSheetPull"));
     expect(pull).toContain('closest?.("input, textarea, select, [contenteditable=\'true\']")');
+    expect(pull).toContain("pick-sheet");
     expect(pull).toContain("scroller.scrollTop > 0");
     expect(pull).not.toContain(".sheet-grab, .sheet-head");
     expect(addForm).not.toContain("checkIcon");
+    expect(addForm).not.toContain("Optional");
+    expect(addForm).toContain("sectionTouched");
     const editItem = js.slice(js.indexOf('state.sheet?.kind === "edit-item"'), js.indexOf('state.sheet?.kind === "pick-date"'));
     expect(editItem).not.toContain("usedInHtml");
     expect(editItem).not.toContain("Used in");
@@ -2445,7 +2449,10 @@ describe("grocery API", () => {
     expect(night.indexOf('class="lo-pill"')).toBeGreaterThan(-1);
     expect(night.indexOf('class="lo-pill"')).toBeLessThan(night.indexOf("<h1>"));
     expect(night).toContain('class="night-card');
-    expect(night).toContain('class="hero hero-tint hero-');
+    expect(night).toContain("hero hero-tint hero-");
+    expect(night).toContain("foodPhoto(recipe, entry)");
+    expect(night).toContain("bowlIcon()");
+    expect(night).toContain('class="hero-logo"');
     expect(night).toContain(">Change</button>");
     expect(night).not.toContain('class="night-gap"');
     expect(js).toContain("nightCard(dinner, recipe, { edit: Boolean(recipe) })");
@@ -2522,6 +2529,7 @@ describe("grocery API", () => {
     expect(js).not.toContain("Reheating");
     expect(js).toContain('data-action="cancel-pick"');
     const pick = js.slice(js.indexOf("function pickHtml"), js.indexOf("function recipesHtml"));
+    expect(pick).toContain('class="pick-list"');
     expect(pick).not.toContain("plan-kinds");
     expect(pick).not.toContain("mark-out");
     expect(pick).not.toContain("mark-leftovers");
@@ -2558,9 +2566,12 @@ describe("grocery API", () => {
     const shell = await (await exports.default.fetch("https://grocery.test/sw.js")).text();
     expect(js).toContain('root.classList.toggle("kb-open", kb > 80)');
     expect(css).toContain(".kb-open .add-sheet .sheet-card");
-    expect(shell).toContain("grocery-shell-v95");
-    expect(shell).toContain("/styles.css?v=83");
-    expect(shell).toContain("/app.js?v=90");
+    expect(js).toContain("function screenBehindPick");
+    expect(js).toContain("function parkTodayHero");
+    expect(js).toContain("function restoreTodayHero");
+    expect(shell).toContain("grocery-shell-v96");
+    expect(shell).toContain("/styles.css?v=84");
+    expect(shell).toContain("/app.js?v=91");
     const weekTab = js.slice(js.indexOf('if (action === "tab")'), js.indexOf('if (action === "back")'));
     expect(weekTab).toContain('state.calMode = "week";');
     expect(weekTab).toContain("state.weekAnchor = null;");
@@ -2586,7 +2597,7 @@ describe("grocery API", () => {
     expect(js).not.toContain('class="period-snap"');
     expect(js).not.toContain("commitPeriodSnap");
     expect(js).toContain("Version ${APP_VERSION}");
-    expect(js).toContain('class="hero hero-tint hero-');
+    expect(js).toContain("hero hero-tint hero-");
     expect(js).toContain(">Change</button>");
     expect(js).toContain('data-action="open-about"');
     expect(js).not.toContain('data-action="toggle-swipe-debug"');

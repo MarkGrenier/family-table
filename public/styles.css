@@ -569,7 +569,18 @@ h1, .title {
 .add-form .add-details { margin-top: 0.35rem; }
 .add-form .field-label { margin: 0.4rem 0; }
 .add-form .green-btn { width: 100%; margin: 0.45rem 0 0.9rem; }
-.pick-sheet .sheet-card { max-height: calc(var(--vvh, 100dvh) - 4.25rem); }
+.pick-sheet .sheet-card {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  max-height: calc(var(--vvh, 100dvh) - 4.25rem);
+}
+.pick-list {
+  overflow: auto;
+  min-height: 0;
+  max-height: calc(var(--vvh, 100dvh) - 16rem);
+  overscroll-behavior-y: contain;
+}
 .aisle-head { margin: 0.45rem 0 0.1rem; color: #8a8a90; font-size: 0.72rem; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; }
 button.box { display: block; width: 100%; text-align: left; font-weight: 400; }
 .store-drop, .store-edit-menu {
