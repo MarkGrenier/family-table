@@ -141,6 +141,10 @@ const pendingSlots = new Map();
 const deleteJobs = new Map();
 const removeSerial = new Map();
 let swallowClick = false;
+let swallowUntil = 0;
+let sheetClosing = false;
+let nameFocusAt = 0;
+let addPressTarget = null;
 let edgeClick = false;
 let backSettle = 0;
 let edgeAnimating = 0;
@@ -153,10 +157,37 @@ let viewKeySeen = "";
 
 function swallowNextClick() {
   swallowClick = true;
+  swallowUntil = 0;
   setTimeout(() => {
     swallowClick = false;
   }, 0);
 }
+
+function swallowClicksFor(ms) {
+  swallowClick = true;
+  swallowUntil = Date.now() + ms;
+  setTimeout(() => {
+    if (Date.now() >= swallowUntil) swallowClick = false;
+  }, ms + 30);
+}
+
+function blurSheetFields() {
+  const active = document.activeElement;
+  if (active instanceof HTMLElement && active !== document.body) active.blur();
+}
+
+function sheetFocusBlocked() {
+  return sheetClosing || (gesture?.kind === "sheet" && gesture.dragging);
+}
+
+document.addEventListener("focusin", (event) => {
+  const target = event.target;
+  if (target?.id === "add-search" && target.name === "name") nameFocusAt = Date.now();
+  if (!sheetFocusBlocked()) return;
+  if (!(target instanceof HTMLElement)) return;
+  if (!target.matches("input, textarea, select, [contenteditable='true']")) return;
+  target.blur();
+}, true);
 
 boot();
 setInterval(() => refresh(false), 5000);
@@ -227,7 +258,7 @@ async function refresh(force) {
     state.plan = applyPlanPending(mergeDated(state.plan, plan.plan || [], range));
     state.events = mergeDated(state.events, events.events || [], range);
     state.error = "";
-    if ((force || !isTyping()) && !gesture?.dragging && gesture?.kind !== "back" && !edgeAnimating) render();
+    if ((force || !isTyping()) && !gesture?.dragging && gesture?.kind !== "back" && gesture?.kind !== "sheet" && !sheetClosing && !edgeAnimating) render();
   } catch (error) {
     if (serial !== refreshSerial) return;
     if (error.status === 401) {
@@ -299,7 +330,7 @@ function render(force = false) {
   if (moved && key.startsWith("tab:today")) state.todayPanel = "ingredients";
   viewKeySeen = key;
   const finish = () => {
-    if (moved) scrollToTop();
+    if (moved && !document.querySelector(".sheet") && !document.documentElement.classList.contains("sheet-open")) scrollToTop();
     if (state.scrollTo) {
       const id = state.scrollTo;
       state.scrollTo = null;
@@ -333,6 +364,9 @@ function render(force = false) {
     return;
   }
   parkTodayHero();
+  if (!document.documentElement.classList.contains("sheet-open")) {
+    sheetScrollY = window.scrollY || document.documentElement.scrollTop || document.body.scrollTop || 0;
+  }
   app.innerHTML = appHtml();
   restoreTodayHero();
   keepOneAddField();
@@ -1167,7 +1201,7 @@ function addHtml() {
     ? `<input id="add-search" name="name" class="search-box" type="text" placeholder="Add something..." value="${esc(state.addQuery)}" maxlength="80" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="done" aria-label="Name">`
     : addRow("name", "Name", state.addQuery, "Add something...");
   const qtyControl = typing === "quantity"
-    ? `<input id="add-search" name="quantityNote" class="field-box" type="text" placeholder="2 lb, a bunch" value="${esc(draft.quantityNote)}" maxlength="140" autocomplete="off" enterkeyhint="done" aria-label="Quantity">`
+    ? `<input id="add-search" name="quantityNote" class="field-box" type="text" placeholder="Quantity" value="${esc(draft.quantityNote)}" maxlength="140" autocomplete="off" enterkeyhint="done" aria-label="Quantity">`
     : addRow("quantity", "Quantity", draft.quantityNote, "");
   const noteTyping = typing === "note";
   return `<div class="sheet add-sheet"><div id="add-form" class="add-form sheet-card" data-form="add-item">
@@ -1889,6 +1923,7 @@ function aboutHtml() {
 }
 
 function onPointerDown(event) {
+  addPressTarget = event.target instanceof Element ? event.target : null;
   if (beginEdgeBack(event)) return;
   if (beginSheetPull(event)) return;
   if (event.button !== 0 || event.isPrimary === false) return;
@@ -2087,13 +2122,19 @@ function sheetScroller(card, target) {
 
 function beginSheetPull(event) {
   if (event.button !== 0 || event.isPrimary === false) return false;
-  const card = event.target.closest?.(".sheet-card");
+  const directCard = event.target.closest?.(".sheet-card");
+  const fromBackdrop = !directCard && Boolean(event.target.closest?.(".sheet-backdrop"));
+  const sheet = event.target.closest?.(".sheet");
+  const card = directCard || sheet?.querySelector(".sheet-card");
   if (!card) return false;
-  const typing = event.target.closest?.("input, textarea, select, [contenteditable='true']");
-  const fieldSheet = card.closest(".add-sheet") || card.classList.contains("edit-sheet") || card.dataset.form === "item-edit";
-  if (typing && !card.closest(".pick-sheet") && !fieldSheet) return false;
-  const scroller = sheetScroller(card, event.target);
-  if (scroller.scrollTop > 0) return false;
+  let scroller = card;
+  if (!fromBackdrop) {
+    const typing = event.target.closest?.("input, textarea, select, [contenteditable='true']");
+    const fieldSheet = card.closest(".add-sheet") || card.classList.contains("edit-sheet") || card.dataset.form === "item-edit";
+    if (typing && !card.closest(".pick-sheet") && !fieldSheet) return false;
+    scroller = sheetScroller(card, event.target);
+    if (scroller.scrollTop > 0) return false;
+  }
   clearGesture();
   gesture = {
     kind: "sheet",
@@ -2144,6 +2185,7 @@ function trackSheetPull(clientX, clientY, timeStamp) {
     }
     gesture.dragging = true;
     document.documentElement.classList.add("is-sheet-pulling");
+    blurSheetFields();
     if (gesture.scroller && gesture.scroller.scrollTop > 0) gesture.scroller.scrollTop = 0;
   }
   if (!atTop) {
@@ -2168,19 +2210,39 @@ function endSheetPull(commit) {
   const dragging = gesture.dragging;
   clearGesture();
   if (!dragging || !card?.isConnected) return;
-  swallowNextClick();
   const dismiss = commit && (dy > 88 || (dy > 36 && vy > 0.6));
-  card.style.transition = "transform 0.2s ease";
-  card.style.transform = dismiss ? "translateY(110%)" : "translateY(0)";
   if (!dismiss) {
+    card.style.transition = "transform 0.28s ease";
+    card.style.transform = "translateY(0)";
     setTimeout(() => {
       if (!card.isConnected) return;
       card.style.transition = "";
       card.style.transform = "";
-    }, 220);
+    }, 280);
     return;
   }
-  setTimeout(() => closePresented(), 190);
+  slideSheetAway(closePresented);
+}
+
+function slideSheetAway(done) {
+  if (sheetClosing) return;
+  sheetClosing = true;
+  blurSheetFields();
+  swallowClicksFor(700);
+  const card = document.querySelector(".sheet .sheet-card");
+  const finish = () => {
+    done();
+    setTimeout(() => {
+      sheetClosing = false;
+    }, 500);
+  };
+  if (!card) {
+    finish();
+    return;
+  }
+  card.style.transition = "transform 0.28s ease";
+  card.style.transform = "translateY(110%)";
+  setTimeout(finish, 280);
 }
 
 function armSheetTouch() {
@@ -2217,7 +2279,6 @@ function markSheetOpen() {
   const open = Boolean(document.querySelector(".sheet"));
   if (open) {
     if (!root.classList.contains("sheet-open")) {
-      sheetScrollY = window.scrollY || root.scrollTop || document.body.scrollTop || 0;
       root.style.setProperty("--sheet-scroll", `${sheetScrollY}px`);
       root.classList.add("sheet-open");
     }
@@ -2230,7 +2291,18 @@ function markSheetOpen() {
   root.classList.remove("sheet-open");
   root.style.removeProperty("--sheet-scroll");
   disarmSheetLock();
-  window.scrollTo(0, y);
+  pinClosedScroll(y);
+}
+
+function pinClosedScroll(y) {
+  const apply = () => {
+    if (document.querySelector(".sheet")) return;
+    window.scrollTo(0, y);
+  };
+  apply();
+  requestAnimationFrame(apply);
+  setTimeout(apply, 80);
+  setTimeout(apply, 360);
 }
 
 function armSheetLock() {
@@ -2356,7 +2428,9 @@ function dismissSheet() {
 
 async function onClick(event) {
   if (swallowClick && !edgeClick) {
-    swallowClick = false;
+    event.preventDefault();
+    event.stopPropagation();
+    if (Date.now() >= swallowUntil) swallowClick = false;
     return;
   }
   const storeLabel = event.target.closest?.(".field-label");
@@ -2364,16 +2438,7 @@ async function onClick(event) {
     closeStoreDrop();
   }
   if (event.target.classList?.contains("sheet") || event.target.classList?.contains("sheet-backdrop")) {
-    if (state.sheet) dismissSheet();
-    else if (state.page?.kind === "pick") closePick();
-    else if (state.page?.kind === "add-item") {
-      state.page = null;
-      state.tab = "groceries";
-      state.addQuery = "";
-      state.addDraft = blankAddDraft();
-      state.error = "";
-      render();
-    }
+    slideSheetAway(closePresented);
     return;
   }
   const button = event.target.closest("[data-action]");
@@ -2404,7 +2469,10 @@ async function onClick(event) {
     return;
   }
   if (action === "back") {
-    if (state.page?.kind === "pick") return closePick();
+    if (state.page?.kind === "pick" || state.page?.kind === "add-item" || state.sheet) {
+      slideSheetAway(closePresented);
+      return;
+    }
     const kind = state.page?.kind;
     state.sheet = null;
     if (kind === "recipe" && state.recipeBack) {
@@ -2458,7 +2526,10 @@ async function onClick(event) {
     return;
   }
   if (action === "add-meal") return openAddMeal(button.dataset.date || nyToday(), button.dataset.meal || "dinner");
-  if (action === "cancel-pick") return closePick();
+  if (action === "cancel-pick") {
+    slideSheetAway(closePresented);
+    return;
+  }
   if (action === "open-prep") {
     state.sheet = { kind: "prep" };
     render();
@@ -2481,7 +2552,7 @@ async function onClick(event) {
     return planRecipe(sheet.date, sheet.meal, sheet.recipeId, false);
   }
   if (action === "plan-cancel") {
-    dismissSheet();
+    slideSheetAway(closePresented);
     return;
   }
   if (action === "clear-meal" || action === "remove-meal") return confirmRemove(button.dataset.id);
@@ -2622,7 +2693,7 @@ async function onClick(event) {
     return;
   }
   if (action === "close-sheet") {
-    dismissSheet();
+    slideSheetAway(closePresented);
     return;
   }
   if (action === "toggle-done") {
@@ -2652,7 +2723,15 @@ async function onClick(event) {
   }
   if (action === "submit-add") return submitAdd();
   if (action === "add-focus") {
-    state.addFocus = button.dataset.field || "name";
+    const pressed = addPressTarget?.closest?.("#add-search, [data-action=add-focus]");
+    const pressedName = pressed?.id === "add-search" ? pressed.getAttribute("name") : "";
+    const pressedField = pressed?.id === "add-search"
+      ? (pressedName === "quantityNote" ? "quantity" : pressedName === "notes" ? "note" : "name")
+      : pressed?.dataset?.field;
+    const next = button.dataset.field || "name";
+    if (pressedField && pressedField !== next) return;
+    if (!pressedField && next !== "name" && Date.now() - nameFocusAt < 500) return;
+    state.addFocus = next;
     state.storeAdd = false;
     state.storeEdit = null;
     state.storeEditOpen = false;
