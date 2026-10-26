@@ -1277,10 +1277,10 @@ function buyChoices() {
 }
 
 function sectionOptionsHtml(section) {
-  return SECTIONS.map(([id, label]) => {
-    const on = id === section ? " is-on" : "";
-    return `<button class="store-option${on}" type="button" data-action="pick-section" data-section="${esc(id)}">${esc(label)}</button>`;
-  }).join("");
+  return `<div class="pill-row">${SECTIONS.map(([id, label]) => {
+    const on = id === section;
+    return `<button class="pill${on ? " is-on" : ""}" type="button" data-action="pick-section" data-section="${esc(id)}" aria-pressed="${on ? "true" : "false"}">${esc(label)}</button>`;
+  }).join("")}</div>`;
 }
 
 function buyDayOptionsHtml(selected) {
@@ -1296,10 +1296,13 @@ function addDetailsHtml(draft, section) {
   const store = draft.store ?? "";
   return `<div class="add-details">
       <label class="detail-line"><span>Quantity</span><input name="quantityNote" class="detail-input" maxlength="140" value="${esc(draft.quantityNote || "")}" autocomplete="off" enterkeyhint="done" aria-label="Quantity"></label>
-      <button class="detail-line" type="button" data-action="toggle-stores" aria-label="Store" aria-expanded="${state.storeOpen ? "true" : "false"}"><span>Store</span><strong data-store-value>${esc(storeLabel(store))}</strong></button>
-      <div class="store-drop${state.storeOpen ? "" : " is-hidden"}" role="listbox">${storeOptionsHtml(store)}</div>
-      ${state.storeAdd ? `<div class="new-store"><input class="field-box" name="newStore" maxlength="40" placeholder="Store name" aria-label="New store" autocomplete="off" enterkeyhint="done"><button class="text-green" type="button" data-action="save-store">Add</button></div>` : ""}
-      ${state.storeEditOpen ? `<div class="store-edit-menu">${editStoresHtml()}</div>` : ""}
+      <div class="choice-block">
+        <span class="choice-label">Store</span>
+        ${storePillsHtml(store)}
+        <button class="quiet-link" type="button" data-action="edit-stores">Edit stores</button>
+        ${state.storeAdd ? `<div class="new-store"><input class="field-box" name="newStore" maxlength="40" placeholder="Store name" aria-label="New store" autocomplete="off" enterkeyhint="done"><button class="text-green" type="button" data-action="save-store">Add</button></div>` : ""}
+        ${state.storeEditOpen ? `<div class="store-edit-menu">${storeManagerHtml()}</div>` : ""}
+      </div>
       <button class="detail-line" type="button" data-action="toggle-section" aria-expanded="${state.addSectionOpen ? "true" : "false"}"><span>Section</span><strong data-section-value>${esc(section ? sectionLabel(section) : "")}</strong></button>
       <div class="section-drop${state.addSectionOpen ? "" : " is-hidden"}">${sectionOptionsHtml(section)}</div>
       <button class="detail-line" type="button" data-action="toggle-fresh" aria-pressed="${on ? "true" : "false"}"><span>Fresh</span><span class="fresh-box${on ? " is-on" : ""}" aria-hidden="true"></span></button>
@@ -2892,6 +2895,12 @@ async function onClick(event) {
     paintStoreMenus(fieldRoot(button));
     return;
   }
+  if (action === "cancel-remove-store") {
+    state.storeConfirm = null;
+    state.storeEdit = null;
+    paintStoreMenus(fieldRoot(button));
+    return;
+  }
   if (action === "confirm-remove-store") return removeStore(button.dataset.id);
   if (action === "edit-item") {
     state.swipeId = null;
@@ -3796,39 +3805,34 @@ function storeEditIcon() {
   return `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 20h4l10-10-4-4L4 16v4z"/><path d="m13 7 4 4"/></svg>`;
 }
 
+function storePillsHtml(selected) {
+  const current = selected || "";
+  const pills = storesInOrder().map((store) => {
+    const on = store.id === current;
+    return `<button class="pill${on ? " is-on" : ""}" type="button" data-action="pick-store" data-store="${esc(store.id)}" aria-pressed="${on ? "true" : "false"}">${esc(store.name)}</button>`;
+  }).join("");
+  return `<div class="pill-row store-pills" role="group" aria-label="Store">${pills}</div>`;
+}
+
+function storeManagerHtml() {
+  return `<button class="manager-add" type="button" data-action="add-store-row">+ New store</button>${editStoresHtml()}`;
+}
+
 function storeFieldHtml(selected) {
-  const open = state.storeOpen ? "" : " is-hidden";
   const adding = state.storeAdd ? "" : " is-hidden";
   const editing = state.storeEditOpen ? "" : " is-hidden";
-  const onAdd = state.page?.kind === "add-item";
-  const newStore = !onAdd || state.storeAdd;
-  const editMenu = !onAdd || state.storeEditOpen;
-  const typingId = onAdd && state.storeAdd ? " id=\"add-search\"" : "";
-  const hiddenStore = onAdd ? "" : `<input type="hidden" name="store" value="${esc(selected || "")}">`;
-  return `<div class="store-field"><div class="select-wrap"><button class="box" type="button" data-action="toggle-stores" aria-label="Store" aria-haspopup="listbox" aria-expanded="${state.storeOpen ? "true" : "false"}">${esc(storeLabel(selected))}</button></div>
-    ${hiddenStore}
-    <div class="store-drop${open}" role="listbox">${storeOptionsHtml(selected)}</div>
-    ${newStore ? `<div class="new-store${adding}"><input${typingId} class="field-box" name="newStore" maxlength="40" placeholder="Store name" aria-label="New store" autocomplete="off" enterkeyhint="done"><button class="text-green" type="button" data-action="save-store">Add</button></div>` : ""}
-    ${editMenu ? `<div class="store-edit-menu${editing}">${editStoresHtml()}</div>` : ""}</div>`;
+  return `<div class="store-field">
+    <span class="choice-label">Store</span>
+    <input type="hidden" name="store" value="${esc(selected || "")}">
+    ${storePillsHtml(selected)}
+    <button class="quiet-link" type="button" data-action="edit-stores">Edit stores</button>
+    <div class="new-store${adding}"><input class="field-box" name="newStore" maxlength="40" placeholder="Store name" aria-label="New store" autocomplete="off" enterkeyhint="done"><button class="text-green" type="button" data-action="save-store">Add</button></div>
+    <div class="store-edit-menu${editing}">${storeManagerHtml()}</div>
+  </div>`;
 }
 
 function storesInOrder() {
   return [...(state.stores || [])].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
-}
-
-function storeOptionsHtml(selected) {
-  const current = selected || "";
-  const none = !current;
-  const rows = [
-    `<button class="suggest store-choice is-plain${none ? " is-on" : ""}" type="button" data-action="pick-store" data-store="" aria-selected="${none ? "true" : "false"}"><span class="suggest-name">No store</span>${none ? `<span class="suggest-meta">Picked</span>` : ""}</button>`,
-  ];
-  for (const store of storesInOrder()) {
-    const on = store.id === current;
-    rows.push(`<button class="suggest store-choice${on ? " is-on" : ""}" type="button" data-action="pick-store" data-store="${esc(store.id)}" aria-selected="${on ? "true" : "false"}"><span class="suggest-name">+ ${esc(store.name)}</span>${on ? `<span class="suggest-meta">Picked</span>` : ""}</button>`);
-  }
-  rows.push(`<button class="suggest store-choice" type="button" data-action="add-store-row"><span class="suggest-name">+ New store</span></button>`);
-  rows.push(`<button class="suggest store-choice is-plain" type="button" data-action="edit-stores"><span class="suggest-name">Edit stores…</span></button>`);
-  return rows.join("");
 }
 
 function editStoresHtml() {
@@ -3836,7 +3840,7 @@ function editStoresHtml() {
   if (!stores.length) return `<p class="muted store-empty">No stores yet.</p>`;
   return stores.map((store) => {
     if (state.storeConfirm === store.id) {
-      return `<div class="store-confirm" data-id="${esc(store.id)}"><span>Remove ${esc(store.name)}? Its items will have no store.</span><button class="text-btn" type="button" data-action="confirm-remove-store" data-id="${esc(store.id)}">Remove</button><button class="text-green" type="button" data-action="edit-store" data-id="${esc(store.id)}">Cancel</button></div>`;
+      return `<div class="store-confirm" data-id="${esc(store.id)}"><span>Remove ${esc(store.name)}? Its items will have no store.</span><button class="text-btn" type="button" data-action="confirm-remove-store" data-id="${esc(store.id)}">Remove</button><button class="text-green" type="button" data-action="cancel-remove-store" data-id="${esc(store.id)}">Cancel</button></div>`;
     }
     if (state.storeEdit === store.id) {
       return `<div class="store-rename" data-id="${esc(store.id)}"><input class="field-box" name="renameStore" maxlength="40" value="${esc(store.name)}" aria-label="Rename ${esc(store.name)}"><button class="text-green" type="button" data-action="save-rename" data-id="${esc(store.id)}">Save</button><button class="text-btn" type="button" data-action="ask-remove-store" data-id="${esc(store.id)}">Delete</button></div>`;
@@ -3849,20 +3853,22 @@ function fieldRoot(node) {
   return node?.closest?.("form, #add-form") || null;
 }
 
+function paintStorePills(form, selected) {
+  const current = selected || "";
+  form?.querySelectorAll(".store-pills .pill").forEach((button) => {
+    const on = (button.dataset.store || "") === current && current !== "";
+    button.classList.toggle("is-on", on);
+    button.setAttribute("aria-pressed", on ? "true" : "false");
+  });
+}
+
 function paintStoreMenus(form) {
   if (!form) return;
   const selected = form.id === "add-form" ? (state.addDraft?.store || "") : (form.querySelector("[name=store]")?.value || "");
-  const drop = form.querySelector(".store-drop");
-  if (drop) drop.innerHTML = storeOptionsHtml(selected);
+  const row = form.querySelector(".store-pills");
+  if (row) row.outerHTML = storePillsHtml(selected);
   const menu = form.querySelector(".store-edit-menu");
-  if (menu) menu.innerHTML = editStoresHtml();
-  const label = form.querySelector("[data-action=toggle-stores]");
-  if (form.id === "add-form") {
-    const value = label?.querySelector("strong");
-    if (value) value.textContent = storeLabel(selected);
-  } else if (label) {
-    label.textContent = storeLabel(selected);
-  }
+  if (menu) menu.innerHTML = storeManagerHtml();
 }
 
 function closeStoreDrop() {
@@ -3890,23 +3896,12 @@ function toggleStores(button) {
 function pickStore(button) {
   const form = fieldRoot(button);
   if (!form) return;
-  const choice = button.dataset.store ?? "";
+  let choice = button.dataset.store ?? "";
   const hidden = form.querySelector("[name=store]");
+  const current = form.id === "add-form" ? (state.addDraft?.store || "") : (hidden?.value || "");
+  if (choice && choice === current) choice = "";
   if (hidden) hidden.value = choice;
-  const label = form.querySelector("[data-action=toggle-stores]");
-  if (form.id === "add-form") {
-    const value = label?.querySelector("strong");
-    if (value) value.textContent = storeLabel(choice);
-  } else if (label) {
-    label.textContent = storeLabel(choice);
-  }
-  closeStoreDrop();
-  state.storeAdd = false;
-  state.storeEditOpen = false;
-  state.storeEdit = null;
-  state.storeConfirm = null;
-  form.querySelector(".new-store")?.classList.add("is-hidden");
-  form.querySelector(".store-edit-menu")?.classList.add("is-hidden");
+  paintStorePills(form, choice);
   if (form.id === "add-form" && state.addDraft) {
     state.addDraft.store = choice;
     state.addDraft.storeTouched = true;
@@ -3917,22 +3912,18 @@ function pickStore(button) {
 function showNewStore(button) {
   const form = fieldRoot(button);
   if (!form) return;
+  state.storeAdd = true;
+  state.storeEditOpen = true;
+  state.storeEdit = null;
+  state.storeConfirm = null;
   if (form.id === "add-form") {
-    closeStoreDrop();
-    state.storeAdd = true;
-    state.storeEditOpen = false;
-    state.storeEdit = null;
-    state.storeConfirm = null;
     state.addSectionOpen = false;
     state.buyDayOpen = false;
     render();
     document.querySelector("#add-form [name=newStore]")?.focus({ preventScroll: true });
     return;
   }
-  closeStoreDrop();
-  state.storeAdd = true;
-  state.storeEditOpen = false;
-  form.querySelector(".store-edit-menu")?.classList.add("is-hidden");
+  form.querySelector(".store-edit-menu")?.classList.remove("is-hidden");
   const row = form.querySelector(".new-store");
   row?.classList.remove("is-hidden");
   row?.querySelector("[name=newStore]")?.focus();
@@ -4222,8 +4213,7 @@ function syncAddChrome() {
   if (!draft.storeTouched) {
     const store = shownAddStore(draft, name);
     draft.store = store;
-    const node = document.querySelector("[data-store-value]");
-    if (node) node.textContent = storeLabel(store);
+    paintStorePills(document.getElementById("add-form"), store);
   }
 }
 
@@ -4296,8 +4286,10 @@ function pickSection(button) {
   if (label) label.textContent = sectionLabel(section);
   document.querySelector(".section-drop:not(.buy-drop)")?.classList.add("is-hidden");
   document.querySelector("[data-action=toggle-section]")?.setAttribute("aria-expanded", "false");
-  document.querySelectorAll(".section-drop:not(.buy-drop) .store-option").forEach((option) => {
-    option.classList.toggle("is-on", option.dataset.section === section);
+  document.querySelectorAll(".section-drop:not(.buy-drop) .pill").forEach((option) => {
+    const on = option.dataset.section === section;
+    option.classList.toggle("is-on", on);
+    option.setAttribute("aria-pressed", on ? "true" : "false");
   });
 }
 

@@ -684,15 +684,17 @@ button.box { display: block; width: 100%; text-align: left; font-weight: 400; }
   align-items: flex-end;
   justify-content: center;
 }
-/* Keyboard open: the whole Add sheet is the visual viewport minus the
-   accessory bar, so the green Add button sits above that bar. */
+/* Keyboard open: the white sheet reaches the keyboard. The accessory bar
+   overlays the bottom of the visual viewport, so the Add button sits in
+   that reserved strip instead of leaving a hole the grocery list shows through. */
 .kb-open .add-sheet {
   top: var(--vvt, 0px);
   bottom: auto;
-  height: calc(var(--vvh, 100dvh) - var(--key-acc, 44px));
+  height: var(--vvh, 100dvh);
   flex-direction: column;
   align-items: center;
   justify-content: flex-end;
+  background: transparent;
 }
 .kb-open .add-sheet .sheet-card {
   flex: 1 1 auto;
@@ -722,7 +724,10 @@ button.box { display: block; width: 100%; text-align: left; font-weight: 400; }
   background: #fff;
 }
 .add-sheet .add-dock .green-btn { margin: 0; flex: none; min-height: 52px; }
-.kb-open .add-sheet .add-dock { padding-bottom: 0.45rem; }
+.kb-open .add-sheet .add-dock {
+  padding-bottom: calc(var(--key-acc, 44px) + 0.35rem);
+  background: #fff;
+}
 .details-row,
 .add-details .detail-line,
 .add-details .detail-input,
@@ -757,8 +762,53 @@ button.box { display: block; width: 100%; text-align: left; font-weight: 400; }
   padding: 0;
 }
 .add-details .detail-line + .detail-line,
-.add-details .store-drop,
 .add-details .section-drop { margin-top: 0; }
+.add-details .section-drop:not(.buy-drop) {
+  border: 0;
+  background: transparent;
+  max-height: none;
+  overflow: visible;
+  border-radius: 0;
+}
+.choice-block { margin: 0.15rem 0 0.35rem; }
+.choice-label {
+  display: block;
+  margin: 0.35rem 0 0.2rem;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 400;
+}
+.pill-row { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.pill {
+  min-height: 36px;
+  padding: 0.28rem 0.8rem;
+  border: 1.5px solid #d5d5d8;
+  border-radius: 999px;
+  background: #fff;
+  color: var(--ink);
+  font-size: 0.92rem;
+  font-weight: 600;
+}
+.pill.is-on { background: var(--green); border-color: var(--green); color: #fff; }
+.quiet-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  margin-top: 0.15rem;
+  padding: 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 500;
+}
+.manager-add {
+  display: block;
+  width: 100%;
+  min-height: 40px;
+  padding: 0.35rem 0.75rem;
+  text-align: left;
+  color: var(--green-dark);
+  font-weight: 650;
+}
 .sheet-backdrop {
   position: absolute;
   inset: 0;
