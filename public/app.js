@@ -460,8 +460,6 @@ function render(force = false) {
   }
   app.innerHTML = appHtml();
   restoreTodayHero();
-  const search = document.getElementById("add-search");
-  if (search && state.sheet?.kind === "add-item") search.focus({ preventScroll: true });
   finish();
 }
 
@@ -695,7 +693,9 @@ function duePrepSteps() {
   const steps = [];
   for (const meal of ["breakfast", "lunch", "dinner"]) {
     const entry = mealOn(tomorrow, meal);
-    const recipe = recipeForEntry(entry);
+    // Leftovers and notes point at an earlier dish for the photo. They are not a cook, so they have nothing to prep.
+    if (!entry || entry.type !== "recipe" || !entry.recipeId) continue;
+    const recipe = recipeById(entry.recipeId);
     if (!recipe) continue;
     recipePrepAhead(recipe).forEach((text, index) => {
       steps.push({ text, meal, key: `${tomorrow}:${meal}:${recipe.id}:${index}` });

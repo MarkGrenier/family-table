@@ -2,7 +2,7 @@
 
 Dinners, recipes, and one grocery list for Mark and Emma.
 
-The live app is the Cloudflare Worker `family-grocery` at https://family-grocery.grenier-family.workers.dev. Recipes, the week plan, and the grocery list are in the D1 database `grocery`. `wrangler.toml` names that database. The phone shell cache is `grocery-shell-v110`.
+The live app is the Cloudflare Worker `family-grocery` at https://family-grocery.grenier-family.workers.dev. Recipes, the week plan, and the grocery list are in the D1 database `grocery`. `wrangler.toml` names that database. The phone shell cache is `grocery-shell-v111`.
 
 ## Run it on this computer
 

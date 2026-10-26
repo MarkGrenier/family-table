@@ -2678,9 +2678,9 @@ describe("grocery API", () => {
     expect(js).toContain("function screenBehindPick");
     expect(js).toContain("function parkTodayHero");
     expect(js).toContain("function restoreTodayHero");
-    expect(shell).toContain("grocery-shell-v110");
-    expect(shell).toContain("/styles.css?v=98");
-    expect(shell).toContain("/app.js?v=105");
+    expect(shell).toContain("grocery-shell-v111");
+    expect(shell).toContain("/styles.css?v=99");
+    expect(shell).toContain("/app.js?v=106");
     expect(css).toContain(".fab.is-away { display: none; }");
     expect(js).toContain('data-action="quick-add"');
     expect(js).not.toContain('data-action="filter-store"');
@@ -2786,6 +2786,12 @@ describe("grocery API", () => {
     expect(ahead).toContain("seen.has(line)");
     const due = js.slice(js.indexOf("function duePrepSteps"), js.indexOf("function prepPhotoTag"));
     expect(due).toContain("recipePrepAhead(recipe)");
+    expect(due).toContain('entry.type !== "recipe"');
+    expect(due).toContain("recipeById(entry.recipeId)");
+    expect(due).not.toContain("recipeForEntry");
+    const renderBody = js.slice(js.indexOf("function render"), js.indexOf("function appHtml"));
+    expect(renderBody).not.toContain('getElementById("add-search")');
+    expect(renderBody).not.toContain(".focus(");
     const cookMode = js.slice(js.indexOf("function cookSequence"), js.indexOf("function resolveIngredient"));
     expect(cookMode).toContain("recipe.prepSteps");
     expect(cookMode).not.toContain("recipe.nightBefore");

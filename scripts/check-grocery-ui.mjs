@@ -7,6 +7,17 @@ import { fileURLToPath } from "node:url";
 const root = fileURLToPath(new URL("../", import.meta.url));
 const shots = "/opt/cursor/artifacts";
 
+function nyToday() {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+}
+
+function addDays(iso, count) {
+  const [year, month, day] = iso.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  date.setUTCDate(date.getUTCDate() + count);
+  return date.toISOString().slice(0, 10);
+}
+
 function seedItems() {
   const items = [
     {
@@ -140,7 +151,13 @@ async function installApi(page, bag) {
             ? { items: bag.items, staples: [] }
             : u.pathname === "/api/stores"
               ? { stores: bag.stores }
-              : {};
+              : u.pathname === "/api/recipes"
+                ? { recipes: bag.recipes || [] }
+                : u.pathname.startsWith("/api/plan")
+                  ? { plan: bag.plan || [] }
+                  : u.pathname.startsWith("/api/events")
+                    ? { events: bag.events || [] }
+                    : {};
       return route.fulfill({ json: data });
     }
     const path = root + "public" + (u.pathname === "/" ? "/index.html" : u.pathname);
@@ -168,6 +185,11 @@ async function openGroceries(page) {
 async function openAdd(page) {
   await page.locator(".fab").click();
   await page.locator("#add-search").waitFor();
+  const focusedField = await page.evaluate(() => {
+    const el = document.activeElement;
+    return Boolean(el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT"));
+  });
+  assert.equal(focusedField, false);
 }
 
 async function addBySheet(page, text, fields = {}) {
@@ -426,9 +448,53 @@ test("iPhone 390x844 WebKit screenshots of the add sheet", { timeout: 90000 }, a
     const page = await context.newPage();
     const errors = [];
     page.on("pageerror", (error) => errors.push(error.message));
+    const today = nyToday();
+    const tomorrow = addDays(today, 1);
     const bag = {
       items: seedItems(),
       stores: [{ id: "amazon", name: "Amazon" }, { id: "local", name: "Market" }],
+      recipes: [
+        {
+          id: "stir-fry",
+          name: "Peanut-Lime Chicken Stir-Fry",
+          servings: 4,
+          imageUrl: "/photos/chili.svg",
+          ingredients: [{ name: "Chicken", qty: 1, unit: "lb" }, { name: "Lime", qty: 1, unit: "" }],
+          cookSteps: [{ text: "Stir-fry the chicken." }],
+          nightBefore: ["Marinate the chicken"],
+          prepSteps: ["Slice the chicken"],
+          coversNights: 2,
+        },
+        {
+          id: "tacos",
+          name: "Tacos",
+          servings: 4,
+          imageUrl: "/photos/pasta.svg",
+          ingredients: [{ name: "Tortillas", qty: 8, unit: "" }],
+          cookSteps: [{ text: "Warm the tortillas." }],
+          prepSteps: ["Warm the tortillas"],
+        },
+      ],
+      plan: [
+        {
+          id: "today-dinner",
+          date: today,
+          meal: "dinner",
+          type: "recipe",
+          recipeId: "stir-fry",
+          recipeName: "Peanut-Lime Chicken Stir-Fry",
+          imageUrl: "/photos/chili.svg",
+        },
+        {
+          id: "tomorrow-dinner",
+          date: tomorrow,
+          meal: "dinner",
+          type: "leftovers",
+          recipeId: "stir-fry",
+          recipeName: "Peanut-Lime Chicken Stir-Fry",
+          imageUrl: "/photos/chili.svg",
+        },
+      ],
       writes: [],
       saved: new Map(),
       fail: false,
@@ -443,6 +509,7 @@ test("iPhone 390x844 WebKit screenshots of the add sheet", { timeout: 90000 }, a
     await openAdd(page);
     assert.equal(await page.locator("#add-form").count(), 1);
     assert.equal(await page.locator("#add-section option").count(), 12);
+    await page.screenshot({ path: `${shots}/add-sheet-no-focus.png` });
     await page.screenshot({ path: `${shots}/add-sheet.png` });
 
     await page.locator("#add-search").fill("mil");
@@ -482,6 +549,39 @@ test("iPhone 390x844 WebKit screenshots of the add sheet", { timeout: 90000 }, a
     await page.locator('.toast button[data-action="undo-check"]').click();
     await page.waitForTimeout(300);
     assert.equal(bag.items.find((entry) => entry.id === "jam").deleted, false);
+
+    await page.locator('[data-action="tab"][data-tab="today"]').click();
+    await page.getByRole("heading", { name: "Peanut-Lime Chicken Stir-Fry" }).waitFor();
+    assert.equal(await page.locator(".prep-tag, .prep-line").count(), 0);
+    assert.equal((await page.locator("main").innerText()).includes("Prep for tomorrow"), false);
+    await page.screenshot({ path: `${shots}/today-leftovers-no-prep.png` });
+    const cookedTomorrow = await page.evaluate(() => {
+      const dinner = state.plan.find((entry) => entry.id === "tomorrow-dinner");
+      dinner.type = "recipe";
+      dinner.recipeId = "tacos";
+      dinner.recipeName = "Tacos";
+      state.plan.push({
+        id: "tomorrow-lunch",
+        date: addDays(nyToday(), 1),
+        meal: "lunch",
+        type: "leftovers",
+        recipeId: "stir-fry",
+        recipeName: "Peanut-Lime Chicken Stir-Fry",
+      });
+      render();
+      return document.querySelector(".prep-tag")?.textContent || "";
+    });
+    assert.equal(cookedTomorrow, "Prep for tomorrow · 1 step");
+    const noted = await page.evaluate(() => {
+      const dinner = state.plan.find((entry) => entry.id === "tomorrow-dinner");
+      dinner.type = "note";
+      dinner.recipeId = null;
+      dinner.note = "Dinner out";
+      state.plan = state.plan.filter((entry) => entry.id !== "tomorrow-lunch");
+      render();
+      return document.querySelector(".prep-tag, .prep-line") ? "shown" : "hidden";
+    });
+    assert.equal(noted, "hidden");
     assert.deepEqual(errors, []);
   } finally {
     await browser.close();
