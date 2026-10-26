@@ -211,6 +211,26 @@ async function firstName(page) {
   return (await page.locator("#grocery-list .g-name").first().innerText()).split("\n")[0].trim();
 }
 
+async function headingGap(page) {
+  return page.locator("#grocery-list .section-head").first().evaluate((label) => {
+    const heading = document.querySelector(".grocery-screen h1");
+    return label.getBoundingClientRect().top - heading.getBoundingClientRect().bottom;
+  });
+}
+
+async function scrollToRow(page, id) {
+  const row = () => page.locator(`.g-row[data-id="${id}"]`);
+  for (let attempt = 0; attempt < 3; attempt++) {
+    await row().waitFor();
+    try {
+      await row().scrollIntoViewIfNeeded();
+      return;
+    } catch (error) {
+      if (attempt === 2) throw error;
+    }
+  }
+}
+
 test("grocery add sheet, edit page, undo, stores and long list", { timeout: 90000 }, async () => {
   const browser = await chromium.launch({
     headless: true,
@@ -231,6 +251,8 @@ test("grocery add sheet, edit page, undo, stores and long list", { timeout: 9000
     await installApi(page, bag);
     await openGroceries(page);
 
+    const gap = await headingGap(page);
+    assert.ok(gap >= 16 && gap <= 20, `heading gap ${gap}`);
     assert.match(await page.locator("#grocery-list").innerText(), /Buy today/);
     assert.equal(await page.locator("#quick-add, .add-bar, #add-item, #add-form").count(), 0);
     assert.equal(await page.locator(".fab").count(), 1);
@@ -369,7 +391,7 @@ test("grocery add sheet, edit page, undo, stores and long list", { timeout: 9000
     await page.locator(".fab").waitFor();
     assert.equal(bag.items.find((entry) => entry.id === "milk").quantityNote, "3 gallons");
 
-    await page.locator('.g-row[data-id="jam"]').scrollIntoViewIfNeeded();
+    await scrollToRow(page, "jam");
     const jam = await page.locator('.g-row[data-id="jam"]').boundingBox();
     await page.mouse.move(jam.x + jam.width - 24, jam.y + jam.height / 2);
     await page.mouse.down();
@@ -504,7 +526,9 @@ test("iPhone 390x844 WebKit screenshots of the add sheet", { timeout: 90000 }, a
     await openGroceries(page);
     assert.equal(await page.locator("#quick-add, .add-bar, #add-form").count(), 0);
     assert.equal(await page.locator(".fab").count(), 1);
-    await page.screenshot({ path: `${shots}/grocery-list.png` });
+    const gap = await headingGap(page);
+    assert.ok(gap >= 16 && gap <= 20, `heading gap ${gap}`);
+    await page.screenshot({ path: `${shots}/grocery-list-top.png` });
 
     await openAdd(page);
     assert.equal(await page.locator("#add-form").count(), 1);
@@ -537,8 +561,7 @@ test("iPhone 390x844 WebKit screenshots of the add sheet", { timeout: 90000 }, a
     await page.locator('[data-action="back"]').click();
     await page.locator(".fab").waitFor();
     await page.waitForTimeout(2300);
-    await page.locator('.g-row[data-id="jam"]').waitFor();
-    await page.locator('.g-row[data-id="jam"]').scrollIntoViewIfNeeded();
+    await scrollToRow(page, "jam");
     const jam = await page.locator('.g-row[data-id="jam"]').boundingBox();
     await page.mouse.move(jam.x + jam.width - 20, jam.y + jam.height / 2);
     await page.mouse.down();

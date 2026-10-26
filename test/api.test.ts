@@ -2678,8 +2678,8 @@ describe("grocery API", () => {
     expect(js).toContain("function screenBehindPick");
     expect(js).toContain("function parkTodayHero");
     expect(js).toContain("function restoreTodayHero");
-    expect(shell).toContain("grocery-shell-v111");
-    expect(shell).toContain("/styles.css?v=99");
+    expect(shell).toContain("grocery-shell-v112");
+    expect(shell).toContain("/styles.css?v=100");
     expect(shell).toContain("/app.js?v=106");
     expect(css).toContain(".fab.is-away { display: none; }");
     expect(js).toContain('data-action="quick-add"');
@@ -2770,6 +2770,7 @@ describe("grocery API", () => {
     expect(css).toContain("grid-template-rows: 0fr");
     expect(css).toContain(".g-swipe.is-checking-out { transition: none; transform: none; }");
     expect(css).toContain(".section-head.store-head { color: var(--ink); font-weight: 750; }");
+    expect(css).toContain("#grocery-list > .section-head:first-child { margin-top: 1.125rem; }");
     expect(css).toContain(".aisle-head { margin: 0.45rem 0 0.1rem; color: #8a8a90; font-size: 0.72rem; font-weight: 600;");
     expect(css).toContain(".buy-hint {\n  display: inline-block;\n  margin-top: 0.22rem;\n  padding: 0.12rem 0.48rem;\n  border-radius: 999px;\n  background: var(--green-soft);");
     const buyHintCss = css.slice(css.indexOf(".buy-hint {"), css.indexOf(".g-name .buy-hint"));
