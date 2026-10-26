@@ -13,6 +13,7 @@ const state = {
   recipeQuery: "",
   recipeSort: "favorites",
   addQuery: "",
+  suggestHold: "",
   addFocus: "name",
   addSectionOpen: false,
   addDetails: false,
@@ -48,8 +49,6 @@ const state = {
   todayId: null,
 };
 
-const APP_VERSION = "94";
-
 const SECTIONS = [
   ["produce", "Produce"],
   ["meat", "Meat & Seafood"],
@@ -79,6 +78,8 @@ function blankAddDraft() {
     storeDefault: "",
     category: "shelf",
     section: "",
+    brand: "",
+    asin: "",
     notes: "",
     fresh: false,
     buyDate: "",
@@ -101,8 +102,12 @@ app.addEventListener("pointercancel", onPointerCancel);
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible" && state.page?.kind === "cook") lockScreen();
 });
-document.addEventListener("scroll", () => {
+document.addEventListener("scroll", (event) => {
   if (state.swipeId || gesture?.dragging) avoidFab();
+  const target = event.target;
+  if (target instanceof Element && target.classList.contains("sheet-card") && target.closest(".add-sheet") && target.scrollTop) {
+    target.scrollTop = 0;
+  }
 }, true);
 function pinSheets() {
   const vv = window.visualViewport;
@@ -112,7 +117,30 @@ function pinSheets() {
   root.style.setProperty("--vvt", `${Math.round(vv.offsetTop)}px`);
   root.style.setProperty("--vvh", `${Math.round(vv.height)}px`);
   root.style.setProperty("--kb", `${kb}px`);
+  // Room for the iOS keyboard accessory (chevrons and Done) so Add sits above it.
+  root.style.setProperty("--key-acc", kb > 80 ? "52px" : "0px");
   root.classList.toggle("kb-open", kb > 80);
+  if (kb > 80) lockAddSheetScroll();
+}
+
+function lockAddSheetScroll() {
+  const card = document.querySelector(".add-sheet .sheet-card");
+  if (card && card.scrollTop) card.scrollTop = 0;
+}
+
+function keepAddFieldInView() {
+  const active = document.activeElement;
+  if (!(active instanceof HTMLElement) || !active.closest(".add-sheet")) return;
+  const scroller = document.querySelector(".add-sheet .add-scroll");
+  if (!scroller) return;
+  const row = active.closest(".detail-line, .search-box") || active;
+  const rowBox = row.getBoundingClientRect();
+  const view = scroller.getBoundingClientRect();
+  const dock = document.querySelector(".add-sheet .add-dock");
+  const dockTop = dock ? dock.getBoundingClientRect().top : view.bottom;
+  const limit = Math.min(view.bottom, dockTop) - 10;
+  if (rowBox.bottom > limit) scroller.scrollTop += rowBox.bottom - limit;
+  else if (rowBox.top < view.top + 6) scroller.scrollTop -= view.top + 6 - rowBox.top;
 }
 if (window.visualViewport) {
   window.visualViewport.addEventListener("resize", pinSheets);
@@ -200,6 +228,16 @@ function sheetFocusBlocked() {
 document.addEventListener("focusin", (event) => {
   const target = event.target;
   if (target?.id === "add-search" && target.name === "name") nameFocusAt = Date.now();
+  if (target instanceof HTMLElement && target.closest(".add-sheet") && !sheetFocusBlocked()) {
+    const settle = () => {
+      lockAddSheetScroll();
+      keepAddFieldInView();
+    };
+    settle();
+    requestAnimationFrame(settle);
+    setTimeout(settle, 60);
+    setTimeout(settle, 320);
+  }
   if (!sheetFocusBlocked()) return;
   if (!(target instanceof HTMLElement)) return;
   if (!target.matches("input, textarea, select, [contenteditable='true']")) return;
@@ -454,7 +492,6 @@ function screenHtml() {
   if (state.page?.kind === "item") return itemHtml(state.page.id);
   if (state.page?.kind === "add-item") return groceriesHtml() + addHtml();
   if (state.page?.kind === "new-recipe") return newRecipeHtml();
-  if (state.page?.kind === "about") return aboutHtml();
   if (state.tab === "calendar") return calendarHtml();
   if (state.tab === "recipes") return recipesHtml();
   if (state.tab === "groceries") return groceriesHtml();
@@ -1137,7 +1174,6 @@ function groceriesHtml() {
     ${body}
     ${body ? "" : `<p class="empty">The list is clear.</p>`}
     ${state.doneOpen && done.length ? `<h2 class="section-head">Completed</h2>${done.map((item) => groceryRow(item)).join("")}` : ""}
-    <button class="about-link" type="button" data-action="open-about">About</button>
     <button class="fab" type="button" data-action="add-item" aria-label="Add">+</button>`;
 }
 
@@ -1186,7 +1222,7 @@ function itemHtml(id) {
 
 function filteredSuggestions() {
   const query = memoryKey(state.addQuery);
-  if (!query) return [];
+  if (!query || memoryKey(state.suggestHold) === query) return [];
   const active = new Set(state.items.filter((item) => isActiveGrocery(item)).map((item) => memoryKey(item.name)));
   return suggestionRows()
     .filter((row) => row.key.includes(query))
@@ -1205,7 +1241,7 @@ function filteredSuggestions() {
 function suggestHtml(rows) {
   return rows.map((row) => {
     const meta = row.onList ? "On the list" : suggestionMeta(row);
-    return `<button class="suggest${row.onList ? " is-onlist" : ""}" type="button" data-action="use-suggest" data-onlist="${row.onList ? "1" : "0"}" data-name="${esc(row.name)}" data-store="${esc(row.store)}" data-section="${esc(row.section || "")}" data-category="${esc(row.category || "")}" data-brand="${esc(row.brand || "")}" data-asin="${esc(row.asin || "")}"><span class="suggest-name">${esc(row.name)}</span><span class="suggest-meta">${esc(meta)}</span></button>`;
+    return `<button class="suggest${row.onList ? " is-onlist" : ""}" type="button" data-action="use-suggest" data-name="${esc(row.name)}" data-store="${esc(row.store)}" data-section="${esc(row.section || "")}" data-category="${esc(row.category || "")}" data-brand="${esc(row.brand || "")}" data-asin="${esc(row.asin || "")}" data-fresh="${row.fresh ? "1" : "0"}"><span class="suggest-name">${esc(row.name)}</span><span class="suggest-meta">${esc(meta)}</span></button>`;
   }).join("");
 }
 
@@ -1261,7 +1297,7 @@ function addHtml() {
         ${addDetailsHtml(draft, section)}
         ${state.error ? `<p class="error">${esc(state.error)}</p>` : ""}
       </div>
-      <div class="add-dock"><button class="green-btn" type="submit" data-action="submit-add">Add</button></div>
+      <div class="add-dock"><button class="green-btn" type="button" data-action="submit-add">Add</button></div>
     </div></div>`;
 }
 
@@ -1945,15 +1981,6 @@ function onEdgeTouchMove(event) {
   if (event.cancelable) event.preventDefault();
 }
 
-function aboutHtml() {
-  return `<div class="topbar"><button class="back" type="button" data-action="back" aria-label="Back">${chevLeft()}</button><h1>About</h1><span></span></div>
-    <div class="pad about-pad">
-      <p class="about-name">Family Table</p>
-      <p class="muted">Dinners, the week, and the grocery list.</p>
-      <p class="about-version">Version ${APP_VERSION}</p>
-    </div>`;
-}
-
 function onPointerDown(event) {
   addPressTarget = event.target instanceof Element ? event.target : null;
   if (beginEdgeBack(event)) return;
@@ -2455,6 +2482,7 @@ function closePresented() {
     state.page = null;
     state.tab = "groceries";
     state.addQuery = "";
+    state.suggestHold = "";
     state.addFocus = "name";
     state.addSectionOpen = false;
     state.addDraft = blankAddDraft();
@@ -2743,12 +2771,6 @@ async function onClick(event) {
   }
   if (action === "send-feedback") return sendFeedback(button.dataset.id);
   if (action === "toggle-item") return toggleItem(button.dataset.id);
-  if (action === "open-about") {
-    state.page = { kind: "about" };
-    state.sheet = null;
-    render();
-    return;
-  }
   if (action === "grocery-menu") {
     state.sheet = { kind: "grocery-menu" };
     render();
@@ -2771,6 +2793,7 @@ async function onClick(event) {
     const store = viewing !== null ? viewing : rememberedStore() || state.stores?.[0]?.id || "";
     state.page = { kind: "add-item" };
     state.addQuery = "";
+    state.suggestHold = "";
     state.addFocus = "name";
     state.addDetails = false;
     state.addSectionOpen = false;
@@ -2891,6 +2914,7 @@ function onInput(event) {
     }
     if (field !== "name") return;
     state.addQuery = event.target.value;
+    if (memoryKey(state.addQuery) !== memoryKey(state.suggestHold)) state.suggestHold = "";
     const list = document.getElementById("suggest-list");
     if (list) list.innerHTML = suggestHtml(filteredSuggestions());
     syncAddChrome();
@@ -3967,14 +3991,10 @@ async function removeStore(id) {
 function onKeyDown(event) {
   if (event.key !== "Enter") return;
   const name = event.target?.name;
-  if (event.target?.id === "add-search" && name === "name") {
+  const onAdd = event.target?.closest?.("#add-form");
+  if (onAdd && ((event.target.id === "add-search" && name === "name") || name === "quantityNote")) {
     event.preventDefault();
-    acceptTypedAdd();
-    return;
-  }
-  if (name === "quantityNote") {
-    event.preventDefault();
-    submitAdd();
+    event.target.blur();
     return;
   }
   if (name !== "newStore" && name !== "renameStore") return;
@@ -4130,19 +4150,6 @@ function syncAddChrome() {
   }
 }
 
-function acceptTypedAdd() {
-  const top = filteredSuggestions()[0];
-  if (top?.onList) {
-    closeToListed(top.name);
-    return;
-  }
-  if (top) {
-    addSuggested(top);
-    return;
-  }
-  submitAdd();
-}
-
 function fieldsFromDraft(draft, name, row) {
   const store = row ? (row.store ?? draft.store ?? "") : (draft.store == null ? "" : String(draft.store));
   const section = row
@@ -4158,8 +4165,8 @@ function fieldsFromDraft(draft, name, row) {
     notes: null,
     fresh,
     buyDate: fresh ? draft.buyDate || nyToday() : null,
-    brand: row?.brand || null,
-    asin: row?.asin || null,
+    brand: row?.brand || draft.brand || null,
+    asin: row?.asin || draft.asin || null,
     storeTouched: Boolean(draft.storeTouched),
     sectionTouched: Boolean(draft.sectionTouched),
     freshTouched: Boolean(draft.freshTouched),
@@ -4251,32 +4258,32 @@ function toggleFresh(button) {
   button.querySelector(".fresh-box")?.classList.toggle("is-on", on);
 }
 
-async function useSuggestion(button) {
-  const name = button.dataset.name || "";
-  if (button.dataset.onlist === "1") {
-    closeToListed(name);
-    return;
-  }
-  await addSuggested({
-    name,
-    store: button.dataset.store ?? "",
-    section: button.dataset.section || "",
-    category: button.dataset.category || "",
-    brand: button.dataset.brand || "",
-    asin: button.dataset.asin || "",
-  });
-}
-
-async function addSuggested(row) {
+function useSuggestion(button) {
   const draft = state.addDraft || blankAddDraft();
-  const name = row.name || "";
-  if (activeListed(name)) {
-    closeToListed(name);
-    return;
+  const name = button.dataset.name || "";
+  const store = button.dataset.store ?? "";
+  const section = button.dataset.section || "";
+  state.addDraft = draft;
+  state.addQuery = name;
+  state.suggestHold = name;
+  draft.store = store;
+  draft.storeTouched = true;
+  if (section) {
+    draft.section = section;
+    draft.sectionTouched = true;
   }
-  const ok = await saveNewOrRevive(name, fieldsFromDraft(draft, name, row));
-  if (!ok) return;
-  finishAddSheet();
+  draft.category = savedCategory(store, section || draft.section || guessSection(name), button.dataset.category || "");
+  draft.brand = button.dataset.brand || "";
+  draft.asin = button.dataset.asin || "";
+  if (button.dataset.fresh === "1") {
+    draft.fresh = true;
+    draft.freshTouched = true;
+    if (!draft.buyDate) draft.buyDate = nyToday();
+  }
+  state.storeOpen = false;
+  state.addSectionOpen = false;
+  state.buyDayOpen = false;
+  render();
 }
 
 async function saveNewOrRevive(name, extra) {
@@ -4547,6 +4554,17 @@ function suggestionRows() {
   }
   for (const group of groups.values()) {
     if (!group.count) group.count = 1;
+  }
+  const freshAt = new Map();
+  for (const item of state.items) {
+    const key = memoryKey(item.name);
+    const group = groups.get(key);
+    if (!group) continue;
+    const when = item.updatedAt || item.createdAt || "";
+    if (when >= (freshAt.get(key) || "")) {
+      freshAt.set(key, when);
+      group.fresh = Boolean(item.fresh);
+    }
   }
   return [...groups.values()];
 }

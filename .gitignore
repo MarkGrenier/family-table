@@ -1,5 +1,6 @@
 node_modules/
 .wrangler/
+backups/
 share-keys.txt
 .vite/
 dist/
