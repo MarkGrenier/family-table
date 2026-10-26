@@ -2,6 +2,12 @@ node_modules/
 .wrangler/
 backups/
 share-keys.txt
+.dev.vars
+.dev.vars.*
+.env
+.env.*
+.api_token
+*.pem
 .vite/
 dist/
 *.log
