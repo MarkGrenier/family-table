@@ -1297,7 +1297,9 @@ function addDetailsHtml(draft, section) {
   return `<div class="add-details">
       <label class="detail-line"><span>Quantity</span><input name="quantityNote" class="detail-input" maxlength="140" value="${esc(draft.quantityNote || "")}" autocomplete="off" enterkeyhint="done" aria-label="Quantity"></label>
       <button class="detail-line" type="button" data-action="toggle-stores" aria-label="Store" aria-expanded="${state.storeOpen ? "true" : "false"}"><span>Store</span><strong data-store-value>${esc(storeLabel(store))}</strong></button>
-      <div class="store-drop${state.storeOpen ? "" : " is-hidden"}" role="listbox">${storeOptionsHtml(store, false)}</div>
+      <div class="store-drop${state.storeOpen ? "" : " is-hidden"}" role="listbox">${storeOptionsHtml(store)}</div>
+      ${state.storeAdd ? `<div class="new-store"><input class="field-box" name="newStore" maxlength="40" placeholder="Store name" aria-label="New store" autocomplete="off" enterkeyhint="done"><button class="text-green" type="button" data-action="save-store">Add</button></div>` : ""}
+      ${state.storeEditOpen ? `<div class="store-edit-menu">${editStoresHtml()}</div>` : ""}
       <button class="detail-line" type="button" data-action="toggle-section" aria-expanded="${state.addSectionOpen ? "true" : "false"}"><span>Section</span><strong data-section-value>${esc(section ? sectionLabel(section) : "")}</strong></button>
       <div class="section-drop${state.addSectionOpen ? "" : " is-hidden"}">${sectionOptionsHtml(section)}</div>
       <button class="detail-line" type="button" data-action="toggle-fresh" aria-pressed="${on ? "true" : "false"}"><span>Fresh</span><span class="fresh-box${on ? " is-on" : ""}" aria-hidden="true"></span></button>
@@ -2176,7 +2178,7 @@ function keepOneAddField() {
   if (state.page?.kind !== "add-item") return;
   const form = document.getElementById("add-form");
   for (const node of document.querySelectorAll("input, textarea, select")) {
-    if (form?.contains(node) && (node.id === "add-search" || node.name === "quantityNote")) continue;
+    if (form?.contains(node) && (node.id === "add-search" || node.name === "quantityNote" || node.name === "newStore" || node.name === "renameStore")) continue;
     node.remove();
   }
 }
@@ -3416,6 +3418,28 @@ function reduceMotion() {
   return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
 
+function paintBoughtRow(id, name) {
+  const swipe = document.querySelector(`.g-swipe[data-id="${cssEscape(id)}"]`);
+  if (!swipe) return false;
+  swipe.classList.remove("is-open");
+  const row = swipe.querySelector(".g-row");
+  if (row) {
+    row.classList.add("is-done");
+    row.style.transition = "";
+    row.style.transform = "";
+  }
+  const del = swipe.querySelector(".g-delete");
+  if (del) del.style.width = "";
+  const check = swipe.querySelector(".g-check");
+  if (check) {
+    check.classList.add("is-on");
+    check.setAttribute("aria-label", `Put back ${name}`);
+    check.innerHTML = checkIcon();
+  }
+  avoidFab();
+  return true;
+}
+
 function restoreRow(id, name) {
   const swipe = document.querySelector(`.g-swipe[data-id="${cssEscape(id)}"]`);
   if (!swipe) return false;
@@ -3543,7 +3567,8 @@ async function toggleItem(id) {
   item.checked = true;
   armCheckout(id);
   showUndo({ id, name: item.name, kind: "check" });
-  render();
+  if (!paintBoughtRow(id, item.name)) render();
+  else paintBadge();
   try {
     await settleCheck(id, true);
   } catch {
@@ -3649,23 +3674,40 @@ function showUndo(undo) {
     undoFadeTimer = null;
     render();
   }, UNDO_MS);
+  paintToast();
 }
 
 async function deleteGrocery(id) {
   const item = state.items.find((entry) => entry.id === id);
   if (!item) return;
+  const hadSheet = Boolean(state.sheet) || Boolean(document.querySelector(".sheet"));
+  const leftPage = state.page?.kind === "item" && state.page.id === id;
   state.sheet = null;
   state.swipeId = null;
-  if (state.page?.kind === "item" && state.page.id === id) state.page = null;
-  render();
+  if (leftPage) state.page = null;
+  showUndo({ id, name: item.name, kind: "delete" });
+  if (leftPage || hadSheet) render();
   const row = document.querySelector(`.g-swipe[data-id="${cssEscape(id)}"]`);
-  row?.classList.add("is-leaving");
-  if (row) await wait(180);
+  if (row) {
+    row.classList.remove("is-open");
+    const line = row.querySelector(".g-row");
+    if (line) {
+      line.style.transition = "";
+      line.style.transform = "";
+    }
+    const del = row.querySelector(".g-delete");
+    if (del) del.style.width = "";
+    row.classList.add("is-leaving");
+  }
+  const gone = row ? wait(180) : Promise.resolve();
   try {
-    await api(`/api/items/${id}`, { method: "PATCH", body: { deleted: true } });
-    showUndo({ id, name: item.name, kind: "delete" });
+    await Promise.all([
+      api(`/api/items/${id}`, { method: "PATCH", body: { deleted: true } }),
+      gone,
+    ]);
     await refresh(true);
   } catch (error) {
+    if (state.undo?.id === id && state.undo.kind === "delete") clearUndo();
     state.error = error.message;
     render();
   }
@@ -3770,33 +3812,36 @@ function storeFieldHtml(selected) {
     ${editMenu ? `<div class="store-edit-menu${editing}">${editStoresHtml()}</div>` : ""}</div>`;
 }
 
-function storeOptionsHtml(selected, manage = true) {
+function storesInOrder() {
+  return [...(state.stores || [])].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
+}
+
+function storeOptionsHtml(selected) {
   const current = selected || "";
-  const rows = [];
-  if (manage) rows.push(`<button class="store-option${current ? "" : " is-on"}" type="button" data-action="pick-store" data-store="">No store</button>`);
-  (state.stores || []).forEach((store) => {
-    const on = store.id === current ? " is-on" : "";
-    rows.push(`<button class="store-option${on}" type="button" data-action="pick-store" data-store="${esc(store.id)}">${esc(store.name)}</button>`);
-  });
-  if (manage) {
-    rows.push(`<button class="store-option" type="button" data-action="add-store-row">Add store…</button>`);
-    rows.push(`<button class="store-option" type="button" data-action="edit-stores">Edit stores…</button>`);
+  const none = !current;
+  const rows = [
+    `<button class="suggest store-choice is-plain${none ? " is-on" : ""}" type="button" data-action="pick-store" data-store="" aria-selected="${none ? "true" : "false"}"><span class="suggest-name">No store</span>${none ? `<span class="suggest-meta">Picked</span>` : ""}</button>`,
+  ];
+  for (const store of storesInOrder()) {
+    const on = store.id === current;
+    rows.push(`<button class="suggest store-choice${on ? " is-on" : ""}" type="button" data-action="pick-store" data-store="${esc(store.id)}" aria-selected="${on ? "true" : "false"}"><span class="suggest-name">+ ${esc(store.name)}</span>${on ? `<span class="suggest-meta">Picked</span>` : ""}</button>`);
   }
+  rows.push(`<button class="suggest store-choice" type="button" data-action="add-store-row"><span class="suggest-name">+ New store</span></button>`);
+  rows.push(`<button class="suggest store-choice is-plain" type="button" data-action="edit-stores"><span class="suggest-name">Edit stores…</span></button>`);
   return rows.join("");
 }
 
 function editStoresHtml() {
-  const stores = state.stores || [];
+  const stores = storesInOrder();
   if (!stores.length) return `<p class="muted store-empty">No stores yet.</p>`;
   return stores.map((store) => {
     if (state.storeConfirm === store.id) {
       return `<div class="store-confirm" data-id="${esc(store.id)}"><span>Remove ${esc(store.name)}? Its items will have no store.</span><button class="text-btn" type="button" data-action="confirm-remove-store" data-id="${esc(store.id)}">Remove</button><button class="text-green" type="button" data-action="edit-store" data-id="${esc(store.id)}">Cancel</button></div>`;
     }
     if (state.storeEdit === store.id) {
-      const typingId = state.page?.kind === "add-item" ? " id=\"add-search\"" : "";
-      return `<div class="store-rename" data-id="${esc(store.id)}"><input${typingId} class="field-box" name="renameStore" maxlength="40" value="${esc(store.name)}" aria-label="Rename ${esc(store.name)}"><button class="text-green" type="button" data-action="save-rename" data-id="${esc(store.id)}">Save</button><button class="text-btn" type="button" data-action="ask-remove-store" data-id="${esc(store.id)}">Remove</button></div>`;
+      return `<div class="store-rename" data-id="${esc(store.id)}"><input class="field-box" name="renameStore" maxlength="40" value="${esc(store.name)}" aria-label="Rename ${esc(store.name)}"><button class="text-green" type="button" data-action="save-rename" data-id="${esc(store.id)}">Save</button><button class="text-btn" type="button" data-action="ask-remove-store" data-id="${esc(store.id)}">Delete</button></div>`;
     }
-    return `<div class="store-line"><span class="store-pick">${esc(store.name)}</span><button class="store-edit" type="button" data-action="edit-store" data-id="${esc(store.id)}" aria-label="Edit ${esc(store.name)}">${storeEditIcon()}</button></div>`;
+    return `<div class="store-line"><span class="store-pick">${esc(store.name)}</span><button class="store-delete" type="button" data-action="ask-remove-store" data-id="${esc(store.id)}">Delete</button><button class="store-edit" type="button" data-action="edit-store" data-id="${esc(store.id)}" aria-label="Rename ${esc(store.name)}">${storeEditIcon()}</button></div>`;
   }).join("");
 }
 
@@ -3808,7 +3853,7 @@ function paintStoreMenus(form) {
   if (!form) return;
   const selected = form.id === "add-form" ? (state.addDraft?.store || "") : (form.querySelector("[name=store]")?.value || "");
   const drop = form.querySelector(".store-drop");
-  if (drop) drop.innerHTML = storeOptionsHtml(selected, form.id !== "add-form");
+  if (drop) drop.innerHTML = storeOptionsHtml(selected);
   const menu = form.querySelector(".store-edit-menu");
   if (menu) menu.innerHTML = editStoresHtml();
   const label = form.querySelector("[data-action=toggle-stores]");
@@ -3879,7 +3924,9 @@ function showNewStore(button) {
     state.storeEdit = null;
     state.storeConfirm = null;
     state.addSectionOpen = false;
+    state.buyDayOpen = false;
     render();
+    document.querySelector("#add-form [name=newStore]")?.focus({ preventScroll: true });
     return;
   }
   closeStoreDrop();
@@ -3932,6 +3979,12 @@ function showEditStores(button) {
   state.storeEditOpen = true;
   state.storeEdit = null;
   state.storeConfirm = null;
+  if (form.id === "add-form") {
+    state.addSectionOpen = false;
+    state.buyDayOpen = false;
+    render();
+    return;
+  }
   form.querySelector(".new-store")?.classList.add("is-hidden");
   const menu = form.querySelector(".store-edit-menu");
   if (menu) {

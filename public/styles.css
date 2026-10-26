@@ -584,13 +584,22 @@ h1, .title {
 .aisle-head { margin: 0.45rem 0 0.1rem; color: #8a8a90; font-size: 0.72rem; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; }
 button.box { display: block; width: 100%; text-align: left; font-weight: 400; }
 .store-drop, .store-edit-menu {
-  margin: 0.25rem 0 0.45rem;
+  margin: 0.15rem 0 0.45rem;
   overflow: auto;
   max-height: 20rem;
+}
+.store-edit-menu {
   border: 1px solid var(--line);
   border-radius: 12px;
   background: #fff;
 }
+.store-drop .suggest { padding-left: 0.15rem; padding-right: 0.15rem; }
+.store-drop .suggest.is-on {
+  background: #f3fbe9;
+  border-radius: 10px;
+  box-shadow: inset 3px 0 0 var(--green);
+}
+.store-drop .suggest.is-plain { color: var(--ink); font-weight: 550; }
 .store-drop.is-hidden, .new-store.is-hidden, .store-edit-menu.is-hidden, .section-drop.is-hidden { display: none; }
 .store-option {
   display: block;
@@ -618,6 +627,13 @@ button.box { display: block; width: 100%; text-align: left; font-weight: 400; }
   height: 36px;
   margin-right: 0.15rem;
   color: var(--muted);
+}
+.store-delete {
+  flex: none;
+  min-height: 40px;
+  padding: 0 0.45rem;
+  color: var(--danger);
+  font-weight: 650;
 }
 .store-rename, .store-confirm { gap: 0.35rem; padding: 0.3rem 0.45rem; }
 .store-rename .field-box { flex: 1; min-height: 36px; }
@@ -1725,7 +1741,7 @@ body:has(.month-screen),
   left: 50%;
   transform: translateX(-50%);
   bottom: calc(5.1rem + env(safe-area-inset-bottom));
-  z-index: 28;
+  z-index: 46;
   width: min(42rem, calc(100% - 1.4rem));
   display: flex;
   align-items: center;

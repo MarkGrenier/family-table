@@ -2370,7 +2370,11 @@ describe("grocery API", () => {
     expect(addForm).not.toContain(">Aisle");
     expect(addForm).toContain('class="sheet add-sheet"');
     expect(addForm).not.toContain("choiceHtml(STORES");
-    expect(js).toContain("Add store…");
+    expect(js).toContain("+ New store");
+    expect(js).toContain("function storesInOrder");
+    expect(js).toContain('a.name.localeCompare(b.name, undefined, { sensitivity: "base" })');
+    expect(js).toContain("+ ${esc(store.name)}");
+    expect(js).toContain(">Picked</span>");
     expect(js).toContain("Edit stores…");
     expect(js).toContain('data-action="edit-store"');
     expect(js).not.toContain("Manage stores");
@@ -2544,6 +2548,12 @@ describe("grocery API", () => {
     expect(toggleItem).not.toContain("wait(");
     expect(toggleItem).not.toContain("is-leaving");
     expect(toggleItem.indexOf("showUndo")).toBeLessThan(toggleItem.indexOf("settleCheck(id, true)"));
+    expect(toggleItem.indexOf("showUndo")).toBeLessThan(toggleItem.indexOf("paintBoughtRow"));
+    const deleteGrocery = js.slice(js.indexOf("async function deleteGrocery"), js.indexOf("function showNotice"));
+    expect(deleteGrocery.indexOf("showUndo")).toBeGreaterThan(-1);
+    expect(deleteGrocery.indexOf("showUndo")).toBeLessThan(deleteGrocery.indexOf('method: "PATCH"'));
+    expect(deleteGrocery.indexOf("showUndo")).toBeLessThan(deleteGrocery.indexOf("wait("));
+    expect(js).toContain("paintToast();");
     expect(js).toContain('class="dot');
     expect(js).not.toContain("day-dish");
     expect(js).not.toContain("day-num");
@@ -2601,9 +2611,9 @@ describe("grocery API", () => {
     expect(js).toContain("function screenBehindPick");
     expect(js).toContain("function parkTodayHero");
     expect(js).toContain("function restoreTodayHero");
-    expect(shell).toContain("grocery-shell-v103");
-    expect(shell).toContain("/styles.css?v=91");
-    expect(shell).toContain("/app.js?v=98");
+    expect(shell).toContain("grocery-shell-v104");
+    expect(shell).toContain("/styles.css?v=92");
+    expect(shell).toContain("/app.js?v=99");
     const listed = js.slice(js.indexOf("function closeToListed"), js.indexOf("function syncAddChrome"));
     expect(listed).toContain("activeListed");
     expect(listed).not.toContain("doneOpen = true");
