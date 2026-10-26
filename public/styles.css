@@ -450,7 +450,7 @@ h1, .title {
   text-transform: uppercase;
 }
 .section-head.store-head { color: var(--ink); font-weight: 750; }
-#grocery-list > .section-head:first-child { margin-top: 0; }
+#grocery-list > .section-head:first-child { margin-top: 1.125rem; }
 
 .g-swipe {
   position: relative;
