@@ -2,7 +2,7 @@
 
 Dinners, recipes, and one grocery list for Mark and Emma.
 
-The live app is the Cloudflare Worker `family-grocery` at https://family-grocery.grenier-family.workers.dev. Recipes, the week plan, and the grocery list are in the D1 database `grocery`. `wrangler.toml` names that database. The phone shell cache is `grocery-shell-v106`.
+The live app is the Cloudflare Worker `family-grocery` at https://family-grocery.grenier-family.workers.dev. Recipes, the week plan, and the grocery list are in the D1 database `grocery`. `wrangler.toml` names that database. The phone shell cache is `grocery-shell-v107`.
 
 ## Run it on this computer
 
@@ -18,6 +18,19 @@ npm start
 ```
 
 Open http://127.0.0.1:47219
+
+## Checks
+
+```bash
+npm run typecheck
+npm test
+npx playwright install chromium
+npm run test:ui
+```
+
+The browser check uses a separate practice list and mocked API responses. It checks adding, editing an existing item, restoring a completed item, clearing quantity, Undo, keyboard focus, repeated submission, and offline startup. It does not write to the live list.
+
+The grocery Add screen stays open between items. Suggestions fill the form; **Add item** (or the keyboard's Go action) saves it. Section, fresh timing, and notes are under **More details**. Store management is in **Groceries → List options → Manage stores**. Offline, the last successfully saved list is available to read; changes require a connection.
 
 ## Deploy
 

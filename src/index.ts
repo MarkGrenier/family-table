@@ -192,8 +192,12 @@ async function handleApi(request: Request, env: Env, path: string): Promise<Resp
   }
   if (path === "/api/items" && method === "POST") {
     const parsed = parseNewItem(await readJson(request));
+    const requestId = request.headers.get("Idempotency-Key") || undefined;
+    if (requestId && !/^[a-zA-Z0-9-]{16,80}$/.test(requestId)) {
+      throw new HttpError(400, "That add request isn't valid. Try again.");
+    }
     const placed = await placeStore(env.DB, parsed.storeRequest || "", parsed.category);
-    const item = await createItem(env.DB, { ...parsed, ...placed });
+    const item = await createItem(env.DB, { ...parsed, ...placed }, requestId);
     return json({ item }, 201);
   }
   if (path === "/api/items/history" && method === "GET") {

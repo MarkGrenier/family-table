@@ -1,5 +1,5 @@
 import { env, exports } from "cloudflare:workers";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { deriveShareKey, sha256Hex } from "../src/auth";
 
 type Json = Record<string, unknown>;
@@ -67,10 +67,11 @@ async function pngPixel(bytes: Uint8Array, x: number, y: number) {
 
 async function call(
   path: string,
-  opts: { method?: string; body?: unknown; token?: string; cookie?: string } = {},
+  opts: { method?: string; body?: unknown; token?: string; cookie?: string; requestId?: string } = {},
 ) {
   const headers = new Headers();
   if (opts.body !== undefined) headers.set("Content-Type", "application/json");
+  if (opts.requestId) headers.set("Idempotency-Key", opts.requestId);
   if (opts.token) headers.set("Authorization", `Bearer ${opts.token}`);
   if (opts.cookie) headers.set("Cookie", opts.cookie);
   const response = await exports.default.fetch(
@@ -137,6 +138,7 @@ async function signIn(): Promise<string> {
 }
 
 describe("grocery API", () => {
+  afterEach(() => vi.useRealTimers());
   beforeEach(async () => {
     await env.DB.prepare("DELETE FROM recipe_feedback").run();
     await env.DB.prepare("DELETE FROM recipe_made").run();
@@ -156,6 +158,33 @@ describe("grocery API", () => {
     const staples = await call("/api/staples", { cookie });
     expect(items.json).toEqual({ items: [] });
     expect(staples.json).toEqual({ staples: [] });
+  });
+
+  it("creates only one grocery for concurrent retries of an add request", async () => {
+    const requestId = crypto.randomUUID();
+    const options = { method: "POST", token: env.API_TOKEN, requestId, body: {
+      name: "Bananas", store: "local", category: "produce", section: "produce", quantityNote: "6",
+    } };
+    const [first, retry] = await Promise.all([call("/api/items", options), call("/api/items", options)]);
+    expect(first.status).toBe(201);
+    expect(retry.status).toBe(201);
+    expect((first.json?.item as Json).id).toBe((retry.json?.item as Json).id);
+    const list = await call("/api/items", { token: env.API_TOKEN });
+    expect((list.json?.items as Json[]).filter((item) => item.name === "Bananas")).toHaveLength(1);
+    const changed = await call("/api/items", { ...options, body: { ...options.body, name: "Apples" } });
+    expect(changed.status).toBe(409);
+  });
+
+  it("clears a completed grocery's old quantity and fresh timing explicitly", async () => {
+    const added = await call("/api/items", { method: "POST", token: env.API_TOKEN, body: {
+      name: "Eggs", store: "local", category: "refrigerated", quantityNote: "2 dozen", checked: true, fresh: true, buyDate: "2026-10-20",
+    } });
+    const id = (added.json?.item as Json).id;
+    const revived = await call(`/api/items/${id}`, { method: "PATCH", token: env.API_TOKEN, body: {
+      checked: false, quantityNote: null, fresh: false, buyDate: null,
+    } });
+    expect(revived.status).toBe(200);
+    expect(revived.json?.item).toMatchObject({ checked: false, quantityNote: null, fresh: false, buyDate: null });
   });
 
   it("rejects a missing or wrong sign-in", async () => {
@@ -654,6 +683,8 @@ describe("grocery API", () => {
   });
 
   it("saves a recipe, plans it, and shops its ingredients once", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-19T12:00:00Z"));
     const token = env.API_TOKEN;
     const created = await call("/api/recipes", {
       method: "POST",
@@ -841,6 +872,8 @@ describe("grocery API", () => {
   });
 
   it("does not add one planned meal twice when the week is added later", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-19T12:00:00Z"));
     const token = env.API_TOKEN;
     const created = await call("/api/recipes", {
       method: "POST",
@@ -861,6 +894,8 @@ describe("grocery API", () => {
   });
 
   it("adds groceries when a recipe is planned and takes them back when it changes", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-19T12:00:00Z"));
     const token = env.API_TOKEN;
     const chili = await call("/api/recipes", {
       method: "POST",
@@ -925,6 +960,8 @@ describe("grocery API", () => {
   });
 
   it("replaces a week of recipes for a helper and reads it back", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-19T12:00:00Z"));
     const token = env.API_TOKEN;
     const first = await call("/api/week", {
       method: "PUT",
@@ -2335,7 +2372,7 @@ describe("grocery API", () => {
     expect(js).toContain("Edit recipe");
     expect(js).not.toContain("Delete item");
     expect(js).not.toContain("Used in");
-    expect(js).toContain('data-form="add-item"');
+    expect(js).toContain('aria-labelledby="add-title"');
     expect(js).toContain(">Add</button>");
     expect(js).not.toContain("add-done");
     expect(js).toContain("guessSection");
@@ -2355,17 +2392,17 @@ describe("grocery API", () => {
     expect(addForm).not.toContain("<form");
     expect(addForm).not.toContain('type="hidden"');
     expect(addForm).toContain('name="quantityNote"');
-    expect(addForm).toContain(">Quantity</span>");
+    expect(addForm).toContain(">Quantity <span");
     expect(addForm).toContain(">Store</span>");
     expect(addForm).toContain(">Section</span>");
-    expect(addForm).toContain(">Fresh</span>");
+    expect(addForm).toContain(">Time-sensitive / fresh</span>");
     expect(addForm).not.toContain('data-action="toggle-details"');
     expect(addForm).not.toContain(">Details</button>");
     expect(addForm).toContain("add-dock");
     expect(addForm).not.toContain("storeFieldHtml");
     expect(addForm).not.toContain("sectionFieldHtml");
-    expect(addForm).not.toContain("More details");
-    expect(addForm).not.toContain("more-details");
+    expect(addForm).toContain("More details");
+    expect(addForm).toContain("more-details");
     expect(addForm).not.toContain('name="category"');
     expect(addForm).not.toContain(">Aisle");
     expect(addForm).toContain('class="sheet add-sheet"');
@@ -2382,7 +2419,7 @@ describe("grocery API", () => {
     expect(pickStore).toContain("choice === current");
     expect(pickStore).toContain('choice = ""');
     expect(js).toContain('data-action="edit-store"');
-    expect(js).not.toContain("Manage stores");
+    expect(js).toContain("Manage stores");
     expect(js).toContain("Shelf-stable");
     expect(js).toContain('data-action="confirm-remove-store"');
     expect(js).toContain("will have no store.");
@@ -2403,7 +2440,7 @@ describe("grocery API", () => {
     expect(addForm).not.toContain('name="brand"');
     expect(addForm).not.toContain(">Brand");
     expect(addForm).toContain('placeholder="Add something..."');
-    expect(addForm).not.toContain('name="notes"');
+    expect(addForm).toContain('name="notes"');
     const freshRow = js.slice(js.indexOf("function freshRowHtml"), js.indexOf("function aisleFor"));
     expect(freshRow).toContain(">Fresh</span>");
     expect(freshRow).toContain('name="fresh"');
@@ -2414,7 +2451,7 @@ describe("grocery API", () => {
     expect(addForm).not.toContain("checkbox");
     expect(addForm).toContain("suggestHtml(filteredSuggestions())");
     const suggestions = js.slice(js.indexOf("function filteredSuggestions"), js.indexOf("function suggestHtml"));
-    expect(suggestions).toContain("if (!query || memoryKey(state.suggestHold) === query) return []");
+    expect(suggestions).toContain("query && memoryKey(state.suggestHold) === query");
     expect(suggestions).toContain(".slice(0, 5)");
     expect(suggestions).toContain("onList");
     expect(suggestions).toContain("isActiveGrocery");
@@ -2439,7 +2476,7 @@ describe("grocery API", () => {
     expect(js).toContain("function onSheetLockMove");
     expect(addForm).not.toContain("checkIcon");
     expect(addForm).not.toContain("Optional");
-    expect(addForm).toContain("sectionTouched");
+    expect(addForm).toContain("addSectionValue");
     const editItem = js.slice(js.indexOf('state.sheet?.kind === "edit-item"'), js.indexOf('state.sheet?.kind === "pick-date"'));
     expect(editItem).not.toContain("usedInHtml");
     expect(editItem).not.toContain("Used in");
@@ -2587,7 +2624,7 @@ describe("grocery API", () => {
     expect(js).toContain("Added to ");
     expect(js).toContain("focusCalendarDate");
     expect(js).not.toContain('kind: "day"');
-    expect(js).toContain("dataset.session");
+    expect(js).toContain("if (me.status === 401)");
     expect(js).toContain("login-brand");
     expect(js).toContain("markImg(88)");
     expect(js).not.toContain('class="splash"');
@@ -2616,10 +2653,10 @@ describe("grocery API", () => {
     expect(js).toContain("function screenBehindPick");
     expect(js).toContain("function parkTodayHero");
     expect(js).toContain("function restoreTodayHero");
-    expect(shell).toContain("grocery-shell-v106");
-    expect(shell).toContain("/styles.css?v=94");
-    expect(shell).toContain("/app.js?v=101");
-    const listed = js.slice(js.indexOf("function closeToListed"), js.indexOf("function syncAddChrome"));
+    expect(shell).toContain("grocery-shell-v107");
+    expect(shell).toContain("/styles.css?v=95");
+    expect(shell).toContain("/app.js?v=102");
+    const listed = js.slice(js.indexOf("function addFieldsHtml"), js.indexOf("function addFeedbackHtml"));
     expect(listed).toContain("activeListed");
     expect(listed).not.toContain("doneOpen = true");
     const revive = js.slice(js.indexOf("async function reactivateGrocery"), js.indexOf("async function addGrocery"));
@@ -2664,16 +2701,16 @@ describe("grocery API", () => {
     expect(openAdd.indexOf("render()")).toBeLessThan(openAdd.indexOf(".focus("));
     expect(openAdd).not.toContain("await ");
     const suggest = js.slice(js.indexOf("function suggestHtml"), js.indexOf("function buyLabel"));
-    expect(suggest).toContain("+ ${esc(row.name)}");
-    expect(suggest).toContain("On the list");
+    expect(suggest).not.toContain("+ ${esc(row.name)}");
+    expect(suggest).toContain("Already on your list");
     expect(suggest).not.toContain("suggestionMeta");
     const suggestTap = js.slice(js.indexOf("function useSuggestion"), js.indexOf("async function saveNewOrRevive"));
     expect(suggestTap).toContain("state.suggestHold = name");
     expect(suggestTap).not.toContain("saveNewOrRevive");
     expect(suggestTap).not.toContain("submitAdd");
     const enterKey = js.slice(js.indexOf("function onKeyDown"), js.indexOf("function guessSection"));
-    expect(enterKey).toContain("event.target.blur()");
-    expect(enterKey).not.toContain("submitAdd");
+    expect(enterKey).not.toContain("event.target.blur()");
+    expect(enterKey).toContain("submitAdd()");
     expect(js).not.toContain('data-action="toggle-swipe-debug"');
     expect(css).toContain(".today-head h1");
     expect(css).toContain(".today-head {\n  flex: none;\n  margin-bottom: 0.8rem;\n}");

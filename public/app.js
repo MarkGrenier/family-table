@@ -17,6 +17,12 @@ const state = {
   addFocus: "name",
   addSectionOpen: false,
   addDetails: false,
+  addBusy: false,
+  addMessage: "",
+  addUndo: null,
+  addRequest: null,
+  offline: false,
+  cachedAt: null,
   buyDayOpen: false,
   revealId: "",
   lastStore: null,
@@ -74,6 +80,9 @@ const AISLE_GROUPS = [
 function blankAddDraft() {
   return {
     quantityNote: "",
+    quantityTouched: false,
+    notesTouched: false,
+    sourceKey: "",
     store: "",
     storeDefault: "",
     category: "shelf",
@@ -277,19 +286,72 @@ document.addEventListener("focusout", (event) => {
 });
 
 boot();
-setInterval(() => refresh(false), 5000);
+setInterval(() => {
+  if (document.visibilityState === "visible" && state.page?.kind !== "add-item") refresh(false);
+}, 5000);
+window.addEventListener("online", () => refresh(true));
+window.addEventListener("offline", () => {
+  state.offline = true;
+  if (state.page?.kind === "add-item") paintAddForm();
+  else render();
+});
+
+const LIST_CACHE = "family-table-last-list-v1";
+let lastFullRefresh = 0;
+
+function cacheList() {
+  state.cachedAt = new Date().toISOString();
+  try {
+    localStorage.setItem(LIST_CACHE, JSON.stringify({
+      items: state.items, stores: state.stores, memory: state.memory,
+      recipes: state.recipes, plan: state.plan, events: state.events, savedAt: state.cachedAt,
+    }));
+  } catch { /* Storage can be full or unavailable. */ }
+}
+
+function restoreList() {
+  try {
+    const data = JSON.parse(localStorage.getItem(LIST_CACHE) || "null");
+    if (!data || !Array.isArray(data.items) || !Array.isArray(data.stores)) return false;
+    for (const key of ["items", "stores", "recipes", "plan", "events"]) state[key] = Array.isArray(data[key]) ? data[key] : [];
+    state.memory = data.memory || { items: [], staples: [] };
+    state.cachedAt = data.savedAt;
+    state.authed = true;
+    state.tab = "groceries";
+    return true;
+  } catch { return false; }
+}
+
+function forgetList() {
+  try { localStorage.removeItem(LIST_CACHE); } catch { /* No cached copy. */ }
+}
+
+function connectionHtml() {
+  if (!state.offline) return "";
+  const saved = state.cachedAt ? ` Last saved ${new Date(state.cachedAt).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}.` : "";
+  return `<p class="connection-note" role="status">Offline — viewing the last saved list.${esc(saved)} Changes need a connection. <button type="button" data-action="retry-connection">Retry</button></p>`;
+}
 
 const SPLASH_MS = 1500;
 
 async function boot() {
   const started = performance.now();
   const fonts = splashFonts();
-  if (app.dataset.session === "0") state.authed = false;
-  const me = await fetch("/api/items");
-  const typed = document.getElementById("passcode");
-  if (typed) state.passcode = typed.value;
-  state.authed = me.status !== 401;
-  if (state.authed) await refresh(true);
+  try {
+    const me = await fetch("/api/items");
+    if (me.status === 401) {
+      state.offline = false;
+      state.authed = false;
+      forgetList();
+    } else {
+      if (!me.ok) throw new Error("Couldn't reach the list.");
+      state.authed = true;
+      await refresh(true);
+    }
+  } catch {
+    state.offline = true;
+    if (!restoreList()) state.authed = false;
+  }
   await fonts;
   const remain = SPLASH_MS - (performance.now() - started);
   if (remain > 0) await wait(remain);
@@ -324,37 +386,45 @@ function dismissSplash() {
 }
 
 async function refresh(force) {
-  if (!state.authed) return;
+  if (!state.authed || state.addBusy) return;
   if (checkouts.size && !force) return;
   const serial = ++refreshSerial;
   try {
     const range = visibleRange();
+    const full = force || state.tab !== "groceries" || Date.now() - lastFullRefresh > 60000;
     const [items, recipes, plan, events, stores, memory] = await Promise.all([
       api("/api/items"),
-      api("/api/recipes"),
-      api(`/api/plan?from=${range.from}&to=${range.to}`),
-      api(`/api/events?from=${range.from}&to=${range.to}`),
-      api("/api/stores"),
-      api("/api/items/history").catch(() => null),
+      full ? api("/api/recipes") : { recipes: state.recipes },
+      full ? api(`/api/plan?from=${range.from}&to=${range.to}`) : { plan: state.plan },
+      full ? api(`/api/events?from=${range.from}&to=${range.to}`) : { events: state.events },
+      full ? api("/api/stores") : { stores: state.stores },
+      full ? api("/api/items/history").catch(() => null) : null,
     ]);
     if (serial !== refreshSerial) return;
+    state.offline = false;
+    if (full) lastFullRefresh = Date.now();
     state.items = items.items || [];
     if (memory) state.memory = { items: memory.items || [], staples: memory.staples || [] };
     state.stores = stores.stores || [];
     state.recipes = recipes.recipes || [];
     state.plan = applyPlanPending(mergeDated(state.plan, plan.plan || [], range));
     state.events = mergeDated(state.events, events.events || [], range);
+    cacheList();
     state.error = "";
+    if (state.page?.kind === "add-item") { paintAddForm(); return; }
     if ((force || !isTyping()) && !gesture?.dragging && gesture?.kind !== "back" && gesture?.kind !== "sheet" && !sheetClosing && !edgeAnimating) render();
   } catch (error) {
     if (serial !== refreshSerial) return;
     if (error.status === 401) {
       state.authed = false;
+      forgetList();
       render();
       return;
     }
+    state.offline = true;
+    if (!state.cachedAt) restoreList();
     if (force) {
-      state.error = "Couldn't refresh just now.";
+      state.error = "Couldn't refresh just now. Your last saved list is still available.";
       render();
     }
   }
@@ -366,9 +436,12 @@ function isTyping() {
 }
 
 async function api(path, options = {}) {
+  if (state.offline && options.method && options.method !== "GET" && path !== "/api/login") {
+    throw new Error("You're offline. Reconnect to save this change.");
+  }
   const response = await fetch(path, {
     method: options.method || "GET",
-    headers: options.body ? { "Content-Type": "application/json" } : undefined,
+    headers: { ...(options.body ? { "Content-Type": "application/json" } : {}), ...options.headers },
     body: options.body ? JSON.stringify(options.body) : undefined,
   });
   const text = await response.text();
@@ -429,6 +502,7 @@ function render(force = false) {
     pinSheets();
     markSwipeBack();
     markSheetOpen();
+    manageAddFocus();
   };
   if (state.loading) {
     finish();
@@ -447,6 +521,11 @@ function render(force = false) {
     app.innerHTML = loginHtml();
     const fresh = document.getElementById("passcode");
     if (fresh && state.passcode) fresh.value = state.passcode;
+    finish();
+    return;
+  }
+  if (state.page?.kind === "add-item" && !state.sheet && !document.querySelector(".edit-item-sheet") && document.getElementById("add-form")) {
+    paintAddForm();
     finish();
     return;
   }
@@ -483,6 +562,7 @@ function shownSurface() {
 function loginHtml() {
   return `<main class="login">
     <div class="login-brand">${markImg(88)}<h1>Family Table</h1></div>
+    ${state.offline ? `<p class="connection-note" role="status">Connect to open your list. <button type="button" data-action="retry-connection">Retry</button></p>` : ""}
     <form id="login-form">
       <div class="pass-box">
         <input id="passcode" name="passcode" type="password" autocomplete="current-password" autocorrect="off" autocapitalize="off" spellcheck="false" inputmode="text" placeholder="Enter family passcode" aria-label="Passcode">
@@ -1198,6 +1278,8 @@ function groceriesHtml() {
     return `<h2 class="section-head store-head" data-store-head="${esc(block.id)}">${esc(block.label)}</h2>${aisles}`;
   }).join("");
   return `<div class="title-row"><h1>Groceries</h1><button class="icon-green" type="button" data-action="grocery-menu" aria-label="List options">${dots()}</button></div>
+    ${connectionHtml()}
+    ${state.error ? `<p class="error" role="alert">${esc(state.error)}</p>` : ""}
     ${body}
     ${body ? "" : `<p class="empty">The list is clear.</p>`}
     ${state.doneOpen && done.length ? `<h2 class="section-head">Completed</h2>${done.map((item) => groceryRow(item)).join("")}` : ""}
@@ -1249,16 +1331,16 @@ function itemHtml(id) {
 
 function filteredSuggestions() {
   const query = memoryKey(state.addQuery);
-  if (!query || memoryKey(state.suggestHold) === query) return [];
-  const active = new Set(state.items.filter((item) => isActiveGrocery(item)).map((item) => memoryKey(item.name)));
+  if (query && memoryKey(state.suggestHold) === query) return [];
+  const active = new Set(state.items.filter(isActiveGrocery).map((item) => memoryKey(item.name)));
   return suggestionRows()
-    .filter((row) => row.key.includes(query))
+    .filter((row) => query ? row.key.includes(query) : !active.has(row.key))
     .sort((a, b) => {
-      const aStart = a.key.startsWith(query) ? 1 : 0;
-      const bStart = b.key.startsWith(query) ? 1 : 0;
+      const aStart = query && a.key.startsWith(query) ? 1 : 0;
+      const bStart = query && b.key.startsWith(query) ? 1 : 0;
       if (aStart !== bStart) return bStart - aStart;
-      if (a.count !== b.count) return b.count - a.count;
       if (a.recency !== b.recency) return a.recency < b.recency ? 1 : -1;
+      if (a.count !== b.count) return b.count - a.count;
       return a.name.localeCompare(b.name);
     })
     .slice(0, 5)
@@ -1266,10 +1348,12 @@ function filteredSuggestions() {
 }
 
 function suggestHtml(rows) {
-  return rows.map((row) => {
-    const listed = row.onList ? `<span class="suggest-meta">On the list</span>` : "";
-    return `<button class="suggest${row.onList ? " is-onlist" : ""}" type="button" data-action="use-suggest" data-name="${esc(row.name)}" data-store="${esc(row.store)}" data-section="${esc(row.section || "")}" data-category="${esc(row.category || "")}" data-brand="${esc(row.brand || "")}" data-asin="${esc(row.asin || "")}" data-fresh="${row.fresh ? "1" : "0"}"><span class="suggest-name">+ ${esc(row.name)}</span>${listed}</button>`;
-  }).join("");
+  if (!rows.length) return "";
+  const title = state.addQuery.trim() ? "Suggestions" : "Buy again";
+  return `<p class="add-label">${title}</p>${rows.map((row) => {
+    const meta = row.onList ? "Already on your list" : storeLabel(row.store);
+    return `<button class="suggest${row.onList ? " is-onlist" : ""}" type="button" data-action="use-suggest" data-name="${esc(row.name)}"><span class="suggest-name">${esc(row.name)}</span><span class="suggest-meta">${esc(meta)}</span></button>`;
+  }).join("")}`;
 }
 
 function buyLabel(iso) {
@@ -1300,41 +1384,96 @@ function buyDayOptionsHtml(selected) {
 
 function addDetailsHtml(draft, section) {
   const on = draft.fresh === true;
-  const buy = draft.buyDate || nyToday();
-  const store = draft.store ?? "";
+  const summary = [sectionLabel(section), on ? buyLabel(draft.buyDate || nyToday()) : ""].filter(Boolean).join(" · ");
   return `<div class="add-details">
-      <label class="detail-line"><span>Quantity</span><input name="quantityNote" class="detail-input" maxlength="140" value="${esc(draft.quantityNote || "")}" autocomplete="off" enterkeyhint="done" aria-label="Quantity"></label>
-      <div class="choice-block">
-        <span class="choice-label">Store</span>
-        ${storePillsHtml(store)}
-        <button class="quiet-link" type="button" data-action="edit-stores">Edit stores</button>
-        ${state.storeAdd ? `<div class="new-store"><input class="field-box" name="newStore" maxlength="40" placeholder="Store name" aria-label="New store" autocomplete="off" enterkeyhint="done"><button class="text-green" type="button" data-action="save-store">Add</button></div>` : ""}
-        ${state.storeEditOpen ? `<div class="store-edit-menu">${storeManagerHtml()}</div>` : ""}
+      <label class="detail-line"><span>Quantity <span class="optional">(optional)</span></span><input name="quantityNote" class="detail-input" maxlength="140" placeholder="e.g. 2 cartons" value="${esc(draft.quantityNote || "")}" autocomplete="off" enterkeyhint="go" aria-label="Quantity"></label>
+      <div class="choice-block"><span class="choice-label">Store</span>${storePillsHtml(draft.store ?? "")}</div>
+      <button class="add-more detail-line" type="button" data-action="toggle-add-details" aria-expanded="${state.addDetails}" aria-controls="add-more-details"><span>${state.addDetails ? "Fewer details" : "More details"}</span><span class="add-summary">${esc(summary)} ${state.addDetails ? "⌃" : "⌄"}</span></button>
+      <div id="add-more-details" ${state.addDetails ? "" : "hidden"}>
+        <div class="choice-block"><span class="choice-label">Section</span>${sectionPillsHtml(section)}</div>
+        <button class="detail-line fresh-line" type="button" data-action="toggle-fresh" aria-pressed="${on}"><span>Time-sensitive / fresh</span><span class="fresh-box${on ? " is-on" : ""}" aria-hidden="true"></span></button>
+        ${on ? `<button class="detail-line" type="button" data-action="toggle-buy-day" aria-expanded="${state.buyDayOpen}"><span data-buy-value>${esc(buyLabel(draft.buyDate || nyToday()))}</span></button><div class="section-drop buy-drop${state.buyDayOpen ? "" : " is-hidden"}">${buyDayOptionsHtml(draft.buyDate || nyToday())}</div>` : ""}
+        <label class="detail-line"><span>Note</span><input name="notes" class="detail-input" maxlength="500" placeholder="Brand, size, or preference" value="${esc(draft.notes || "")}" aria-label="Note" enterkeyhint="go"></label>
       </div>
-      <div class="choice-block">
-        <span class="choice-label">Section</span>
-        ${sectionPillsHtml(section)}
-      </div>
-      <button class="detail-line fresh-line" type="button" data-action="toggle-fresh" aria-pressed="${on ? "true" : "false"}"><span>Fresh</span><span class="fresh-box${on ? " is-on" : ""}" aria-hidden="true"></span></button>
-      ${on ? `<button class="detail-line" type="button" data-action="toggle-buy-day" aria-expanded="${state.buyDayOpen ? "true" : "false"}"><span data-buy-value>${esc(buyLabel(buy))}</span></button>
-      <div class="section-drop buy-drop${state.buyDayOpen ? "" : " is-hidden"}">${buyDayOptionsHtml(buy)}</div>` : ""}
     </div>`;
 }
 
 function addHtml() {
   const draft = state.addDraft || blankAddDraft();
-  const section = draft.sectionTouched ? draft.section || "" : addSectionValue(draft, state.addQuery);
-  if (!draft.storeTouched) draft.store = shownAddStore(draft, state.addQuery);
-  return `<div class="sheet add-sheet"><div id="add-form" class="add-form sheet-card" data-form="add-item">
-      <div class="topbar"><button class="back" type="button" data-action="back" aria-label="Close">✕</button><h1>Add</h1><span></span></div>
+  return `<div class="sheet add-sheet"><div id="add-form" class="add-form sheet-card" role="dialog" aria-modal="true" aria-labelledby="add-title" aria-busy="${state.addBusy}">
+      <div class="topbar"><span></span><h1 id="add-title">Add groceries</h1><button class="text-btn" type="button" data-action="back" aria-label="Done adding groceries">Done</button></div>
       <div class="add-scroll">
-        <input id="add-search" name="name" class="search-box" type="text" placeholder="Add something..." value="${esc(state.addQuery)}" maxlength="80" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="done" aria-label="Name">
-        <div id="suggest-list" class="suggest-list">${suggestHtml(filteredSuggestions())}</div>
-        ${addDetailsHtml(draft, section)}
-        ${state.error ? `<p class="error">${esc(state.error)}</p>` : ""}
+        <label class="sr-only" for="add-search">Item name</label><input id="add-search" name="name" class="search-box" type="text" placeholder="Add something..." value="${esc(state.addQuery)}" maxlength="80" autocomplete="off" autocapitalize="sentences" spellcheck="true" enterkeyhint="go">
+        <div id="add-feedback" role="status" aria-live="polite">${addFeedbackHtml()}</div>
+        <div id="suggest-list" class="suggest-list" role="group" aria-label="Item suggestions">${suggestHtml(filteredSuggestions())}</div>
+        <div id="add-fields">${addFieldsHtml(draft)}</div>
+        <p id="add-error" class="error" role="alert" ${state.error ? "" : "hidden"}>${esc(state.error)}</p>
       </div>
-      <div class="add-dock"><button class="green-btn" type="button" data-action="submit-add">Add</button></div>
+      <div class="add-dock"><button class="green-btn" type="button" data-action="submit-add" ${canSubmitAdd() ? "" : "disabled"}>${state.addBusy ? "Adding…" : activeListed(state.addQuery) ? "Already on your list" : "Add item"}</button></div>
     </div></div>`;
+}
+
+function addFieldsHtml(draft) {
+  const item = activeListed(state.addQuery);
+  if (item) return `<div class="add-existing"><strong>Already on your list</strong><p>${esc(item.name)}${qtyOf(item) ? ` · ${esc(qtyOf(item))}` : ""} · ${esc(storeLabel(storeIdOf(item)))}</p><button class="text-green" type="button" data-action="edit-listed-item" data-id="${esc(item.id)}">Edit existing item</button></div>`;
+  return addDetailsHtml(draft, addSectionValue(draft, state.addQuery));
+}
+
+function addFeedbackHtml() {
+  if (state.offline) return connectionHtml();
+  if (!state.addMessage) return "";
+  return `<div class="add-confirmation"><span>${esc(state.addMessage)}</span>${state.addUndo ? `<button type="button" class="text-green" data-action="undo-add">Undo</button>` : ""}</div>`;
+}
+
+function canSubmitAdd() {
+  return Boolean(state.addQuery.trim()) && !activeListed(state.addQuery) && !state.addBusy && !state.offline;
+}
+
+function paintAddForm() {
+  const form = document.getElementById("add-form");
+  if (!form) return;
+  const active = document.activeElement;
+  const field = form.contains(active) ? active.name : null;
+  const start = active?.selectionStart;
+  const end = active?.selectionEnd;
+  const scroll = form.querySelector(".add-scroll").scrollTop;
+  const search = form.querySelector("#add-search");
+  if (search.value !== state.addQuery) search.value = state.addQuery;
+  form.querySelector("#suggest-list").innerHTML = suggestHtml(filteredSuggestions());
+  form.querySelector("#add-fields").innerHTML = addFieldsHtml(state.addDraft || blankAddDraft());
+  form.querySelector("#add-feedback").innerHTML = addFeedbackHtml();
+  const error = form.querySelector("#add-error");
+  error.hidden = !state.error;
+  error.textContent = state.error;
+  const submit = form.querySelector('[data-action="submit-add"]');
+  submit.disabled = !canSubmitAdd();
+  submit.textContent = state.addBusy ? "Adding…" : activeListed(state.addQuery) ? "Already on your list" : "Add item";
+  form.setAttribute("aria-busy", String(state.addBusy));
+  search.readOnly = state.addBusy;
+  form.querySelector("#add-fields").inert = state.addBusy;
+  if (field && field !== "name") {
+    const replacement = [...form.querySelectorAll("input")].find((node) => node.name === field);
+    if (replacement) { replacement.focus({ preventScroll: true }); replacement.setSelectionRange(start, end); }
+  }
+  form.querySelector(".add-scroll").scrollTop = scroll;
+}
+
+function manageAddFocus() {
+  const dialog = document.getElementById("add-form");
+  const main = app.querySelector("main");
+  if (!main) return;
+  for (const node of main.children) {
+    const behind = Boolean(dialog) && !node.contains(dialog);
+    node.inert = behind;
+    if (behind) node.setAttribute("aria-hidden", "true");
+    else node.removeAttribute("aria-hidden");
+  }
+  if (dialog) {
+    dialog.inert = Boolean(state.sheet);
+    if (state.sheet) dialog.setAttribute("aria-hidden", "true");
+    else dialog.removeAttribute("aria-hidden");
+  }
+  if (dialog && !state.sheet && !dialog.contains(document.activeElement)) dialog.querySelector("#add-search")?.focus({ preventScroll: true });
 }
 
 function newRecipeHtml() {
@@ -1601,7 +1740,16 @@ function sheetHtml() {
         <button class="menu-row" type="button" data-action="toggle-done">${boxIcon()} ${state.doneOpen ? "Hide completed items" : "Show completed items"}</button>
         <button class="menu-row" type="button" data-action="mark-all">${checkOutline()} Mark all complete</button>
         <button class="menu-row" type="button" data-action="share-list">${shareIcon()} Share</button>
+        <button class="menu-row" type="button" data-action="manage-stores">${dots()} Manage stores</button>
       </div></div>`;
+  }
+  if (state.sheet?.kind === "manage-stores") {
+    return `<div class="sheet"><form class="sheet-card" role="dialog" aria-modal="true" aria-label="Manage stores" data-form="manage-stores">
+      <div class="sheet-head"><h2>Stores</h2><button class="text-green" type="button" data-action="close-sheet">Done</button></div>
+      <div class="store-edit-menu">${storeManagerHtml()}</div>
+      <div class="new-store${state.storeAdd ? "" : " is-hidden"}"><input class="field-box" name="newStore" maxlength="40" placeholder="Store name" aria-label="New store" autocomplete="off" enterkeyhint="done"><button class="text-green" type="button" data-action="save-store">Add</button></div>
+      ${state.error ? `<p class="error" role="alert">${esc(state.error)}</p>` : ""}
+    </form></div>`;
   }
   if (state.sheet?.kind === "edit-item") {
     const item = state.items.find((entry) => entry.id === state.sheet.id);
@@ -2025,6 +2173,12 @@ function onEdgeTouchMove(event) {
 
 function onPointerDown(event) {
   addPressTarget = event.target instanceof Element ? event.target : null;
+  // Keep the keyboard and sheet geometry stable until a button's click arrives.
+  // Blurring on pointerdown can otherwise move the button beneath the finger.
+  if (event.button === 0 && event.target.closest?.(".sheet button")) {
+    if (document.activeElement?.closest?.(".sheet input, .sheet textarea")) event.preventDefault();
+    return;
+  }
   if (beginEdgeBack(event)) return;
   if (beginSheetPull(event)) return;
   if (event.button !== 0 || event.isPrimary === false) return;
@@ -2194,10 +2348,10 @@ function mountSheetBackdrops() {
 }
 
 function keepOneAddField() {
-  if (state.page?.kind !== "add-item") return;
+  if (state.page?.kind !== "add-item" || state.sheet) return;
   const form = document.getElementById("add-form");
   for (const node of document.querySelectorAll("input, textarea, select")) {
-    if (form?.contains(node) && (node.id === "add-search" || node.name === "quantityNote" || node.name === "newStore" || node.name === "renameStore")) continue;
+    if (form?.contains(node)) continue;
     node.remove();
   }
 }
@@ -2229,6 +2383,7 @@ function beginSheetPull(event) {
   const sheet = event.target.closest?.(".sheet");
   const card = directCard || sheet?.querySelector(".sheet-card");
   if (!card) return false;
+  if (card.id === "add-form" && state.addBusy) return false;
   if (event.target.closest?.(".section-drop, .section-pills, .store-drop, .buy-drop")) return false;
   let scroller = card;
   if (!fromBackdrop) {
@@ -2328,6 +2483,7 @@ function endSheetPull(commit) {
 }
 
 function slideSheetAway(done) {
+  if (state.page?.kind === "add-item" && state.addBusy) return;
   const card = document.querySelector(".sheet .sheet-card");
   const leaving = card && String(card.style.transform).includes("110%");
   if (sheetClosing && (!card || leaving)) return;
@@ -2521,6 +2677,7 @@ function closePresented() {
     return;
   }
   if (state.page?.kind === "add-item") {
+    if (state.addBusy) return;
     state.page = null;
     state.tab = "groceries";
     state.addQuery = "";
@@ -2530,6 +2687,7 @@ function closePresented() {
     state.addDraft = blankAddDraft();
     state.error = "";
     render();
+    document.querySelector('[data-action="add-item"]')?.focus({ preventScroll: true });
   }
 }
 
@@ -2575,6 +2733,31 @@ async function onClick(event) {
   if (state.page?.kind === "add-item" && action !== "back" && Date.now() - nameFocusAt < 500) {
     const pressed = addPressTarget?.closest?.("[data-action]");
     if (pressed !== button) return;
+  }
+  if (action === "retry-connection") return state.authed ? refresh(true) : boot();
+  if (action === "manage-stores") {
+    state.sheet = { kind: "manage-stores" };
+    state.storeAdd = false;
+    state.storeEdit = null;
+    state.storeConfirm = null;
+    render();
+    return;
+  }
+  if (state.page?.kind === "add-item" && state.addBusy && button.closest("#add-form")) return;
+  if (action === "toggle-add-details") {
+    state.addDetails = !state.addDetails;
+    paintAddForm();
+    document.querySelector('[data-action="toggle-add-details"]')?.focus({ preventScroll: true });
+    return;
+  }
+  if (action === "undo-add") return undoAdd();
+  if (action === "edit-listed-item") {
+    state.page = null;
+    state.tab = "groceries";
+    state.sheet = { kind: "edit-item", id: button.dataset.id };
+    render(true);
+    document.querySelector(".edit-item-sheet [name=name]")?.focus();
+    return;
   }
   if (action === "toggle-passcode") {
     const input = document.getElementById("passcode");
@@ -2836,6 +3019,9 @@ async function onClick(event) {
     state.page = { kind: "add-item" };
     state.addQuery = "";
     state.suggestHold = "";
+    state.addMessage = "";
+    state.addUndo = null;
+    state.addRequest = null;
     state.addFocus = "name";
     state.addDetails = false;
     state.addSectionOpen = false;
@@ -2960,15 +3146,15 @@ function onInput(event) {
     const field = event.target.name;
     const draft = state.addDraft;
     if (field === "quantityNote") {
-      if (draft) draft.quantityNote = event.target.value;
+      if (draft) { draft.quantityNote = event.target.value; draft.quantityTouched = true; }
       return;
     }
     if (field !== "name") return;
     state.addQuery = event.target.value;
     if (memoryKey(state.addQuery) !== memoryKey(state.suggestHold)) state.suggestHold = "";
-    const list = document.getElementById("suggest-list");
-    if (list) list.innerHTML = suggestHtml(filteredSuggestions());
-    syncAddChrome();
+    hydrateAddDraft(state.addQuery);
+    state.error = "";
+    paintAddForm();
     return;
   }
   if (onAddField(event)) return;
@@ -2985,6 +3171,7 @@ async function signIn(passcode) {
   state.loginError = "";
   try {
     await api("/api/login", { method: "POST", body: { passcode: value } });
+    state.offline = false;
     state.authed = true;
     state.loading = true;
     state.passcode = "";
@@ -4073,12 +4260,26 @@ async function removeStore(id) {
 }
 
 function onKeyDown(event) {
-  if (event.key !== "Enter") return;
+  const dialog = document.getElementById("add-form");
+  if (dialog && !state.sheet && event.key === "Escape") {
+    event.preventDefault();
+    if (!state.addBusy) closePresented();
+    return;
+  }
+  if (dialog && !state.sheet && event.key === "Tab") {
+    const controls = [...dialog.querySelectorAll('button:not(:disabled), input:not(:disabled), [tabindex="0"]')].filter((node) => node.getClientRects().length && !node.closest("[hidden], [inert]"));
+    const first = controls[0], last = controls.at(-1);
+    if ((event.shiftKey && document.activeElement === first) || (!event.shiftKey && document.activeElement === last)) {
+      event.preventDefault(); (event.shiftKey ? last : first)?.focus();
+    }
+    return;
+  }
+  if (event.key !== "Enter" || event.isComposing) return;
   const name = event.target?.name;
   const onAdd = event.target?.closest?.("#add-form");
-  if (onAdd && ((event.target.id === "add-search" && name === "name") || name === "quantityNote")) {
+  if (onAdd && ((event.target.id === "add-search" && name === "name") || name === "quantityNote" || name === "notes")) {
     event.preventDefault();
-    event.target.blur();
+    submitAdd();
     return;
   }
   if (name !== "newStore" && name !== "renameStore") return;
@@ -4096,7 +4297,9 @@ function onKeyDown(event) {
 function guessSection(name) {
   const n = String(name || "").trim().toLowerCase();
   if (!n) return "other";
-  if (/soap|detergent|paper towel|trash bag|foil|sponge|cleaner|bleach/.test(n)) return "household";
+  if (/\b(coconut milk|almond milk|oat milk|soy milk|peanut butter|almond butter|cashew butter|egg noodles|canned tomatoes|cream of)\b/.test(n)) return "pantry";
+  if (/\b(steak sauce|fish sauce|oyster sauce)\b/.test(n)) return "oils";
+  if (/soap|detergent|toilet paper|tissue|paper towel|trash bag|foil|sponge|cleaner|bleach/.test(n)) return "household";
   if (/frozen|ice cream/.test(n)) return "frozen";
   if (/bread|bagel|bun|roll|tortilla|pita|baguette/.test(n)) return "bakery";
   if (/milk|cheese|yogurt|butter|cream|egg/.test(n) && !/eggplant|cream of/.test(n)) return "dairy";
@@ -4121,6 +4324,7 @@ function onAddField(event) {
   const name = event.target.name;
   if (name === "quantityNote" || name === "notes") {
     draft[name] = event.target.value;
+    if (name === "notes") draft.notesTouched = true;
     return true;
   }
   if (name === "fresh") {
@@ -4195,90 +4399,120 @@ function matchedCompleted(name) {
 
 function addSectionValue(draft, name) {
   if (draft?.sectionTouched) return draft.section || "";
+  if (draft?.section) return draft.section;
   const done = matchedCompleted(name);
   if (done?.section) return done.section;
   const named = String(name || "").trim();
   return named ? guessSection(named) : "";
 }
 
-function shownAddStore(draft, name) {
-  if (draft?.storeTouched) return draft.store ?? "";
-  const done = matchedCompleted(name);
-  if (done) return storeIdOf(done);
-  return draft?.storeDefault ?? draft?.store ?? "";
-}
-
-function closeToListed(name) {
-  const item = activeListed(name);
-  if (!item) return false;
-  state.doneOpen = false;
-  state.revealId = item.id;
-  slideSheetAway(closePresented);
-  return true;
-}
-
-function syncAddChrome() {
+function hydrateAddDraft(name) {
   const draft = state.addDraft;
   if (!draft) return;
-  const name = state.addQuery;
-  if (!draft.sectionTouched) {
-    paintSectionPills(document.getElementById("add-form"), addSectionValue(draft, name));
+  const key = memoryKey(name);
+  if (draft.sourceKey === key) return;
+  draft.sourceKey = key;
+  const item = matchedCompleted(name);
+  const row = suggestionRows().find((entry) => entry.key === key);
+  if (!draft.storeTouched) draft.store = row?.store ?? (item ? storeIdOf(item) : draft.storeDefault);
+  if (!draft.sectionTouched) draft.section = row?.section || item?.section || guessSection(name);
+  if (!draft.quantityTouched) draft.quantityNote = item?.quantityNote || "";
+  if (!draft.notesTouched) draft.notes = item?.notes || "";
+  if (!draft.freshTouched) {
+    draft.fresh = Boolean(item?.fresh ?? row?.fresh);
+    // A purchase from a previous trip must never inherit an expired date.
+    draft.buyDate = draft.fresh ? nyToday() : "";
   }
-  if (!draft.storeTouched) {
-    const store = shownAddStore(draft, name);
-    draft.store = store;
-    paintStorePills(document.getElementById("add-form"), store);
-  }
+  draft.brand = row?.brand || item?.brand || "";
+  draft.asin = row?.asin || item?.asin || "";
 }
 
-function fieldsFromDraft(draft, name, row) {
-  const store = row ? (row.store ?? draft.store ?? "") : (draft.store == null ? "" : String(draft.store));
-  const section = row
-    ? (row.section || addSectionValue(draft, name))
-    : addSectionValue(draft, name);
-  const category = row ? savedCategory(store, section, row.category || "") : aisleFor(store, section);
+function fieldsFromDraft(draft, name) {
+  const store = draft.store ?? "";
+  const section = addSectionValue(draft, name);
   const fresh = draft.fresh === true;
   return {
-    quantityNote: String(draft.quantityNote || "") || null,
+    quantityNote: String(draft.quantityNote || "").trim() || null,
     store,
-    category,
+    category: savedCategory(store, section, ""),
     section,
-    notes: null,
+    notes: String(draft.notes || "").trim() || null,
     fresh,
     buyDate: fresh ? draft.buyDate || nyToday() : null,
-    brand: row?.brand || draft.brand || null,
-    asin: row?.asin || draft.asin || null,
-    storeTouched: Boolean(draft.storeTouched),
-    sectionTouched: Boolean(draft.sectionTouched),
-    freshTouched: Boolean(draft.freshTouched),
+    brand: draft.brand || null,
+    asin: draft.asin || null,
   };
 }
 
-function finishAddSheet() {
-  state.page = null;
-  state.tab = "groceries";
-  state.addFocus = "name";
-  state.addDetails = false;
+function finishAddSheet(store) {
+  state.addQuery = "";
+  state.suggestHold = "";
+  state.addRequest = null;
   state.addSectionOpen = false;
   state.buyDayOpen = false;
-  state.storeOpen = false;
-  state.addDraft = blankAddDraft();
-  render();
+  state.addDraft = { ...blankAddDraft(), store, storeDefault: store, storeTouched: true };
+  paintAddForm();
+  document.getElementById("add-search")?.focus({ preventScroll: true });
+  document.querySelector(".add-scroll")?.scrollTo(0, 0);
 }
 
 async function submitAdd() {
+  if (!canSubmitAdd()) return;
   const draft = state.addDraft || blankAddDraft();
   const name = String(state.addQuery || "").trim();
-  if (!name) return;
-  if (activeListed(name)) {
-    closeToListed(name);
-    return;
+  const extra = fieldsFromDraft(draft, name);
+  const previous = completedListed(name);
+  // Discard any poll that started before this mutation.
+  ++refreshSerial;
+  state.addBusy = true;
+  state.error = "";
+  paintAddForm();
+  try {
+    const item = await saveNewOrRevive(name, extra);
+    const index = state.items.findIndex((entry) => entry.id === item.id);
+    if (index < 0) state.items.push(item);
+    else state.items[index] = item;
+    const history = state.memory.items || [];
+    state.memory.items = [item, ...history.filter((entry) => entry.id !== item.id && memoryKey(entry.name) !== memoryKey(item.name))];
+    state.addMessage = `${name} added`;
+    state.addUndo = { id: item.id, name, previous: previous ? { ...previous } : null };
+    rememberStore(extra.store);
+    cacheList();
+    state.addBusy = false;
+    finishAddSheet(extra.store);
+  } catch (error) {
+    state.addBusy = false;
+    if (error.status === 409) state.addRequest = null;
+    state.error = error.message || "Couldn't add this item. Try again.";
+    paintAddForm();
   }
-  const store = draft.store == null ? "" : String(draft.store);
-  if (store === "__add__") return;
-  const ok = await saveNewOrRevive(name, fieldsFromDraft(draft, name, null));
-  if (!ok) return;
-  finishAddSheet();
+}
+
+async function undoAdd() {
+  const undo = state.addUndo;
+  if (!undo || state.addBusy) return;
+  ++refreshSerial;
+  state.addBusy = true;
+  paintAddForm();
+  const old = undo.previous;
+  const body = old ? {
+    checked: true, quantityNote: old.quantityNote, store: storeIdOf(old), section: old.section,
+    category: old.category, fresh: Boolean(old.fresh), buyDate: old.buyDate || null, notes: old.notes || null,
+  } : { deleted: true };
+  try {
+    const data = await api(`/api/items/${undo.id}`, { method: "PATCH", body });
+    state.items = state.items.filter((entry) => entry.id !== undo.id);
+    if (old) {
+      const restored = data.item || old;
+      state.items.push(restored);
+      state.memory.items = [restored, ...(state.memory.items || []).filter((entry) => memoryKey(entry.name) !== memoryKey(restored.name))];
+    }
+    state.addMessage = `${undo.name} removed`;
+    state.addUndo = null;
+    cacheList();
+  } catch (error) { state.error = error.message; }
+  state.addBusy = false;
+  paintAddForm();
 }
 
 function savedCategory(store, section, category) {
@@ -4309,6 +4543,7 @@ function pickSection(button) {
   if (hidden) hidden.value = section;
   state.addSectionOpen = false;
   paintSectionPills(form || document, section);
+  if (form?.id === "add-form") { paintAddForm(); document.querySelector(`[data-action="pick-section"][data-section="${section}"]`)?.focus({ preventScroll: true }); }
 }
 
 function pickBuyDay(button) {
@@ -4322,6 +4557,8 @@ function pickBuyDay(button) {
   document.querySelectorAll(".buy-drop .store-option").forEach((option) => {
     option.classList.toggle("is-on", option.dataset.date === iso);
   });
+  paintAddForm();
+  document.querySelector('[data-action="toggle-buy-day"]')?.focus({ preventScroll: true });
 }
 
 function toggleFresh(button) {
@@ -4346,107 +4583,44 @@ function toggleFresh(button) {
 }
 
 function useSuggestion(button) {
-  const draft = state.addDraft || blankAddDraft();
   const name = button.dataset.name || "";
-  const store = button.dataset.store ?? "";
-  const section = button.dataset.section || "";
-  state.addDraft = draft;
   state.addQuery = name;
   state.suggestHold = name;
-  draft.store = store;
-  draft.storeTouched = true;
-  if (section) {
-    draft.section = section;
-    draft.sectionTouched = true;
-  }
-  draft.category = savedCategory(store, section || draft.section || guessSection(name), button.dataset.category || "");
-  draft.brand = button.dataset.brand || "";
-  draft.asin = button.dataset.asin || "";
-  if (button.dataset.fresh === "1") {
-    draft.fresh = true;
-    draft.freshTouched = true;
-    if (!draft.buyDate) draft.buyDate = nyToday();
-  }
-  state.storeOpen = false;
-  state.addSectionOpen = false;
-  state.buyDayOpen = false;
-  render();
+  hydrateAddDraft(name);
+  state.error = "";
+  paintAddForm();
+  document.getElementById("add-search")?.focus({ preventScroll: true });
 }
 
 async function saveNewOrRevive(name, extra) {
   const done = completedListed(name);
   if (done) {
-    const revived = await reactivateGrocery(done, extra);
-    if (revived === "error") return false;
-    if (revived === "ok") return true;
+    try { return await reactivateGrocery(done, extra); }
+    catch (error) { if (error.status !== 404) throw error; }
   }
   return addGrocery(name, extra);
 }
 
 async function reactivateGrocery(item, extra) {
-  const body = { checked: false };
-  if (extra?.quantityNote) body.quantityNote = extra.quantityNote;
-  if (extra?.storeTouched) {
-    body.store = extra.store ?? "";
-    body.category = extra.category || aisleFor(body.store, extra.section || item.section || "");
-  }
-  if (extra?.sectionTouched) {
-    body.section = extra.section || null;
-    body.category = extra.category || aisleFor(extra.storeTouched ? extra.store || "" : storeIdOf(item), extra.section || "");
-  }
-  if (extra?.freshTouched) {
-    body.fresh = extra.fresh === true;
-    body.buyDate = body.fresh ? extra.buyDate || nyToday() : null;
-  }
-  try {
-    await api(`/api/items/${item.id}`, { method: "PATCH", body });
-    item.checked = false;
-    state.doneOpen = false;
-    state.revealId = item.id;
-    state.addQuery = "";
-    if (extra?.storeTouched) rememberStore(extra.store || "");
-    await refresh(true);
-    return "ok";
-  } catch (error) {
-    if (error.status === 404) return "missing";
-    state.error = error.message;
-    render();
-    return "error";
-  }
+  const body = {
+    checked: false, quantityNote: extra.quantityNote, store: extra.store,
+    section: extra.section, category: extra.category, notes: extra.notes,
+    fresh: extra.fresh, buyDate: extra.fresh ? extra.buyDate || nyToday() : null,
+  };
+  const data = await api(`/api/items/${item.id}`, { method: "PATCH", body });
+  return data.item;
 }
 
 async function addGrocery(name, extra) {
-  const clean = String(name || "").trim();
-  if (!clean) return false;
-  const section = extra?.section || guessSection(clean);
-  const store = extra && Object.prototype.hasOwnProperty.call(extra, "store") ? extra.store : "local";
-  const category = savedCategory(store, section, extra?.category || "");
-  try {
-    await api("/api/items", {
-      method: "POST",
-      body: {
-        name: clean,
-        store,
-        category,
-        section,
-        quantityNote: extra?.quantityNote || null,
-        notes: extra?.notes || null,
-        fresh: extra?.fresh === true,
-        buyDate: extra?.fresh === true ? extra.buyDate || null : null,
-        brand: extra?.brand || null,
-        asin: extra?.asin || null,
-      },
-    });
-    if (extra && Object.prototype.hasOwnProperty.call(extra, "store")) rememberStore(extra.store || "");
-    state.addQuery = "";
-    state.addDraft = blankAddDraft();
-    await refresh(true);
-    return true;
-  } catch (error) {
-    state.error = error.message;
-    render();
-    return false;
-  }
+  const body = {
+    name: String(name).trim(), store: extra.store, category: extra.category, section: extra.section,
+    quantityNote: extra.quantityNote, notes: extra.notes, fresh: extra.fresh,
+    buyDate: extra.fresh ? extra.buyDate : null, brand: extra.brand, asin: extra.asin,
+  };
+  const signature = JSON.stringify(body);
+  if (state.addRequest?.signature !== signature) state.addRequest = { signature, key: crypto.randomUUID() };
+  const data = await api("/api/items", { method: "POST", headers: { "Idempotency-Key": state.addRequest.key }, body });
+  return data.item;
 }
 
 function openEdit(id) {
@@ -4604,7 +4778,7 @@ function suggestionRows() {
     }
   };
   const history = state.memory?.items;
-  const source = Array.isArray(history) ? history : state.items;
+  const source = Array.isArray(history) && history.length ? history : state.items;
   for (const item of source) {
     remember(item.name, {
       fromItem: true,

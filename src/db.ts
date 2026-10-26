@@ -373,8 +373,22 @@ function stapleBind(id: string, fields: StapleInput, now: string) {
   return [id, fields.name, fields.store, fields.category, fields.brand, fields.asin, fields.barcode, now, now] as const;
 }
 
-export async function createItem(db: D1Database, input: ItemInput): Promise<Item> {
-  const id = crypto.randomUUID();
+export async function createItem(db: D1Database, input: ItemInput, requestId?: string): Promise<Item> {
+  // A retry of the same Add uses the item's primary key, including across workers.
+  // A changed payload must use a new key; never silently substitute another item.
+  const id = requestId || crypto.randomUUID();
+  const replay = async () => {
+    const existing = requestId ? await getItem(db, id) : null;
+    if (!existing) return null;
+    const expected = { ...input, fresh: Boolean(input.fresh), buyDate: input.fresh ? input.buyDate ?? null : null, staple: Boolean(input.barcode) || input.staple };
+    const fields = ["name", "quantityNote", "store", "category", "section", "notes", "fresh", "buyDate", "brand", "asin", "barcode", "checked", "staple", "storeTag", "imageUrl", "substitute"] as const;
+    if (fields.some((field) => (existing[field] ?? null) !== (expected[field] ?? null))) {
+      throw new HttpError(409, "This add request has already been used. Try adding again.");
+    }
+    return existing;
+  };
+  const previous = await replay();
+  if (previous) return previous;
   const now = nowIso();
   const remember = Boolean(input.barcode) || input.staple;
   let stapleId: string | null = null;
@@ -438,6 +452,8 @@ export async function createItem(db: D1Database, input: ItemInput): Promise<Item
   try {
     await db.batch(statements);
   } catch (error) {
+    const previous = await replay();
+    if (previous) return previous;
     if (stapleId) {
       const existing = await openItemForStaple(db, stapleId);
       if (existing) return existing;

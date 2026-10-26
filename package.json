@@ -16,11 +16,13 @@
     "seed": "wrangler d1 execute grocery --local --yes --file=./seed.sql",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "deploy": "wrangler deploy"
+    "deploy": "wrangler deploy",
+    "test:ui": "node --test scripts/check-grocery-ui.mjs"
   },
   "devDependencies": {
     "@cloudflare/vitest-plugin": "^1.4.4",
     "@cloudflare/workers-types": "^5.20261018.1",
+    "playwright": "^1.64.1",
     "typescript": "^5.9.3",
     "vitest": "^5.0.5",
     "wrangler": "^4.151.1"

@@ -1,5 +1,5 @@
-const CACHE = "grocery-shell-v106";
-const SHELL = ["/", "/styles.css?v=94", "/app.js?v=101", "/manifest.json", "/mark.svg", "/fonts/fraunces-roman.woff2", "/fonts/fraunces-italic.woff2", "/splash/grain.svg", "/icons/icon-192.png", "/icons/apple-touch-icon.png"];
+const CACHE = "grocery-shell-v107";
+const SHELL = ["/", "/styles.css?v=95", "/app.js?v=102", "/manifest.json", "/mark.svg", "/fonts/fraunces-roman.woff2", "/fonts/fraunces-italic.woff2", "/splash/grain.svg", "/icons/icon-192.png", "/icons/apple-touch-icon.png"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(SHELL)));
@@ -36,7 +36,7 @@ self.addEventListener("fetch", (event) => {
           const home = await caches.match("/");
           if (home) return home;
         }
-        return new Response("The list is saved on the phone, but it can't be reached right now.", {
+        return new Response("Can't open Family Table right now. Reconnect and try again.", {
           status: 503,
           headers: { "Content-Type": "text/plain; charset=utf-8" },
         });
