@@ -14,6 +14,10 @@ const state = {
   recipeSort: "favorites",
   addQuery: "",
   addError: "",
+  addDetailsOpen: false,
+  addQty: "",
+  addSection: "",
+  addStore: "",
   suggestHold: "",
   storeFilter: "",
   addBusy: false,
@@ -103,7 +107,17 @@ app.addEventListener("submit", onSubmit);
 app.addEventListener("input", onInput);
 app.addEventListener("pointerdown", onPointerDown);
 app.addEventListener("mousedown", (event) => {
-  if (event.target.closest?.(".add-go")) event.preventDefault();
+  if (event.target.closest?.(".add-go, .details-link, #suggest-row .chip, #store-picks .pill, #detail-stores .pill")) event.preventDefault();
+});
+app.addEventListener("focusout", (event) => {
+  if (!(event.target instanceof Element)) return;
+  if (!event.target.closest("#quick-add, #add-details, #suggest-row, #store-picks")) return;
+  setTimeout(paintAddAssist, 0);
+});
+app.addEventListener("focusin", (event) => {
+  if (!(event.target instanceof Element)) return;
+  if (!event.target.closest("#quick-add, #add-details, #suggest-row, #store-picks")) return;
+  paintAddAssist();
 });
 app.addEventListener("pointermove", onPointerMove);
 app.addEventListener("pointerup", onPointerUp);
@@ -444,8 +458,13 @@ function render(force = false) {
   if (!document.documentElement.classList.contains("sheet-open")) {
     sheetScrollY = window.scrollY || document.documentElement.scrollTop || document.body.scrollTop || 0;
   }
-  const addName = document.getElementById("add-name");
-  if (addName && document.activeElement === addName) state.addQuery = addName.value;
+  const addItem = document.getElementById("add-item");
+  if (addItem && document.activeElement === addItem) state.addQuery = addItem.value;
+  const addQty = document.getElementById("add-qty");
+  if (addQty) state.addQty = addQty.value;
+  const addSection = document.getElementById("add-section");
+  if (addSection) state.addSection = addSection.value;
+  state.addDetailsOpen = false;
   app.innerHTML = appHtml();
   restoreTodayHero();
   finish();
@@ -1161,26 +1180,39 @@ function groceriesHtml() {
   return `<div class="title-row"><h1>Groceries</h1><button class="icon-green" type="button" data-action="grocery-menu" aria-label="List options">${dots()}</button></div>
     ${connectionHtml()}
     ${state.error ? `<p class="error" role="alert">${esc(state.error)}</p>` : ""}
-    <form id="quick-add" class="add-bar" data-form="quick-add" autocomplete="off">
-      <label class="sr-only" for="add-name">Add an item</label>
-      <input id="add-name" name="name" type="text" placeholder="Add an item" maxlength="80" enterkeyhint="go" autocomplete="off" autocapitalize="sentences" spellcheck="true" value="${esc(state.addQuery)}">
-      <button class="green-btn add-go" type="submit" data-action="submit-add">Add</button>
+    <form id="quick-add" data-form="quick-add" autocomplete="off">
+      <div class="add-bar">
+        <label class="sr-only" for="add-item">Add grocery item</label>
+        <input id="add-item" name="item" type="text" placeholder="Add an item" maxlength="80" enterkeyhint="done" autocomplete="off" autocorrect="on" autocapitalize="sentences" spellcheck="true" aria-label="Add grocery item" value="${esc(state.addQuery)}">
+        <button class="details-link" type="button" data-action="toggle-add-details" aria-expanded="false">Details</button>
+        <button class="green-btn add-go" type="submit" data-action="submit-add">Add</button>
+      </div>
+      <div id="add-details" class="add-details" hidden>
+        <input id="add-qty" name="qty" type="text" placeholder="Qty" maxlength="40" enterkeyhint="done" autocomplete="off" autocorrect="on" autocapitalize="off" spellcheck="false" aria-label="Quantity" value="${esc(state.addQty)}">
+        <select id="add-section" name="section" autocomplete="off" aria-label="Section">${sectionOptionsHtml(state.addSection)}</select>
+        <div id="detail-stores" class="store-picks" role="group" aria-label="Store">${storePicksHtml(storesInOrder())}</div>
+      </div>
     </form>
     <p id="add-error" class="error" role="alert" ${state.addError ? "" : "hidden"}>${esc(state.addError || "")}</p>
     ${addToastHtml()}
-    <div id="suggest-row" class="chip-row" role="group" aria-label="Buy again">${suggestChipsHtml()}</div>
-    ${storeFilterHtml()}
+    <div id="suggest-row" class="chip-row" role="group" aria-label="Buy again"></div>
+    <div id="store-picks" class="store-picks" role="group" aria-label="Matching stores"></div>
     <div id="grocery-list">${groceryItemsHtml()}</div>`;
 }
 
-function storeFilterHtml() {
-  const stores = storesInOrder();
-  if (!stores.length) return "";
-  const pills = stores.map((store) => {
-    const on = state.storeFilter === store.id;
-    return `<button class="pill${on ? " is-on" : ""}" type="button" data-action="filter-store" data-store="${esc(store.id)}" aria-pressed="${on ? "true" : "false"}">${esc(store.name)}</button>`;
-  }).join("");
-  return `<div id="store-filter" class="pill-row store-filter" role="group" aria-label="Store">${pills}</div>`;
+function sectionOptionsHtml(selected) {
+  const current = selected || "";
+  const options = SECTIONS.map(([id, label]) => `<option value="${esc(id)}"${id === current ? " selected" : ""}>${esc(label)}</option>`).join("");
+  return `<option value="">Section</option>${options}`;
+}
+
+function storePillButton(store) {
+  const on = state.addStore === store.id;
+  return `<button class="pill${on ? " is-on" : ""}" type="button" data-action="pick-add-store" data-store="${esc(store.id)}" aria-pressed="${on ? "true" : "false"}">${esc(store.name)}</button>`;
+}
+
+function storePicksHtml(stores) {
+  return stores.map(storePillButton).join("");
 }
 
 function suggestChipsHtml() {
@@ -1188,8 +1220,7 @@ function suggestChipsHtml() {
 }
 
 function groceryItemsHtml() {
-  let open = state.items.filter((item) => isActiveGrocery(item) || checkouts.has(item.id));
-  if (state.storeFilter) open = open.filter((item) => storeIdOf(item) === state.storeFilter);
+  const open = state.items.filter((item) => isActiveGrocery(item) || checkouts.has(item.id));
   const byStore = new Map();
   for (const item of open) {
     const id = storeIdOf(item);
@@ -1240,7 +1271,7 @@ function paintAddError() {
 
 function paintSuggest() {
   const row = document.getElementById("suggest-row");
-  if (row) row.innerHTML = suggestChipsHtml();
+  if (row) row.innerHTML = addAssistVisible() ? suggestChipsHtml() : "";
 }
 
 function paintGroceryList() {
@@ -1250,10 +1281,51 @@ function paintGroceryList() {
   paintBadge();
 }
 
-function paintStoreFilter() {
-  const row = document.getElementById("store-filter");
+function paintStorePicks() {
+  const query = addAssistVisible() ? memoryKey(addText()) : "";
+  const row = document.getElementById("store-picks");
+  if (row) {
+    const matches = query ? storesInOrder().filter((store) => memoryKey(store.name).includes(query)) : [];
+    row.innerHTML = storePicksHtml(matches);
+  }
+  const details = document.getElementById("detail-stores");
+  if (details) details.innerHTML = storePicksHtml(storesInOrder());
+}
+
+function paintAddDetails() {
+  const row = document.getElementById("add-details");
+  const link = document.querySelector("[data-action=toggle-add-details]");
   if (!row) return;
-  row.outerHTML = storeFilterHtml();
+  const engaged = addFieldFocused() || addClusterActive();
+  if (!engaged) state.addDetailsOpen = false;
+  const show = state.addDetailsOpen && engaged;
+  row.hidden = !show;
+  if (link) link.setAttribute("aria-expanded", show ? "true" : "false");
+}
+
+function paintAddAssist() {
+  paintSuggest();
+  paintStorePicks();
+  paintAddDetails();
+}
+
+function addText() {
+  const input = document.getElementById("add-item");
+  return String(input ? input.value : state.addQuery || "");
+}
+
+function addFieldFocused() {
+  const input = document.getElementById("add-item");
+  return Boolean(input && document.activeElement === input);
+}
+
+function addClusterActive() {
+  const active = document.activeElement;
+  return Boolean(active instanceof Element && active.closest("#quick-add, #add-details, #suggest-row, #store-picks"));
+}
+
+function addAssistVisible() {
+  return Boolean(addText().trim() && (addFieldFocused() || addClusterActive()));
 }
 
 function groceryRow(item, hint) {
@@ -1301,6 +1373,7 @@ function itemHtml(id) {
 
 function filteredSuggestions() {
   const query = memoryKey(state.addQuery);
+  if (!query || !addAssistVisible()) return [];
   if (query && memoryKey(state.suggestHold) === query) return [];
   const active = new Set(state.items.filter(isActiveGrocery).map((item) => memoryKey(item.name)));
   return suggestionRows()
@@ -2845,7 +2918,8 @@ async function onClick(event) {
   }
   if (action === "mark-all") return markAll();
   if (action === "share-list") return shareList();
-  if (action === "filter-store") return filterStore(button);
+  if (action === "toggle-add-details") return toggleAddDetails(button);
+  if (action === "pick-add-store") return pickAddStore(button);
   if (action === "submit-add") return submitAdd();
   if (action === "toggle-section") {
     state.addSectionOpen = !state.addSectionOpen;
@@ -2922,12 +2996,20 @@ function onInput(event) {
     if (list) list.innerHTML = recipeListHtml();
     return;
   }
-  if (event.target.id === "add-name") {
+  if (event.target.id === "add-item") {
     state.addQuery = event.target.value;
     if (memoryKey(state.addQuery) !== memoryKey(state.suggestHold)) state.suggestHold = "";
     state.addError = "";
-    paintSuggest();
+    paintAddAssist();
     paintAddError();
+    return;
+  }
+  if (event.target.id === "add-qty") {
+    state.addQty = event.target.value;
+    return;
+  }
+  if (event.target.id === "add-section") {
+    state.addSection = event.target.value;
     return;
   }
   if (event.target.id === "feedback-comment") state.comment = event.target.value;
@@ -3674,7 +3756,7 @@ function showUndo(undo) {
     state.undoFading = false;
     undoTimer = null;
     undoFadeTimer = null;
-    const add = document.getElementById("add-name");
+    const add = document.getElementById("add-item");
     if (add && document.activeElement === add) paintToast();
     else render();
   }, UNDO_MS);
@@ -4045,6 +4127,7 @@ async function removeStore(id) {
     state.stores = (state.stores || []).filter((store) => store.id !== id);
     if (state.addDraft?.store === id) state.addDraft.store = "";
     if (state.storeFilter === id) state.storeFilter = "";
+    if (state.addStore === id) state.addStore = "";
     state.storeEdit = null;
     state.storeConfirm = null;
     state.storeOpen = false;
@@ -4058,7 +4141,7 @@ async function removeStore(id) {
 
 function onKeyDown(event) {
   if (event.key !== "Enter" || event.isComposing) return;
-  if (event.target?.id === "add-name") {
+  if (event.target?.id === "add-item") {
     event.preventDefault();
     submitAdd();
     return;
@@ -4237,11 +4320,15 @@ function parseQuickAdd(raw) {
 function fieldsForQuickAdd(parsed) {
   const done = matchedCompleted(parsed.name);
   const row = suggestionRows().find((entry) => entry.key === memoryKey(parsed.name));
-  const store = state.storeFilter || "";
-  const section = done?.section || row?.section || guessSection(parsed.name);
+  const qtyField = document.getElementById("add-qty");
+  const sectionField = document.getElementById("add-section");
+  const typedQty = String(qtyField ? qtyField.value : state.addQty || "").trim();
+  const pickedSection = String(sectionField ? sectionField.value : state.addSection || "");
+  const store = state.addStore || "";
+  const section = pickedSection || done?.section || row?.section || guessSection(parsed.name);
   const fresh = Boolean(done?.fresh);
   return {
-    quantityNote: parsed.quantityNote || (done ? done.quantityNote || null : null),
+    quantityNote: typedQty || parsed.quantityNote || (done ? done.quantityNote || null : null),
     store,
     category: savedCategory(store, section, done?.category || row?.category || ""),
     section,
@@ -4253,15 +4340,22 @@ function fieldsForQuickAdd(parsed) {
   };
 }
 
-function filterStore(button) {
+function toggleAddDetails(button) {
+  state.addDetailsOpen = !state.addDetailsOpen;
+  if (button) button.setAttribute("aria-expanded", state.addDetailsOpen ? "true" : "false");
+  paintAddDetails();
+  keepAddFocus();
+}
+
+function pickAddStore(button) {
   const id = button.dataset.store || "";
-  state.storeFilter = state.storeFilter === id ? "" : id;
-  paintStoreFilter();
-  paintGroceryList();
+  state.addStore = state.addStore === id ? "" : id;
+  paintStorePicks();
+  keepAddFocus();
 }
 
 function keepAddFocus() {
-  const input = document.getElementById("add-name");
+  const input = document.getElementById("add-item");
   if (input && document.activeElement !== input) input.focus({ preventScroll: true });
 }
 
@@ -4276,7 +4370,7 @@ function revealAddedItem(id) {
 
 async function submitAdd() {
   if (state.addBusy) return;
-  const input = document.getElementById("add-name");
+  const input = document.getElementById("add-item");
   const parsed = parseQuickAdd(input ? input.value : state.addQuery);
   if (!parsed) return;
   if (input) state.addQuery = input.value;
@@ -4309,11 +4403,19 @@ async function submitAdd() {
     state.memory.items = [item, ...history.filter((entry) => entry.id !== item.id && memoryKey(entry.name) !== memoryKey(item.name))];
     state.addRequest = null;
     state.addQuery = "";
+    state.addQty = "";
+    state.addSection = "";
+    state.addStore = "";
+    state.addDetailsOpen = false;
     state.suggestHold = "";
     if (input) input.value = "";
+    const qty = document.getElementById("add-qty");
+    if (qty) qty.value = "";
+    const section = document.getElementById("add-section");
+    if (section) section.value = "";
     cacheList();
     showUndo({ id: item.id, name: parsed.name, kind: "add", previous: previous ? { ...previous } : null });
-    paintSuggest();
+    paintAddAssist();
     paintGroceryList();
     revealAddedItem(item.id);
     keepAddFocus();
@@ -4412,11 +4514,11 @@ function useSuggestion(button) {
   state.addQuery = name;
   state.suggestHold = name;
   state.addError = "";
-  const input = document.getElementById("add-name");
+  const input = document.getElementById("add-item");
   if (input) {
     input.value = name;
     input.focus();
-    paintSuggest();
+    paintAddAssist();
     paintAddError();
     return;
   }
