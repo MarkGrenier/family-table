@@ -109,18 +109,33 @@ document.addEventListener("scroll", (event) => {
     target.scrollTop = 0;
   }
 }, true);
+// Tallest viewport seen while the name field is not focused. iOS home-screen
+// apps shrink the layout viewport with the keyboard, so innerHeight minus
+// visualViewport often reads as zero even though the keyboard is up.
+let restHeight = 0;
+
+function addSheetTyping() {
+  const active = document.activeElement;
+  return active instanceof HTMLElement && !!active.closest(".add-sheet") && active.matches("input, textarea");
+}
+
 function pinSheets() {
   const vv = window.visualViewport;
   if (!vv) return;
   const root = document.documentElement;
-  const kb = Math.max(0, Math.round(window.innerHeight - vv.offsetTop - vv.height));
+  const visible = Math.round(vv.offsetTop + vv.height);
+  const typing = addSheetTyping();
+  if (!typing) restHeight = Math.max(restHeight, visible, Math.round(window.innerHeight));
+  const kb = Math.max(0, (restHeight || visible) - visible);
+  // The accessory bar (chevrons and check) paints over the bottom ~44px of the
+  // visual viewport whenever a field is focused. Reserve it for every field.
+  const acc = typing ? 44 : 0;
   root.style.setProperty("--vvt", `${Math.round(vv.offsetTop)}px`);
   root.style.setProperty("--vvh", `${Math.round(vv.height)}px`);
   root.style.setProperty("--kb", `${kb}px`);
-  // Room for the iOS keyboard accessory (chevrons and Done) so Add sits above it.
-  root.style.setProperty("--key-acc", kb > 80 ? "52px" : "0px");
-  root.classList.toggle("kb-open", kb > 80);
-  if (kb > 80) lockAddSheetScroll();
+  root.style.setProperty("--key-acc", `${acc}px`);
+  root.classList.toggle("kb-open", typing);
+  if (typing) lockAddSheetScroll();
 }
 
 function lockAddSheetScroll() {
@@ -230,6 +245,7 @@ document.addEventListener("focusin", (event) => {
   if (target?.id === "add-search" && target.name === "name") nameFocusAt = Date.now();
   if (target instanceof HTMLElement && target.closest(".add-sheet") && !sheetFocusBlocked()) {
     const settle = () => {
+      pinSheets();
       lockAddSheetScroll();
       keepAddFieldInView();
     };
@@ -248,6 +264,11 @@ document.addEventListener("focusin", (event) => {
   const card = target.closest(".sheet-card");
   if (!card || String(card.style.transform).includes("110%")) target.blur();
 }, true);
+
+document.addEventListener("focusout", (event) => {
+  if (!(event.target instanceof HTMLElement) || !event.target.closest(".add-sheet")) return;
+  setTimeout(pinSheets, 0);
+});
 
 boot();
 setInterval(() => refresh(false), 5000);
@@ -1240,8 +1261,8 @@ function filteredSuggestions() {
 
 function suggestHtml(rows) {
   return rows.map((row) => {
-    const meta = row.onList ? "On the list" : suggestionMeta(row);
-    return `<button class="suggest${row.onList ? " is-onlist" : ""}" type="button" data-action="use-suggest" data-name="${esc(row.name)}" data-store="${esc(row.store)}" data-section="${esc(row.section || "")}" data-category="${esc(row.category || "")}" data-brand="${esc(row.brand || "")}" data-asin="${esc(row.asin || "")}" data-fresh="${row.fresh ? "1" : "0"}"><span class="suggest-name">${esc(row.name)}</span><span class="suggest-meta">${esc(meta)}</span></button>`;
+    const listed = row.onList ? `<span class="suggest-meta">On the list</span>` : "";
+    return `<button class="suggest${row.onList ? " is-onlist" : ""}" type="button" data-action="use-suggest" data-name="${esc(row.name)}" data-store="${esc(row.store)}" data-section="${esc(row.section || "")}" data-category="${esc(row.category || "")}" data-brand="${esc(row.brand || "")}" data-asin="${esc(row.asin || "")}" data-fresh="${row.fresh ? "1" : "0"}"><span class="suggest-name">+ ${esc(row.name)}</span>${listed}</button>`;
   }).join("");
 }
 
@@ -2808,6 +2829,9 @@ async function onClick(event) {
     state.swipeId = null;
     state.tab = "groceries";
     render();
+    // Focus in this tap, before any await, so iOS will open the keyboard.
+    document.getElementById("add-search")?.focus({ preventScroll: true });
+    pinSheets();
     return;
   }
   if (action === "submit-add") return submitAdd();
@@ -4567,12 +4591,6 @@ function suggestionRows() {
     }
   }
   return [...groups.values()];
-}
-
-function suggestionMeta(row) {
-  const place = row.store ? storeLabel(row.store) : "";
-  if (!place || place === "No store") return "";
-  return place;
 }
 
 function lastMadeText(recipe) {
