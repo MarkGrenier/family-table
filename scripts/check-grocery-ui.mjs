@@ -162,13 +162,26 @@ async function openGroceries(page) {
   await page.goto("http://localhost/");
   await page.waitForTimeout(1700);
   await page.locator('[data-action="tab"][data-tab="groceries"]').click();
-  await page.locator("#add-item").waitFor();
+  await page.locator(".fab").waitFor();
 }
 
-async function addByEnter(page, text) {
-  const input = page.locator("#add-item");
-  await input.fill(text);
-  await input.press("Enter");
+async function openAdd(page) {
+  await page.locator(".fab").click();
+  await page.locator("#add-search").waitFor();
+}
+
+async function addBySheet(page, text, fields = {}) {
+  await openAdd(page);
+  await page.locator("#add-search").fill(text);
+  if (fields.qty != null) await page.locator("#add-qty").fill(String(fields.qty));
+  if (fields.section) await page.locator("#add-section").selectOption(fields.section);
+  if (fields.store) {
+    await page.locator("#add-form [data-action=toggle-stores]").click();
+    await page.locator(`#add-form .store-drop [data-store="${fields.store}"]`).click();
+  }
+  if (fields.note) await page.locator("#add-note").fill(fields.note);
+  if (fields.fresh) await page.locator("#add-form .fresh-box").check();
+  await page.locator("#add-form .green-btn").click();
   await page.waitForTimeout(280);
 }
 
@@ -176,25 +189,7 @@ async function firstName(page) {
   return (await page.locator("#grocery-list .g-name").first().innerText()).split("\n")[0].trim();
 }
 
-async function idleBar(page) {
-  return page.evaluate(() => {
-    const h1 = document.querySelector(".title-row h1").getBoundingClientRect();
-    const bar = document.querySelector(".add-bar").getBoundingClientRect();
-    const input = document.querySelector("#add-item").getBoundingClientRect();
-    const list = document.querySelector("#grocery-list").getBoundingClientRect();
-    return {
-      gap: Math.round(bar.top - h1.bottom),
-      barHeight: Math.round(bar.height),
-      inputHeight: Math.round(input.height),
-      listGap: Math.round(list.top - bar.bottom),
-      detailsHidden: document.querySelector("#add-details").hidden,
-      chips: document.querySelectorAll("#suggest-row .chip").length,
-      pills: document.querySelectorAll("#store-picks .pill").length,
-    };
-  });
-}
-
-test("grocery add bar, edit page, undo, store filter and long list", { timeout: 90000 }, async () => {
+test("grocery add sheet, edit page, undo, stores and long list", { timeout: 90000 }, async () => {
   const browser = await chromium.launch({
     headless: true,
     ...(process.env.CHROMIUM_EXECUTABLE_PATH ? { executablePath: process.env.CHROMIUM_EXECUTABLE_PATH } : {}),
@@ -215,48 +210,45 @@ test("grocery add bar, edit page, undo, store filter and long list", { timeout: 
     await openGroceries(page);
 
     assert.match(await page.locator("#grocery-list").innerText(), /Buy today/);
-    assert.equal(await page.locator(".fab, .add-sheet, #add-form, #add-search").count(), 0);
-    assert.equal(await page.locator("#add-item").getAttribute("placeholder"), "Add an item");
-    assert.equal(await page.locator("#add-item").getAttribute("autocomplete"), "off");
-    assert.equal(await page.locator("#add-item").getAttribute("autocorrect"), "on");
-    assert.equal(await page.locator("#add-item").getAttribute("enterkeyhint"), "done");
-    assert.equal(await page.locator("#add-item").getAttribute("aria-label"), "Add grocery item");
-    assert.equal(await page.locator("#add-item").getAttribute("name"), "item");
-    assert.equal(await page.locator("#add-qty").getAttribute("autocomplete"), "off");
+    assert.equal(await page.locator("#quick-add, .add-bar, #add-item, #add-form").count(), 0);
+    assert.equal(await page.locator(".fab").count(), 1);
     assert.equal(await page.locator(".section-pills .pill").count(), 0);
-    const idle = await idleBar(page);
-    assert.ok(idle.gap >= 12 && idle.gap <= 16, JSON.stringify(idle));
-    assert.ok(idle.inputHeight >= 32 && idle.inputHeight <= 40, JSON.stringify(idle));
-    assert.ok(idle.barHeight <= 44, JSON.stringify(idle));
-    assert.ok(idle.listGap > 0 && idle.listGap <= 16, JSON.stringify(idle));
-    assert.equal(idle.detailsHidden, true);
-    assert.equal(idle.chips, 0);
-    assert.equal(idle.pills, 0);
+    const fabBox = await page.locator(".fab").boundingBox();
+    assert.ok(fabBox.width >= 56 && fabBox.width <= 60 && Math.abs(fabBox.width - fabBox.height) < 2, JSON.stringify(fabBox));
 
-    const writesBeforeChip = bag.writes.length;
-    await page.locator("#add-item").fill("egg");
-    await page.locator('[data-action="use-suggest"][data-name="Eggs"]').click();
-    assert.equal(await page.locator("#add-item").inputValue(), "Eggs");
-    assert.equal(bag.writes.length, writesBeforeChip);
-    assert.equal(await page.locator("#suggest-row .chip").count(), 0);
-    await page.locator("#add-item").fill("");
-    assert.equal(await page.locator("#suggest-row .chip").count(), 0);
-    await page.locator("#add-item").fill("mil");
-    assert.equal(await page.locator("#suggest-row .chip").innerText(), "Millet");
-    assert.equal(await page.locator("#store-picks .pill").count(), 0);
-    await page.locator('[data-action="toggle-add-details"]').click();
-    assert.equal(await page.locator("#add-details").isVisible(), true);
-    await page.locator("h1").first().click();
-    await page.waitForFunction(() => document.querySelectorAll("#suggest-row .chip").length === 0 && document.querySelector("#add-details").hidden);
+    await openAdd(page);
+    assert.equal(await page.locator("#add-search").getAttribute("placeholder"), "Add something...");
+    assert.equal(await page.locator("#add-search").getAttribute("autocomplete"), "off");
+    assert.equal(await page.locator("#add-search").getAttribute("name"), "item");
+    assert.equal(await page.locator("#add-search").getAttribute("aria-label"), "Name");
+    assert.equal(await page.locator("#add-qty").getAttribute("autocomplete"), "off");
+    assert.equal(await page.locator("#add-qty").getAttribute("placeholder"), "2 lb, a bunch");
+    assert.equal(await page.locator("#add-section option").count(), 12);
+    assert.equal(await page.locator("#add-form [data-action=toggle-stores]").innerText(), "No store");
+    assert.equal(await page.locator("#add-form .fresh-box").count(), 1);
+    assert.equal(await page.locator("#add-note").count(), 1);
+    await page.locator("#add-search").fill("mil");
+    await page.locator('[data-action="quick-add"][data-name="Millet"]').waitFor();
+    assert.match(await page.locator('[data-action="quick-add"][data-name="Millet"]').innerText(), /^\+ Millet$/);
+    const writesBeforeSuggest = bag.writes.length;
+    await page.locator('[data-action="quick-add"][data-name="Millet"]').click();
+    await page.waitForTimeout(280);
+    assert.equal(bag.writes.length, writesBeforeSuggest + 1);
+    assert.equal(await page.locator("#add-form").count(), 0);
+    assert.equal(await firstName(page), "Millet");
 
-    await addByEnter(page, "Milk");
-    assert.equal(await page.locator("#add-error").innerText(), "Already on your list");
-    assert.equal(await page.locator("#add-item").inputValue(), "Milk");
-    assert.equal(bag.writes.filter((entry) => entry.path === "/api/items").length, 0);
+    await openAdd(page);
+    await page.locator("#add-search").fill("Milk");
+    await page.locator("#add-form .green-btn").click();
+    await page.waitForTimeout(200);
+    assert.equal(await page.locator("#add-form .error").innerText(), "Already on your list");
+    assert.equal(await page.locator("#add-search").inputValue(), "Milk");
+    assert.equal(bag.writes.filter((entry) => entry.path === "/api/items" && entry.method === "POST").length, 0);
+    await page.locator('#add-form [aria-label="Close"]').click();
+    await page.locator(".fab").waitFor();
 
-    await addByEnter(page, "oats 2");
-    assert.equal(await page.locator("#add-item").inputValue(), "");
-    assert.equal(await page.locator("#add-item").evaluate((node) => node === document.activeElement), true);
+    await addBySheet(page, "oats", { qty: "2" });
+    assert.equal(await page.locator("#add-form").count(), 0);
     assert.equal(await firstName(page), "oats");
     assert.equal(bag.items.find((entry) => entry.id === "oats").quantityNote, "2");
     assert.match(await page.locator("#add-toast").innerText(), /Added oats\s+·\s+Undo/);
@@ -267,75 +259,64 @@ test("grocery add bar, edit page, undo, store filter and long list", { timeout: 
     assert.ok(placed.top >= 0 && placed.bottom <= placed.height, JSON.stringify(placed));
     assert.ok(placed.scroll < 5);
 
-    for (const name of ["Bread", "Butter", "Jam"]) await addByEnter(page, name);
-    assert.equal(await page.locator("#add-item").inputValue(), "");
-    assert.equal(await page.locator("#add-item").evaluate((node) => node === document.activeElement), true);
+    for (const name of ["Bread", "Butter", "Jam"]) await addBySheet(page, name);
+    assert.equal(await page.locator("#add-form").count(), 0);
     assert.equal(await firstName(page), "Jam");
     assert.match(await page.locator("#add-toast").innerText(), /Added Jam\s+·\s+Undo/);
     assert.equal(await page.locator("h1").first().innerText(), "Groceries");
 
-    await page.locator("#add-item").press("Escape");
-    assert.equal(await page.locator("#quick-add").count(), 1);
+    await openAdd(page);
+    await page.locator("#add-search").press("Escape");
+    assert.equal(await page.locator("#add-form").count(), 1);
+    await page.locator(".add-sheet").click({ position: { x: 12, y: 12 } });
+    await page.locator(".fab").waitFor();
     assert.equal(await page.locator("h1").first().innerText(), "Groceries");
 
-    const postsBefore = bag.writes.filter((entry) => entry.path === "/api/items").length;
-    await page.locator("#add-item").fill("Bananas");
-    await page.locator('[data-action="submit-add"]').click();
+    const postsBefore = bag.writes.filter((entry) => entry.path === "/api/items" && entry.method === "POST").length;
+    await openAdd(page);
+    await page.locator("#add-search").fill("Bananas");
+    await page.locator("#add-form .green-btn").click();
     await page.evaluate(() => submitAdd());
     await page.waitForTimeout(400);
-    const bananaPosts = bag.writes.filter((entry) => entry.path === "/api/items" && entry.body.name === "Bananas");
+    const bananaPosts = bag.writes.filter((entry) => entry.path === "/api/items" && entry.body?.name === "Bananas");
     assert.equal(bananaPosts.length, 1);
-    assert.equal(bag.writes.filter((entry) => entry.path === "/api/items").length, postsBefore + 1);
+    assert.equal(bag.writes.filter((entry) => entry.path === "/api/items" && entry.method === "POST").length, postsBefore + 1);
     assert.ok(bananaPosts[0].headers["idempotency-key"]);
 
     bag.loseNextAdd = true;
-    await page.locator("#add-item").fill("Apples 4");
-    await page.locator("#add-item").press("Enter");
+    await openAdd(page);
+    await page.locator("#add-search").fill("Apples");
+    await page.locator("#add-qty").fill("4");
+    await page.locator("#add-search").press("Enter");
     await page.waitForTimeout(400);
-    assert.equal(await page.locator("#add-item").inputValue(), "Apples 4");
-    assert.equal(await page.locator("#add-error").isVisible(), true);
-    await page.locator('[data-action="submit-add"]').click();
+    assert.equal(await page.locator("#add-search").inputValue(), "Apples");
+    assert.equal(await page.locator("#add-form .error").isVisible(), true);
+    await page.locator("#add-form .green-btn").click();
     await page.waitForTimeout(400);
     const applePosts = bag.writes.filter((entry) => entry.body?.name === "Apples");
     assert.equal(applePosts.length, 2);
     assert.equal(applePosts[0].headers["idempotency-key"], applePosts[1].headers["idempotency-key"]);
     assert.equal(applePosts[0].body.quantityNote, "4");
     assert.equal(bag.items.filter((entry) => entry.name === "Apples").length, 1);
-    assert.equal(await page.locator("#add-item").inputValue(), "");
+    assert.equal(await page.locator("#add-form").count(), 0);
 
-    await addByEnter(page, "Eggs");
+    await addBySheet(page, "Eggs");
     const eggSave = bag.writes.find((entry) => entry.path === "/api/items/eggs" && entry.body.checked === false);
     assert.ok(eggSave);
     assert.equal(eggSave.body.quantityNote, "2 dozen");
     assert.notEqual(eggSave.body.buyDate, "2026-10-23");
-    assert.equal(await page.locator("#add-item").evaluate((node) => node === document.activeElement), true);
     assert.match(await page.locator("#add-toast").innerText(), /Added Eggs\s+·\s+Undo/);
     await page.locator("#add-toast button").click();
     await page.waitForTimeout(300);
     assert.equal(bag.items.find((entry) => entry.id === "eggs").checked, true);
 
-    await page.locator("#add-item").fill("Zucchini");
-    await page.locator('[data-action="toggle-add-details"]').click();
-    assert.equal(await page.locator("#add-details").isVisible(), true);
-    assert.equal(await page.locator("#add-item").evaluate((node) => node === document.activeElement), true);
-    assert.equal(await page.locator("#add-section option").count(), 13);
-    await page.locator("#add-qty").fill("3");
-    await page.locator("#add-section").selectOption("produce");
-    const pillBox = await page.locator("#detail-stores .pill").first().boundingBox();
-    assert.ok(pillBox.height >= 28 && pillBox.height <= 32, JSON.stringify(pillBox));
-    await page.locator('#detail-stores [data-action="pick-add-store"][data-store="local"]').click();
-    assert.equal(await page.locator('#detail-stores [data-store="local"]').getAttribute("aria-pressed"), "true");
-    assert.equal(await page.locator("#add-item").evaluate((node) => node === document.activeElement), true);
-    await page.locator("#add-item").press("Enter");
-    await page.waitForTimeout(280);
+    await addBySheet(page, "Zucchini", { qty: "3", section: "produce", store: "local" });
     assert.equal(await firstName(page), "Zucchini");
     const zucchini = bag.writes.find((entry) => entry.body?.name === "Zucchini");
     assert.equal(zucchini.body.quantityNote, "3");
     assert.equal(zucchini.body.section, "produce");
     assert.equal(zucchini.body.store, "local");
-    assert.equal(await page.locator("#add-details").isHidden(), true);
-    assert.equal(await page.locator("#suggest-row .chip").count(), 0);
-    assert.equal(await page.locator("#store-picks .pill").count(), 0);
+    assert.equal(await page.locator("#add-form").count(), 0);
     const visible = await page.locator('#grocery-list .g-swipe[data-id="zucchini"]').evaluate((node) => {
       const box = node.getBoundingClientRect();
       return { top: box.top, bottom: box.bottom, height: window.innerHeight };
@@ -344,15 +325,14 @@ test("grocery add bar, edit page, undo, store filter and long list", { timeout: 
     assert.ok((await page.locator("#grocery-list").innerText()).includes("Coffee"));
 
     await page.setViewportSize({ width: 390, height: 500 });
-    await addByEnter(page, "Yogurt");
-    const keyboard = await page.evaluate(() => {
-      const bar = document.querySelector(".add-bar").getBoundingClientRect();
-      const row = document.querySelector('#grocery-list .g-swipe[data-id="yogurt"]').getBoundingClientRect();
-      return { barTop: bar.top, barBottom: bar.bottom, rowTop: row.top, rowBottom: row.bottom, height: window.innerHeight, focused: document.activeElement?.id };
+    await addBySheet(page, "Yogurt");
+    const placedYogurt = await page.locator('#grocery-list .g-swipe[data-id="yogurt"]').evaluate((node) => {
+      const box = node.getBoundingClientRect();
+      const fab = document.querySelector(".fab").getBoundingClientRect();
+      return { top: box.top, bottom: box.bottom, fabTop: fab.top, height: window.innerHeight };
     });
-    assert.equal(keyboard.focused, "add-item");
-    assert.ok(keyboard.barTop >= 0 && keyboard.barBottom <= keyboard.height, JSON.stringify(keyboard));
-    assert.ok(keyboard.rowTop >= 0 && keyboard.rowBottom <= keyboard.height, JSON.stringify(keyboard));
+    assert.ok(placedYogurt.top >= 0 && placedYogurt.bottom <= placedYogurt.height, JSON.stringify(placedYogurt));
+    assert.ok(placedYogurt.fabTop < placedYogurt.height, JSON.stringify(placedYogurt));
     await page.setViewportSize({ width: 390, height: 844 });
 
     await page.locator('.g-row[data-id="milk"] .g-name').click();
@@ -364,7 +344,7 @@ test("grocery add bar, edit page, undo, store filter and long list", { timeout: 
     assert.equal(await page.locator('[data-action="edit-stores"]').count(), 1);
     await page.locator('[name="quantityNote"]').fill("3 gallons");
     await page.locator('[form="item-edit"]').click();
-    await page.locator("#add-item").waitFor();
+    await page.locator(".fab").waitFor();
     assert.equal(bag.items.find((entry) => entry.id === "milk").quantityNote, "3 gallons");
 
     await page.locator('.g-row[data-id="jam"]').scrollIntoViewIfNeeded();
@@ -421,7 +401,7 @@ test("grocery add bar, edit page, undo, store filter and long list", { timeout: 
     await page.locator('[data-action="tab"][data-tab="today"]').click();
     assert.match(await page.locator("main").innerText(), /Today/);
     await page.locator('[data-action="tab"][data-tab="groceries"]').click();
-    await page.locator("#add-item").waitFor();
+    await page.locator(".fab").waitFor();
 
     bag.fail = true;
     await page.reload();
@@ -435,11 +415,14 @@ test("grocery add bar, edit page, undo, store filter and long list", { timeout: 
   }
 });
 
-test("iPhone 13 WebKit screenshots of the slim add bar", { timeout: 90000 }, async () => {
+test("iPhone 390x844 WebKit screenshots of the add sheet", { timeout: 90000 }, async () => {
   fs.mkdirSync(shots, { recursive: true });
   const browser = await webkit.launch({ headless: true });
   try {
-    const context = await browser.newContext({ ...devices["iPhone 13"] });
+    const context = await browser.newContext({
+      ...devices["iPhone 13"],
+      viewport: { width: 390, height: 844 },
+    });
     const page = await context.newPage();
     const errors = [];
     page.on("pageerror", (error) => errors.push(error.message));
@@ -453,55 +436,39 @@ test("iPhone 13 WebKit screenshots of the slim add bar", { timeout: 90000 }, asy
     };
     await installApi(page, bag);
     await openGroceries(page);
-    const idle = await idleBar(page);
-    assert.ok(idle.gap >= 12 && idle.gap <= 16, JSON.stringify(idle));
-    assert.ok(idle.inputHeight >= 32 && idle.inputHeight <= 40, JSON.stringify(idle));
-    assert.ok(idle.barHeight <= 44, JSON.stringify(idle));
-    assert.ok(idle.listGap > 0 && idle.listGap <= 16, JSON.stringify(idle));
-    assert.equal(idle.detailsHidden, true);
-    assert.equal(idle.chips, 0);
-    assert.equal(idle.pills, 0);
-    await page.screenshot({ path: `${shots}/idle-list.png` });
+    assert.equal(await page.locator("#quick-add, .add-bar, #add-form").count(), 0);
+    assert.equal(await page.locator(".fab").count(), 1);
+    await page.screenshot({ path: `${shots}/grocery-list.png` });
 
-    await page.locator("#add-item").fill("mil");
-    await page.locator("#suggest-row .chip").waitFor();
-    assert.equal(await page.locator("#suggest-row .chip").innerText(), "Millet");
-    assert.equal(await page.locator("#store-picks .pill").count(), 0);
-    assert.equal(await page.locator("#add-details").isHidden(), true);
-    await page.screenshot({ path: `${shots}/typing-mil.png` });
+    await openAdd(page);
+    assert.equal(await page.locator("#add-form").count(), 1);
+    assert.equal(await page.locator("#add-section option").count(), 12);
+    await page.screenshot({ path: `${shots}/add-sheet.png` });
 
-    await page.locator('[data-action="toggle-add-details"]').click();
-    assert.equal(await page.locator("#add-details").isVisible(), true);
-    assert.equal(await page.locator("#add-item").evaluate((node) => node === document.activeElement), true);
-    assert.equal(await page.locator("#add-qty").isVisible(), true);
-    assert.equal(await page.locator("#add-section option").count(), 13);
-    assert.ok(await page.locator("#detail-stores .pill").count() >= 2);
-    const pillBox = await page.locator("#detail-stores .pill").first().boundingBox();
-    assert.ok(pillBox.height >= 28 && pillBox.height <= 32, JSON.stringify(pillBox));
-    await page.screenshot({ path: `${shots}/details-expanded.png` });
+    await page.locator("#add-search").fill("mil");
+    await page.locator('[data-action="quick-add"][data-name="Millet"]').waitFor();
+    assert.match(await page.locator('[data-action="quick-add"][data-name="Millet"]').innerText(), /^\+ Millet$/);
+    await page.locator('[data-action="quick-add"][data-name="Millet"]').scrollIntoViewIfNeeded();
+    await page.screenshot({ path: `${shots}/add-sheet-typed.png` });
 
-    await page.locator("#add-item").fill("");
-    await page.locator("h1").first().click();
-    await page.waitForFunction(() => document.querySelector("#add-details").hidden && document.querySelectorAll("#suggest-row .chip").length === 0);
-    for (const name of ["Bread", "Butter", "Jam"]) await addByEnter(page, name);
-    assert.equal(await page.locator("#add-item").evaluate((node) => node === document.activeElement), true);
+    await page.locator('#add-form [aria-label="Close"]').click();
+    await page.locator(".fab").waitFor();
+    await addBySheet(page, "Jam");
     assert.equal(await firstName(page), "Jam");
     assert.match(await page.locator("#add-toast").innerText(), /Added Jam\s+·\s+Undo/);
-    assert.equal(await page.locator("#add-details").isHidden(), true);
-    assert.equal(await page.locator("#suggest-row .chip").count(), 0);
+    assert.equal(await page.locator("#add-form").count(), 0);
     const seen = await page.locator('#grocery-list .g-swipe[data-id="jam"]').evaluate((node) => {
       const box = node.getBoundingClientRect();
       return box.top >= 0 && box.bottom <= window.innerHeight;
     });
     assert.equal(seen, true);
-    await page.locator("h1").first().click();
     await page.screenshot({ path: `${shots}/list-after-adding.png` });
 
     await page.locator('.g-row[data-id="milk"] .g-name').click();
     await page.locator("#item-edit").waitFor();
     assert.equal(await page.locator(".section-pills .pill").count(), 12);
     await page.locator('[data-action="back"]').click();
-    await page.locator("#add-item").waitFor();
+    await page.locator(".fab").waitFor();
     await page.waitForTimeout(2300);
     await page.locator('.g-row[data-id="jam"]').waitFor();
     await page.locator('.g-row[data-id="jam"]').scrollIntoViewIfNeeded();

@@ -2,7 +2,7 @@
 
 Dinners, recipes, and one grocery list for Mark and Emma.
 
-The live app is the Cloudflare Worker `family-grocery` at https://family-grocery.grenier-family.workers.dev. Recipes, the week plan, and the grocery list are in the D1 database `grocery`. `wrangler.toml` names that database. The phone shell cache is `grocery-shell-v109`.
+The live app is the Cloudflare Worker `family-grocery` at https://family-grocery.grenier-family.workers.dev. Recipes, the week plan, and the grocery list are in the D1 database `grocery`. `wrangler.toml` names that database. The phone shell cache is `grocery-shell-v110`.
 
 ## Run it on this computer
 
@@ -28,9 +28,9 @@ npx playwright install chromium
 npm run test:ui
 ```
 
-The browser check uses a separate practice list and mocked API responses. It checks the slim Add field, suggestions while typing, Details, Return keeping focus, a new item at the top of a long list, the edit page, swipe delete, Undo, store changes, and offline startup. It does not write to the live list.
+The browser check uses a separate practice list and mocked API responses. It checks the green Add button, the add sheet, + Name suggestions, a new item at the top of a long list, the edit page, swipe delete, Undo, store changes, and offline startup. It does not write to the live list.
 
-Groceries has a slim Add field under the heading. It stays one line until you type. Return or **Add** saves the item and leaves the field ready for the next one. Tap an item to edit it on its own page. Store management is in **Groceries → List options → Manage stores**, and also from **Edit stores** on an item. Offline, the last successfully saved list is available to read; changes require a connection.
+Groceries is the list. The round green **+** opens the add sheet: name, quantity, section, store, Fresh, a note, and **Add**, with **+ Name** suggestions underneath. Tap an item to edit it on its own page. Store management is in **Groceries → List options → Manage stores**, and also from **Edit stores** on an item. Offline, the last successfully saved list is available to read; changes require a connection.
 
 ## Deploy
 

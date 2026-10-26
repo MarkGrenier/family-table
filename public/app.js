@@ -106,18 +106,8 @@ app.addEventListener("error", onPhotoError, true);
 app.addEventListener("submit", onSubmit);
 app.addEventListener("input", onInput);
 app.addEventListener("pointerdown", onPointerDown);
-app.addEventListener("mousedown", (event) => {
-  if (event.target.closest?.(".add-go, .details-link, #suggest-row .chip, #store-picks .pill, #detail-stores .pill")) event.preventDefault();
-});
-app.addEventListener("focusout", (event) => {
-  if (!(event.target instanceof Element)) return;
-  if (!event.target.closest("#quick-add, #add-details, #suggest-row, #store-picks")) return;
-  setTimeout(paintAddAssist, 0);
-});
-app.addEventListener("focusin", (event) => {
-  if (!(event.target instanceof Element)) return;
-  if (!event.target.closest("#quick-add, #add-details, #suggest-row, #store-picks")) return;
-  paintAddAssist();
+app.addEventListener("change", (event) => {
+  if (event.target?.closest?.("#add-form")) onAddField(event);
 });
 app.addEventListener("pointermove", onPointerMove);
 app.addEventListener("pointerup", onPointerUp);
@@ -458,15 +448,20 @@ function render(force = false) {
   if (!document.documentElement.classList.contains("sheet-open")) {
     sheetScrollY = window.scrollY || document.documentElement.scrollTop || document.body.scrollTop || 0;
   }
-  const addItem = document.getElementById("add-item");
-  if (addItem && document.activeElement === addItem) state.addQuery = addItem.value;
-  const addQty = document.getElementById("add-qty");
-  if (addQty) state.addQty = addQty.value;
-  const addSection = document.getElementById("add-section");
-  if (addSection) state.addSection = addSection.value;
-  state.addDetailsOpen = false;
+  const addForm = document.getElementById("add-form");
+  if (addForm && state.sheet?.kind === "add-item" && state.addDraft) {
+    const data = new FormData(addForm);
+    state.addQuery = String(data.get("item") || "");
+    state.addDraft.quantityNote = String(data.get("qty") || "");
+    state.addDraft.notes = String(data.get("note") || "");
+    state.addDraft.section = String(data.get("section") || state.addDraft.section || "");
+    state.addDraft.store = String(data.get("store") || "");
+    state.addDraft.fresh = data.get("fresh") === "on";
+  }
   app.innerHTML = appHtml();
   restoreTodayHero();
+  const search = document.getElementById("add-search");
+  if (search && state.sheet?.kind === "add-item") search.focus({ preventScroll: true });
   finish();
 }
 
@@ -1180,24 +1175,45 @@ function groceriesHtml() {
   return `<div class="title-row"><h1>Groceries</h1><button class="icon-green" type="button" data-action="grocery-menu" aria-label="List options">${dots()}</button></div>
     ${connectionHtml()}
     ${state.error ? `<p class="error" role="alert">${esc(state.error)}</p>` : ""}
-    <form id="quick-add" data-form="quick-add" autocomplete="off">
-      <div class="add-bar">
-        <label class="sr-only" for="add-item">Add grocery item</label>
-        <input id="add-item" name="item" type="text" placeholder="Add an item" maxlength="80" enterkeyhint="done" autocomplete="off" autocorrect="on" autocapitalize="sentences" spellcheck="true" aria-label="Add grocery item" value="${esc(state.addQuery)}">
-        <button class="details-link" type="button" data-action="toggle-add-details" aria-expanded="false">Details</button>
-        <button class="green-btn add-go" type="submit" data-action="submit-add">Add</button>
-      </div>
-      <div id="add-details" class="add-details" hidden>
-        <input id="add-qty" name="qty" type="text" placeholder="Qty" maxlength="40" enterkeyhint="done" autocomplete="off" autocorrect="on" autocapitalize="off" spellcheck="false" aria-label="Quantity" value="${esc(state.addQty)}">
-        <select id="add-section" name="section" autocomplete="off" aria-label="Section">${sectionOptionsHtml(state.addSection)}</select>
-        <div id="detail-stores" class="store-picks" role="group" aria-label="Store">${storePicksHtml(storesInOrder())}</div>
-      </div>
-    </form>
-    <p id="add-error" class="error" role="alert" ${state.addError ? "" : "hidden"}>${esc(state.addError || "")}</p>
     ${addToastHtml()}
-    <div id="suggest-row" class="chip-row" role="group" aria-label="Buy again"></div>
-    <div id="store-picks" class="store-picks" role="group" aria-label="Matching stores"></div>
-    <div id="grocery-list">${groceryItemsHtml()}</div>`;
+    <div id="grocery-list">${groceryItemsHtml()}</div>
+    <button class="fab" type="button" data-action="add-item" aria-label="Add">+</button>`;
+}
+
+function addHtml() {
+  const draft = state.addDraft || blankAddDraft();
+  const section = draft.sectionTouched ? draft.section : state.addQuery.trim() ? guessSection(state.addQuery) : "other";
+  return `<div class="sheet add-sheet"><form id="add-form" class="add-form sheet-card" data-form="add-item" autocomplete="off">
+      <div class="topbar"><button class="back" type="button" data-action="back" aria-label="Close">✕</button><h1>Add</h1><span></span></div>
+      <div class="pad">
+        <input id="add-search" name="item" class="search-box" type="text" placeholder="Add something..." value="${esc(state.addQuery)}" maxlength="80" autocomplete="off" autocorrect="on" autocapitalize="sentences" spellcheck="true" enterkeyhint="done" aria-label="Name">
+        <label class="field-label">Quantity<input class="field-box" id="add-qty" name="qty" maxlength="140" autocomplete="off" autocorrect="on" value="${esc(draft.quantityNote)}" placeholder="2 lb, a bunch" enterkeyhint="done" aria-label="Quantity"></label>
+        <label class="field-label">Section<span class="select-wrap"><select class="box" id="add-section" name="section" autocomplete="off" aria-label="Section">${choiceHtml(SECTIONS, section || "other")}</select></span></label>
+        ${addStoreFieldHtml(draft.store)}
+        <label class="fresh-row"><span>Fresh</span><input class="fresh-box" type="checkbox" name="fresh" autocomplete="off"${draft.fresh ? " checked" : ""}></label>
+        <label class="field-label">Note<input class="field-box" id="add-note" name="note" maxlength="500" autocomplete="off" value="${esc(draft.notes)}" enterkeyhint="done" aria-label="Note"></label>
+        ${state.addError ? `<p class="error" role="alert">${esc(state.addError)}</p>` : ""}
+        <button class="green-btn" type="submit" data-action="submit-add">Add</button>
+        <div id="suggest-list">${suggestHtml(filteredSuggestions())}</div>
+      </div>
+    </form></div>`;
+}
+
+function addStoreFieldHtml(selected) {
+  const open = state.storeOpen ? "" : " is-hidden";
+  return `<label class="field-label">Store<span class="select-wrap"><button class="box" type="button" data-action="toggle-stores" aria-haspopup="listbox" aria-expanded="${state.storeOpen ? "true" : "false"}">${esc(storeLabel(selected))}</button></span></label>
+    <input type="hidden" name="store" value="${esc(selected || "")}" autocomplete="off">
+    <div class="store-drop${open}" role="listbox">${addStoreOptionsHtml(selected)}</div>`;
+}
+
+function addStoreOptionsHtml(selected) {
+  const current = selected || "";
+  const rows = [`<button class="store-option${current ? "" : " is-on"}" type="button" data-action="pick-store" data-store="">No store</button>`];
+  storesInOrder().forEach((store) => {
+    const on = store.id === current ? " is-on" : "";
+    rows.push(`<button class="store-option${on}" type="button" data-action="pick-store" data-store="${esc(store.id)}">${esc(store.name)}</button>`);
+  });
+  return rows.join("");
 }
 
 function sectionOptionsHtml(selected) {
@@ -1373,11 +1389,9 @@ function itemHtml(id) {
 
 function filteredSuggestions() {
   const query = memoryKey(state.addQuery);
-  if (!query || !addAssistVisible()) return [];
-  if (query && memoryKey(state.suggestHold) === query) return [];
   const active = new Set(state.items.filter(isActiveGrocery).map((item) => memoryKey(item.name)));
   return suggestionRows()
-    .filter((row) => query ? row.key.includes(query) : !active.has(row.key))
+    .filter((row) => !active.has(row.key) && (!query || row.key.includes(query)))
     .sort((a, b) => {
       const aStart = query && a.key.startsWith(query) ? 1 : 0;
       const bStart = query && b.key.startsWith(query) ? 1 : 0;
@@ -1386,14 +1400,12 @@ function filteredSuggestions() {
       if (a.count !== b.count) return b.count - a.count;
       return a.name.localeCompare(b.name);
     })
-    .slice(0, 5)
-    .map((row) => ({ ...row, onList: active.has(row.key) }));
+    .slice(0, 12)
+    .map((row) => row.name);
 }
 
-function suggestHtml(rows) {
-  const chips = rows.filter((row) => !row.onList);
-  if (!chips.length) return "";
-  return chips.map((row) => `<button class="chip" type="button" data-action="use-suggest" data-name="${esc(row.name)}">${esc(row.name)}</button>`).join("");
+function suggestHtml(names) {
+  return names.map((name) => `<button class="suggest" type="button" data-action="quick-add" data-name="${esc(name)}">+ ${esc(name)}</button>`).join("");
 }
 
 function buyLabel(iso) {
@@ -1702,6 +1714,7 @@ async function saveRecipeEdit(form) {
 }
 
 function sheetHtml() {
+  if (state.sheet?.kind === "add-item") return addHtml();
   if (state.sheet?.kind === "prep") return prepSheet();
   if (state.sheet?.kind === "grocery-menu") {
     return `<div class="sheet"><div class="sheet-card" role="dialog">
@@ -2123,10 +2136,11 @@ function onEdgeTouchMove(event) {
 
 function onPointerDown(event) {
   addPressTarget = event.target instanceof Element ? event.target : null;
-  // Keep the keyboard and sheet geometry stable until a button's click arrives.
-  // Blurring on pointerdown can otherwise move the button beneath the finger.
+  // Keep the keyboard from shifting a sheet under the finger. The add sheet's buttons
+  // still need the click: cancelling pointerdown drops it on iOS.
   if (event.button === 0 && event.target.closest?.(".sheet button")) {
-    if (document.activeElement?.closest?.(".sheet input, .sheet textarea")) event.preventDefault();
+    const addControl = event.target.closest?.("#add-form button");
+    if (!addControl && document.activeElement?.closest?.(".sheet input, .sheet textarea")) event.preventDefault();
     return;
   }
   if (beginEdgeBack(event)) return;
@@ -2623,6 +2637,12 @@ function dismissSheet() {
     render();
     return;
   }
+  if (state.sheet?.kind === "add-item") {
+    state.addQuery = "";
+    state.addDraft = blankAddDraft();
+    state.addError = "";
+    state.storeOpen = false;
+  }
   state.sheet = null;
   state.error = "";
   render();
@@ -2968,6 +2988,19 @@ async function onClick(event) {
   if (action === "confirm-remove-store") return removeStore(button.dataset.id);
   if (action === "edit-item") return openEdit(button.dataset.id);
   if (action === "delete-item") return deleteGrocery(button.dataset.id);
+  if (action === "add-item") {
+    state.sheet = { kind: "add-item" };
+    state.addQuery = "";
+    state.addDraft = blankAddDraft();
+    state.addError = "";
+    state.storeOpen = false;
+    state.storeAdd = false;
+    state.storeEditOpen = false;
+    state.swipeId = null;
+    render();
+    return;
+  }
+  if (action === "quick-add") return quickAddName(button.dataset.name);
 }
 
 async function onSubmit(event) {
@@ -2979,7 +3012,7 @@ async function onSubmit(event) {
     state.passcode = (input && input.value) || state.passcode || "";
     return signIn(state.passcode);
   }
-  if (form.dataset.form === "quick-add") return submitAdd();
+  if (form.dataset.form === "add-item") return submitAdd(form);
   if (form.dataset.form === "item-edit") return saveItem(new FormData(form));
   if (form.dataset.form === "fetch-recipe") return fetchRecipe(new FormData(form).get("url"));
   if (form.dataset.form === "edit-recipe") return saveRecipeEdit(form);
@@ -2996,22 +3029,24 @@ function onInput(event) {
     if (list) list.innerHTML = recipeListHtml();
     return;
   }
-  if (event.target.id === "add-item") {
+  if (event.target.id === "add-search") {
     state.addQuery = event.target.value;
-    if (memoryKey(state.addQuery) !== memoryKey(state.suggestHold)) state.suggestHold = "";
     state.addError = "";
-    paintAddAssist();
-    paintAddError();
+    const list = document.getElementById("suggest-list");
+    if (list) list.innerHTML = suggestHtml(filteredSuggestions());
+    const draft = state.addDraft;
+    const form = event.target.form;
+    if (form && draft && !draft.sectionTouched) {
+      draft.section = state.addQuery.trim() ? guessSection(state.addQuery) : "other";
+      const section = form.querySelector("[name=section]");
+      if (section) section.value = draft.section;
+      draft.category = aisleFor(draft.store, draft.section);
+    }
+    const error = form?.querySelector(".error");
+    if (error) error.remove();
     return;
   }
-  if (event.target.id === "add-qty") {
-    state.addQty = event.target.value;
-    return;
-  }
-  if (event.target.id === "add-section") {
-    state.addSection = event.target.value;
-    return;
-  }
+  if (onAddField(event)) return;
   if (event.target.id === "feedback-comment") state.comment = event.target.value;
 }
 
@@ -3462,7 +3497,7 @@ function paintAddToast() {
     current.outerHTML = html;
     return;
   }
-  document.getElementById("add-error")?.insertAdjacentHTML("afterend", html);
+  document.getElementById("grocery-list")?.insertAdjacentHTML("beforebegin", html);
 }
 
 function paintToast() {
@@ -3756,7 +3791,7 @@ function showUndo(undo) {
     state.undoFading = false;
     undoTimer = null;
     undoFadeTimer = null;
-    const add = document.getElementById("add-item");
+    const add = document.getElementById("add-search");
     if (add && document.activeElement === add) paintToast();
     else render();
   }, UNDO_MS);
@@ -3980,14 +4015,25 @@ function pickStore(button) {
   let choice = button.dataset.store ?? "";
   const hidden = form.querySelector("[name=store]");
   const current = form.id === "add-form" ? (state.addDraft?.store || "") : (hidden?.value || "");
-  if (choice && choice === current) choice = "";
+  if (form.id !== "add-form" && choice && choice === current) choice = "";
   if (hidden) hidden.value = choice;
-  paintStorePills(form, choice);
   if (form.id === "add-form" && state.addDraft) {
     state.addDraft.store = choice;
     state.addDraft.storeTouched = true;
-    rememberStore(choice);
+    state.storeOpen = false;
+    const label = form.querySelector("[data-action=toggle-stores]");
+    if (label) {
+      label.textContent = storeLabel(choice);
+      label.setAttribute("aria-expanded", "false");
+    }
+    const drop = form.querySelector(".store-drop");
+    if (drop) {
+      drop.innerHTML = addStoreOptionsHtml(choice);
+      drop.classList.add("is-hidden");
+    }
+    return;
   }
+  paintStorePills(form, choice);
 }
 
 function showNewStore(button) {
@@ -4141,9 +4187,9 @@ async function removeStore(id) {
 
 function onKeyDown(event) {
   if (event.key !== "Enter" || event.isComposing) return;
-  if (event.target?.id === "add-item") {
+  if (event.target?.id === "add-search") {
     event.preventDefault();
-    submitAdd();
+    submitAdd(event.target.form);
     return;
   }
   const name = event.target?.name;
@@ -4187,13 +4233,19 @@ function onAddField(event) {
   if (!form || !state.addDraft) return false;
   const draft = state.addDraft;
   const name = event.target.name;
-  if (name === "quantityNote" || name === "notes") {
-    draft[name] = event.target.value;
-    if (name === "notes") draft.notesTouched = true;
+  if (name === "qty") {
+    draft.quantityNote = event.target.value;
+    draft.quantityTouched = true;
+    return true;
+  }
+  if (name === "note") {
+    draft.notes = event.target.value;
+    draft.notesTouched = true;
     return true;
   }
   if (name === "fresh") {
     draft.fresh = event.target.checked;
+    draft.freshTouched = true;
     return true;
   }
   if (name === "section") {
@@ -4368,33 +4420,73 @@ function revealAddedItem(id) {
   if (row.getBoundingClientRect().bottom > bottom - 8) row.scrollIntoView({ block: "nearest" });
 }
 
-async function submitAdd() {
+function fieldsForSheet(name, data) {
+  const done = matchedCompleted(name);
+  const qty = String(data.get("qty") || "").trim();
+  const note = String(data.get("note") || "").trim();
+  const store = String(data.get("store") ?? "");
+  const section = String(data.get("section") || "") || guessSection(name);
+  const fresh = data.get("fresh") === "on";
+  return {
+    quantityNote: qty || done?.quantityNote || null,
+    store,
+    category: savedCategory(store, section, done?.category || ""),
+    section,
+    notes: note || done?.notes || null,
+    fresh,
+    buyDate: fresh ? nyToday() : null,
+    brand: done?.brand || null,
+    asin: done?.asin || null,
+  };
+}
+
+async function quickAddName(name) {
+  const clean = String(name || "").trim();
+  if (!clean) return;
+  const done = matchedCompleted(clean);
+  const section = guessSection(clean);
+  return commitAdd(clean, {
+    quantityNote: done?.quantityNote || null,
+    store: "",
+    category: savedCategory("", section, done?.category || ""),
+    section,
+    notes: done?.notes || null,
+    fresh: false,
+    buyDate: null,
+    brand: done?.brand || null,
+    asin: done?.asin || null,
+  });
+}
+
+async function submitAdd(form) {
+  const node = form instanceof Element ? form : document.getElementById("add-form");
+  if (!node) return;
+  const data = new FormData(node);
+  const name = String(data.get("item") || "").trim();
+  if (!name) return;
+  return commitAdd(name, fieldsForSheet(name, data));
+}
+
+async function commitAdd(name, extra) {
   if (state.addBusy) return;
-  const input = document.getElementById("add-item");
-  const parsed = parseQuickAdd(input ? input.value : state.addQuery);
-  if (!parsed) return;
-  if (input) state.addQuery = input.value;
+  const clean = String(name || "").trim();
+  if (!clean) return;
   if (state.offline) {
     state.addError = "You're offline. Reconnect to save this change.";
-    paintAddError();
-    keepAddFocus();
+    render();
     return;
   }
-  if (activeListed(parsed.name)) {
+  if (activeListed(clean)) {
     state.addError = "Already on your list";
-    paintAddError();
-    keepAddFocus();
+    render();
     return;
   }
-  const extra = fieldsForQuickAdd(parsed);
-  const previous = completedListed(parsed.name);
+  const previous = completedListed(clean);
   ++refreshSerial;
   state.addBusy = true;
   state.addError = "";
-  paintAddError();
-  keepAddFocus();
   try {
-    const item = await saveNewOrRevive(parsed.name, extra);
+    const item = await saveNewOrRevive(clean, extra);
     item.updatedAt = item.updatedAt && item.updatedAt > new Date(Date.now() - 2000).toISOString() ? item.updatedAt : new Date().toISOString();
     const index = state.items.findIndex((entry) => entry.id === item.id);
     if (index < 0) state.items.unshift(item);
@@ -4403,27 +4495,17 @@ async function submitAdd() {
     state.memory.items = [item, ...history.filter((entry) => entry.id !== item.id && memoryKey(entry.name) !== memoryKey(item.name))];
     state.addRequest = null;
     state.addQuery = "";
-    state.addQty = "";
-    state.addSection = "";
-    state.addStore = "";
-    state.addDetailsOpen = false;
-    state.suggestHold = "";
-    if (input) input.value = "";
-    const qty = document.getElementById("add-qty");
-    if (qty) qty.value = "";
-    const section = document.getElementById("add-section");
-    if (section) section.value = "";
+    state.addDraft = blankAddDraft();
+    state.sheet = null;
+    state.storeOpen = false;
     cacheList();
-    showUndo({ id: item.id, name: parsed.name, kind: "add", previous: previous ? { ...previous } : null });
-    paintAddAssist();
-    paintGroceryList();
+    showUndo({ id: item.id, name: clean, kind: "add", previous: previous ? { ...previous } : null });
+    render();
     revealAddedItem(item.id);
-    keepAddFocus();
   } catch (error) {
     if (error.status === 409) state.addRequest = null;
     state.addError = error.message || "Couldn't add this item. Try again.";
-    paintAddError();
-    keepAddFocus();
+    render();
   } finally {
     state.addBusy = false;
   }
