@@ -114,9 +114,13 @@ document.addEventListener("scroll", (event) => {
 // visualViewport often reads as zero even though the keyboard is up.
 let restHeight = 0;
 
+function typingSheet(node) {
+  return node?.closest?.(".add-sheet, .edit-item-sheet") || null;
+}
+
 function addSheetTyping() {
   const active = document.activeElement;
-  return active instanceof HTMLElement && !!active.closest(".add-sheet") && active.matches("input, textarea");
+  return active instanceof HTMLElement && !!typingSheet(active) && active.matches("input, textarea");
 }
 
 function pinSheets() {
@@ -145,17 +149,19 @@ function lockAddSheetScroll() {
 
 function keepAddFieldInView() {
   const active = document.activeElement;
-  if (!(active instanceof HTMLElement) || !active.closest(".add-sheet")) return;
-  const scroller = document.querySelector(".add-sheet .add-scroll");
+  if (!(active instanceof HTMLElement)) return;
+  const sheet = typingSheet(active);
+  if (!sheet) return;
+  const scroller = sheet.querySelector(".add-scroll, .edit-scroll");
   if (!scroller) return;
-  const row = active.closest(".detail-line, .search-box") || active;
+  const row = active.closest(".detail-line, .search-box, .field-label, .fresh-row, .choice-block") || active;
   const rowBox = row.getBoundingClientRect();
   const view = scroller.getBoundingClientRect();
-  const dock = document.querySelector(".add-sheet .add-dock");
+  const dock = sheet.querySelector(".add-dock");
   const dockTop = dock ? dock.getBoundingClientRect().top : view.bottom;
-  const limit = Math.min(view.bottom, dockTop) - 10;
+  const limit = Math.min(view.bottom, dockTop) - 8;
   if (rowBox.bottom > limit) scroller.scrollTop += rowBox.bottom - limit;
-  else if (rowBox.top < view.top + 6) scroller.scrollTop -= view.top + 6 - rowBox.top;
+  else if (rowBox.top < view.top + 4) scroller.scrollTop -= view.top + 4 - rowBox.top;
 }
 if (window.visualViewport) {
   window.visualViewport.addEventListener("resize", pinSheets);
@@ -243,7 +249,7 @@ function sheetFocusBlocked() {
 document.addEventListener("focusin", (event) => {
   const target = event.target;
   if (target?.id === "add-search" && target.name === "name") nameFocusAt = Date.now();
-  if (target instanceof HTMLElement && target.closest(".add-sheet") && !sheetFocusBlocked()) {
+  if (target instanceof HTMLElement && typingSheet(target) && !sheetFocusBlocked()) {
     const settle = () => {
       pinSheets();
       lockAddSheetScroll();
@@ -266,7 +272,7 @@ document.addEventListener("focusin", (event) => {
 }, true);
 
 document.addEventListener("focusout", (event) => {
-  if (!(event.target instanceof HTMLElement) || !event.target.closest(".add-sheet")) return;
+  if (!(event.target instanceof HTMLElement) || !typingSheet(event.target)) return;
   setTimeout(pinSheets, 0);
 });
 
@@ -1276,11 +1282,13 @@ function buyChoices() {
   return Array.from({ length: 7 }, (_, index) => addDays(today, index));
 }
 
-function sectionOptionsHtml(section) {
-  return `<div class="pill-row">${SECTIONS.map(([id, label]) => {
-    const on = id === section;
+function sectionPillsHtml(section) {
+  const current = section || "";
+  const pills = SECTIONS.map(([id, label]) => {
+    const on = id === current;
     return `<button class="pill${on ? " is-on" : ""}" type="button" data-action="pick-section" data-section="${esc(id)}" aria-pressed="${on ? "true" : "false"}">${esc(label)}</button>`;
-  }).join("")}</div>`;
+  }).join("");
+  return `<div class="pill-row section-pills" role="group" aria-label="Section">${pills}</div>`;
 }
 
 function buyDayOptionsHtml(selected) {
@@ -1303,9 +1311,11 @@ function addDetailsHtml(draft, section) {
         ${state.storeAdd ? `<div class="new-store"><input class="field-box" name="newStore" maxlength="40" placeholder="Store name" aria-label="New store" autocomplete="off" enterkeyhint="done"><button class="text-green" type="button" data-action="save-store">Add</button></div>` : ""}
         ${state.storeEditOpen ? `<div class="store-edit-menu">${storeManagerHtml()}</div>` : ""}
       </div>
-      <button class="detail-line" type="button" data-action="toggle-section" aria-expanded="${state.addSectionOpen ? "true" : "false"}"><span>Section</span><strong data-section-value>${esc(section ? sectionLabel(section) : "")}</strong></button>
-      <div class="section-drop${state.addSectionOpen ? "" : " is-hidden"}">${sectionOptionsHtml(section)}</div>
-      <button class="detail-line" type="button" data-action="toggle-fresh" aria-pressed="${on ? "true" : "false"}"><span>Fresh</span><span class="fresh-box${on ? " is-on" : ""}" aria-hidden="true"></span></button>
+      <div class="choice-block">
+        <span class="choice-label">Section</span>
+        ${sectionPillsHtml(section)}
+      </div>
+      <button class="detail-line fresh-line" type="button" data-action="toggle-fresh" aria-pressed="${on ? "true" : "false"}"><span>Fresh</span><span class="fresh-box${on ? " is-on" : ""}" aria-hidden="true"></span></button>
       ${on ? `<button class="detail-line" type="button" data-action="toggle-buy-day" aria-expanded="${state.buyDayOpen ? "true" : "false"}"><span data-buy-value>${esc(buyLabel(buy))}</span></button>
       <div class="section-drop buy-drop${state.buyDayOpen ? "" : " is-hidden"}">${buyDayOptionsHtml(buy)}</div>` : ""}
     </div>`;
@@ -1596,14 +1606,20 @@ function sheetHtml() {
   if (state.sheet?.kind === "edit-item") {
     const item = state.items.find((entry) => entry.id === state.sheet.id);
     if (!item) return "";
-    return `<div class="sheet"><form class="sheet-card" data-form="item-edit" role="dialog" aria-label="Edit item">
+    return `<div class="sheet edit-item-sheet"><form class="sheet-card" data-form="item-edit" role="dialog" aria-label="Edit item">
         <div class="sheet-head"><button class="text-green" type="button" data-action="close-sheet">Cancel</button><button class="text-green" type="submit">Done</button></div>
-        <label class="field-label">Name<input class="field-box" name="name" required maxlength="80" value="${esc(item.name)}"></label>
-        <label class="field-label">Quantity<input class="field-box" name="quantityNote" maxlength="140" value="${esc(qtyOf(item))}"></label>
-        <label class="field-label">Section<span class="select-wrap"><select class="box" name="section"><option value="" ${item.section ? "" : "selected"}></option>${choiceHtml(SECTIONS, item.section || "")}</select></span></label>
-        ${storeFieldHtml(storeIdOf(item))}
-        ${freshRowHtml(item.fresh)}
-        <label class="field-label">Note<input class="field-box" name="notes" maxlength="500" value="${esc(item.notes || "")}" enterkeyhint="done"></label>
+        <div class="edit-scroll">
+          <label class="field-label">Name<input class="field-box" name="name" required maxlength="80" value="${esc(item.name)}"></label>
+          <label class="field-label">Quantity<input class="field-box" name="quantityNote" maxlength="140" value="${esc(qtyOf(item))}"></label>
+          <div class="choice-block">
+            <span class="choice-label">Section</span>
+            <input type="hidden" name="section" value="${esc(item.section || "")}">
+            ${sectionPillsHtml(item.section || "")}
+          </div>
+          ${storeFieldHtml(storeIdOf(item))}
+          ${freshRowHtml(item.fresh)}
+          <label class="field-label">Note<input class="field-box" name="notes" maxlength="500" value="${esc(item.notes || "")}" enterkeyhint="done"></label>
+        </div>
       </form></div>`;
   }
   if (state.sheet?.kind === "pick-date") return dateSheetHtml();
@@ -2213,7 +2229,7 @@ function beginSheetPull(event) {
   const sheet = event.target.closest?.(".sheet");
   const card = directCard || sheet?.querySelector(".sheet-card");
   if (!card) return false;
-  if (event.target.closest?.(".section-drop, .store-drop, .buy-drop")) return false;
+  if (event.target.closest?.(".section-drop, .section-pills, .store-drop, .buy-drop")) return false;
   let scroller = card;
   if (!fromBackdrop) {
     const typing = event.target.closest?.("input, textarea, select, [contenteditable='true']");
@@ -2461,7 +2477,7 @@ function onSheetLockMove(event) {
     if (event.cancelable) event.preventDefault();
     return;
   }
-  if (target.closest(".section-drop, .store-drop, .buy-drop")) return;
+  if (target.closest(".section-drop, .section-pills, .store-drop, .buy-drop")) return;
   const dy = touch.clientY - sheetLock.y;
   const dx = touch.clientX - sheetLock.x;
   const card = target.closest(".sheet-card");
@@ -4206,9 +4222,7 @@ function syncAddChrome() {
   if (!draft) return;
   const name = state.addQuery;
   if (!draft.sectionTouched) {
-    const section = addSectionValue(draft, name);
-    const node = document.querySelector("[data-section-value]");
-    if (node) node.textContent = section ? sectionLabel(section) : "";
+    paintSectionPills(document.getElementById("add-form"), addSectionValue(draft, name));
   }
   if (!draft.storeTouched) {
     const store = shownAddStore(draft, name);
@@ -4274,23 +4288,27 @@ function savedCategory(store, section, category) {
   return aisleFor(store, section);
 }
 
+function paintSectionPills(root, section) {
+  const current = section || "";
+  (root || document).querySelectorAll(".section-pills .pill").forEach((option) => {
+    const on = (option.dataset.section || "") === current && current !== "";
+    option.classList.toggle("is-on", on);
+    option.setAttribute("aria-pressed", on ? "true" : "false");
+  });
+}
+
 function pickSection(button) {
   const section = button.dataset.section || "other";
-  if (state.addDraft) {
+  const form = fieldRoot(button);
+  if (form?.id === "add-form" && state.addDraft) {
     state.addDraft.section = section;
     state.addDraft.sectionTouched = true;
     state.addDraft.category = aisleFor(state.addDraft.store, section);
   }
+  const hidden = form?.querySelector('input[name="section"]');
+  if (hidden) hidden.value = section;
   state.addSectionOpen = false;
-  const label = document.querySelector("[data-section-value]");
-  if (label) label.textContent = sectionLabel(section);
-  document.querySelector(".section-drop:not(.buy-drop)")?.classList.add("is-hidden");
-  document.querySelector("[data-action=toggle-section]")?.setAttribute("aria-expanded", "false");
-  document.querySelectorAll(".section-drop:not(.buy-drop) .pill").forEach((option) => {
-    const on = option.dataset.section === section;
-    option.classList.toggle("is-on", on);
-    option.setAttribute("aria-pressed", on ? "true" : "false");
-  });
+  paintSectionPills(form || document, section);
 }
 
 function pickBuyDay(button) {

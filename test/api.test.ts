@@ -2616,9 +2616,9 @@ describe("grocery API", () => {
     expect(js).toContain("function screenBehindPick");
     expect(js).toContain("function parkTodayHero");
     expect(js).toContain("function restoreTodayHero");
-    expect(shell).toContain("grocery-shell-v105");
-    expect(shell).toContain("/styles.css?v=93");
-    expect(shell).toContain("/app.js?v=100");
+    expect(shell).toContain("grocery-shell-v106");
+    expect(shell).toContain("/styles.css?v=94");
+    expect(shell).toContain("/app.js?v=101");
     const listed = js.slice(js.indexOf("function closeToListed"), js.indexOf("function syncAddChrome"));
     expect(listed).toContain("activeListed");
     expect(listed).not.toContain("doneOpen = true");
